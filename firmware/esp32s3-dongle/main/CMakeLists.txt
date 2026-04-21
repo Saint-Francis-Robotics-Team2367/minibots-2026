@@ -1,0 +1,28 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "usb_descriptors.c"
+        "hid_handler.c"
+        "espnow_bridge.c"
+        "board_ui.c"
+    INCLUDE_DIRS
+        "."
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../common"
+    REQUIRES
+        nvs_flash
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_driver_spi
+        esp_driver_gpio
+        esp_lcd
+        esp_timer
+        tinyusb
+        driver
+        freertos
+        esp_hw_support
+        esp_now
+        led_strip
+        esp_lvgl_port
+        lvgl
+)

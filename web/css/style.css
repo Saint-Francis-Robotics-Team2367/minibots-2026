@@ -1,0 +1,96 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  font-family: system-ui, sans-serif;
+  margin: 0 auto;
+  max-width: 52rem;
+  padding: 1rem 1.25rem 2rem;
+  background: #0f1419;
+  color: #e8eef4;
+}
+header h1 {
+  margin: 0 0 0.25rem;
+  font-weight: 650;
+}
+.sub {
+  margin: 0 0 1rem;
+  color: #9aa7b2;
+  font-size: 0.9rem;
+}
+.panel {
+  border: 1px solid #243040;
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 0.75rem;
+  background: #151c24;
+}
+.panel h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #b8c5d0;
+}
+button {
+  margin-right: 0.5rem;
+  margin-bottom: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid #3d4f63;
+  background: #1e2a38;
+  color: #e8eef4;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  background: #2a3544;
+}
+.badge.ok {
+  background: #1e4d2e;
+}
+.hint {
+  font-size: 0.85rem;
+  color: #9aa7b2;
+  margin-top: 0;
+}
+.slot-row {
+  display: grid;
+  grid-template-columns: 4rem 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.4rem;
+  font-size: 0.9rem;
+}
+.slot-row select {
+  max-width: 100%;
+  padding: 0.25rem;
+  background: #1e2a38;
+  color: #e8eef4;
+  border: 1px solid #3d4f63;
+  border-radius: 4px;
+}
+#robotList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.85rem;
+}
+#robotList li {
+  padding: 0.25rem 0;
+  border-bottom: 1px solid #243040;
+}
+.log pre {
+  margin: 0;
+  max-height: 12rem;
+  overflow: auto;
+  font-size: 0.75rem;
+  color: #a8b6c4;
+  white-space: pre-wrap;
+}
