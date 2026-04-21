@@ -94,3 +94,54 @@ button:disabled {
   color: #a8b6c4;
   white-space: pre-wrap;
 }
+.spectrum-rec {
+  margin: 0.5rem 0 0.6rem;
+  font-size: 0.88rem;
+  color: #c5d0da;
+}
+.spectrum-rec--warn {
+  color: #e8a598;
+}
+.spectrum-wrap {
+  overflow-x: auto;
+}
+.spectrum-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.spectrum-table th,
+.spectrum-table td {
+  padding: 0.3rem 0.45rem;
+  text-align: left;
+  border-bottom: 1px solid #243040;
+}
+.spectrum-table th {
+  color: #9aa7b2;
+  font-weight: 600;
+}
+.spectrum-row--rec {
+  background: rgba(30, 77, 46, 0.35);
+}
+.spectrum-row--current {
+  box-shadow: inset 3px 0 0 0 #6b9bd1;
+}
+.spectrum-busy-cell {
+  min-width: 7rem;
+}
+.busy-bar {
+  display: inline-block;
+  vertical-align: middle;
+  width: 4.5rem;
+  height: 0.45rem;
+  background: #243040;
+  border-radius: 3px;
+  margin-right: 0.35rem;
+  overflow: hidden;
+}
+.busy-bar > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #3d7a9a, #c98a4a);
+  border-radius: 3px;
+}

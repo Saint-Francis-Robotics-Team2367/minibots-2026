@@ -29,10 +29,12 @@ extern "C" {
 #define MC_HID_RID_DISCOVERY 0x04u
 #define MC_HID_RID_PAIR 0x10u
 #define MC_HID_RID_UNPAIR 0x11u
+#define MC_HID_RID_SPECTRUM_SCAN 0x12u
 
 /* --- HID report IDs: dongle -> host (input) --- */
 #define MC_HID_RID_HEARTBEAT_IN 0x03u
 #define MC_HID_RID_DISCOVERY_IN 0x05u
+#define MC_HID_RID_SPECTRUM_IN 0x07u
 #define MC_HID_RID_DONGLE_STATUS 0xFEu
 
 /* Fixed sizes for HID reports (padded where needed) */
@@ -41,10 +43,15 @@ extern "C" {
 #define MC_HID_OUT_DISCOVERY_LEN 8u
 #define MC_HID_OUT_PAIR_LEN 8u
 #define MC_HID_OUT_UNPAIR_LEN 8u
+#define MC_HID_OUT_SPECTRUM_LEN 8u
 
 #define MC_HID_IN_HEARTBEAT_LEN 20u
 #define MC_HID_IN_DISCOVERY_LEN 24u
+#define MC_HID_IN_SPECTRUM_LEN 32u
 #define MC_HID_IN_STATUS_LEN 16u
+
+/** 2.4 GHz channels 1..14 for spectrum aggregation */
+#define MC_WIFI_CH_24_MAX 14u
 
 #define MC_ROBOT_ID_MAX 16u
 #define MC_JOY_AUX_BYTES 8u
@@ -106,6 +113,19 @@ typedef struct {
     uint8_t reserved[12];
 } dongle_status_t;
 
+/**
+ * Wi-Fi channel survey (report 0x07): passive+active scan aggregate.
+ * ap_count[] / strongest_rssi[] index 0 = channel 1, index 13 = channel 14.
+ * strongest_rssi is strongest observed BSSID RSSI (dBm), or -127 if no APs on that channel.
+ */
+typedef struct {
+    uint8_t recommended_channel; /* usually 1, 6, or 11; 0 if scan failed */
+    uint8_t scan_seq;
+    uint8_t ap_count[MC_WIFI_CH_24_MAX];
+    int8_t strongest_rssi[MC_WIFI_CH_24_MAX];
+    uint8_t reserved[2];
+} spectrum_scan_result_t;
+
 #pragma pack(pop)
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -115,6 +135,7 @@ _Static_assert(sizeof(heartbeat_packet_t) == 20, "heartbeat_packet_t size");
 _Static_assert(sizeof(discovery_request_t) == 2, "discovery_request_t size");
 _Static_assert(sizeof(discovery_response_t) == 24, "discovery_response_t size");
 _Static_assert(sizeof(dongle_status_t) == 16, "dongle_status_t size");
+_Static_assert(sizeof(spectrum_scan_result_t) == 32, "spectrum_scan_result_t size");
 #endif
 
 #ifdef __cplusplus

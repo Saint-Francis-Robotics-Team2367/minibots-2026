@@ -6,10 +6,13 @@ import {
   MC_HID_RID_DISCOVERY,
   MC_HID_RID_PAIR,
   MC_HID_RID_UNPAIR,
+  MC_HID_RID_SPECTRUM_SCAN,
   MC_HID_RID_HEARTBEAT_IN,
   MC_HID_RID_DISCOVERY_IN,
+  MC_HID_RID_SPECTRUM_IN,
   MC_HID_RID_DONGLE_STATUS,
   MC_MAX_ROBOTS,
+  MC_WIFI_CH_24_MAX,
 } from "./constants.js";
 import {
   encodeJoystickOut,
@@ -17,9 +20,12 @@ import {
   encodeDiscoveryOut,
   encodePairOut,
   encodeUnpairOut,
+  encodeSpectrumScanOut,
   decodeHeartbeatIn,
   decodeDiscoveryIn,
   decodeDongleStatus,
+  decodeSpectrumIn,
+  spectrumBusyScore,
   gamepadToJoystick,
 } from "./protocol.js";
 
@@ -27,6 +33,8 @@ import {
 let device = null;
 let seq = 0;
 let raf = 0;
+/** @type {ReturnType<typeof setTimeout> | 0} */
+let spectrumWaitTimer = 0;
 
 const discovered = new Map();
 const pairMac = [];
@@ -41,6 +49,7 @@ function setDongleUi(connected) {
   document.getElementById("dongleState").textContent = connected ? "connected" : "disconnected";
   document.getElementById("dongleState").className = "badge" + (connected ? " ok" : "");
   document.getElementById("btnScan").disabled = !connected;
+  document.getElementById("btnSpectrum").disabled = !connected;
   document.getElementById("chkGlobalEn").disabled = !connected;
   document.getElementById("btnDisconnect").disabled = !connected;
   document.getElementById("btnConnect").disabled = connected;
@@ -68,11 +77,59 @@ function onInputReport(e) {
       renderRobots();
       log("discovered", d.robot_id, k);
     }
+  } else if (reportId === MC_HID_RID_SPECTRUM_IN) {
+    if (spectrumWaitTimer) {
+      window.clearTimeout(spectrumWaitTimer);
+      spectrumWaitTimer = 0;
+    }
+    const sp = decodeSpectrumIn(buf);
+    if (sp) {
+      renderSpectrum(sp);
+      log("spectrum scan", sp.scan_seq, "recommended ch", sp.recommended_channel);
+    } else {
+      document.getElementById("spectrumRec").textContent = "Invalid spectrum report.";
+      document.getElementById("spectrumRec").classList.add("spectrum-rec--warn");
+    }
+    document.getElementById("btnSpectrum").disabled = false;
   } else if (reportId === MC_HID_RID_DONGLE_STATUS) {
     const s = decodeDongleStatus(buf);
     if (s) {
       document.getElementById("chanDisp").textContent = String(s.wifi_channel);
     }
+  }
+}
+
+function renderSpectrum(sp) {
+  const tbody = document.getElementById("spectrumBody");
+  const recEl = document.getElementById("spectrumRec");
+  tbody.innerHTML = "";
+  if (!sp.recommended_channel) {
+    recEl.textContent = "Scan failed — try again.";
+    recEl.classList.add("spectrum-rec--warn");
+    return;
+  }
+  recEl.classList.remove("spectrum-rec--warn");
+  recEl.textContent = `Recommended: channel ${sp.recommended_channel} (best of 1 / 6 / 11 by estimated load). Scan #${sp.scan_seq}.`;
+
+  const curCh = Number(document.getElementById("chanDisp").textContent) || 0;
+  const scores = [];
+  for (let i = 0; i < MC_WIFI_CH_24_MAX; i++) {
+    scores.push(spectrumBusyScore(sp.ap_count[i], sp.strongest_rssi[i]));
+  }
+  const maxScore = Math.max(1, ...scores);
+
+  for (let ch = 1; ch <= MC_WIFI_CH_24_MAX; ch++) {
+    const i = ch - 1;
+    const ap = sp.ap_count[i];
+    const rssi = sp.strongest_rssi[i];
+    const busy = scores[i];
+    const pct = Math.round((busy / maxScore) * 100);
+    const tr = document.createElement("tr");
+    if (ch === sp.recommended_channel) tr.classList.add("spectrum-row--rec");
+    if (ch === curCh) tr.classList.add("spectrum-row--current");
+    const rssiText = rssi <= -120 ? "—" : `${rssi} dBm`;
+    tr.innerHTML = `<td>${ch}</td><td>${ap}</td><td>${rssiText}</td><td class="spectrum-busy-cell"><div class="busy-bar" title="estimated load"><span style="width:${pct}%"></span></div> ${busy}</td>`;
+    tbody.appendChild(tr);
   }
 }
 
@@ -96,6 +153,10 @@ async function connectDongle() {
 }
 
 function disconnectDongle() {
+  if (spectrumWaitTimer) {
+    window.clearTimeout(spectrumWaitTimer);
+    spectrumWaitTimer = 0;
+  }
   if (raf) {
     cancelAnimationFrame(raf);
     raf = 0;
@@ -203,6 +264,35 @@ document.getElementById("btnScan").addEventListener("click", async () => {
   renderRobots();
   await sendReport(MC_HID_RID_DISCOVERY, encodeDiscoveryOut(ch));
   log("scan sent ch", ch);
+});
+document.getElementById("btnSpectrum").addEventListener("click", async () => {
+  if (spectrumWaitTimer) {
+    window.clearTimeout(spectrumWaitTimer);
+    spectrumWaitTimer = 0;
+  }
+  document.getElementById("btnSpectrum").disabled = true;
+  document.getElementById("spectrumRec").textContent = "Scanning… (a few seconds)";
+  document.getElementById("spectrumRec").classList.remove("spectrum-rec--warn");
+  spectrumWaitTimer = window.setTimeout(() => {
+    spectrumWaitTimer = 0;
+    const btn = document.getElementById("btnSpectrum");
+    if (btn.disabled) {
+      btn.disabled = false;
+      document.getElementById("spectrumRec").textContent = "No spectrum report yet — reconnect the dongle or retry.";
+      document.getElementById("spectrumRec").classList.add("spectrum-rec--warn");
+    }
+  }, 15000);
+  try {
+    await sendReport(MC_HID_RID_SPECTRUM_SCAN, encodeSpectrumScanOut());
+  } catch (e) {
+    if (spectrumWaitTimer) {
+      window.clearTimeout(spectrumWaitTimer);
+      spectrumWaitTimer = 0;
+    }
+    document.getElementById("btnSpectrum").disabled = false;
+    document.getElementById("spectrumRec").textContent = String(e);
+    document.getElementById("spectrumRec").classList.add("spectrum-rec--warn");
+  }
 });
 document.getElementById("chkGlobalEn").addEventListener("change", async (e) => {
   const on = e.target.checked;
