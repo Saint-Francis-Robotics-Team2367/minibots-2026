@@ -26,30 +26,6 @@
     </section>
 
     <section class="panel">
-      <h2>RF spectrum (2.4 GHz)</h2>
-      <p class="hint">
-        Quick on-site survey: the dongle scans all channels and counts APs plus strongest signal per channel. Wi-Fi does
-        not expose real-time airtime; “busy” is an estimate from AP density and RSSI. Recommendation picks the quietest
-        of channels 1, 6, or 11 (non-overlapping).
-      </p>
-      <button type="button" id="btnSpectrum" disabled>Scan spectrum</button>
-      <p id="spectrumRec" class="spectrum-rec" aria-live="polite"></p>
-      <div class="spectrum-wrap">
-        <table class="spectrum-table" id="spectrumTable">
-          <thead>
-            <tr>
-              <th>Ch</th>
-              <th>Networks</th>
-              <th>Strongest RSSI</th>
-              <th>Busy (est.)</th>
-            </tr>
-          </thead>
-          <tbody id="spectrumBody"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="panel">
       <h2>Enable</h2>
       <label><input type="checkbox" id="chkGlobalEn" disabled /> Global enable</label>
     </section>

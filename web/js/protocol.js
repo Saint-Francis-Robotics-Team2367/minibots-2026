@@ -117,41 +117,6 @@ export function decodeDongleStatus(buf) {
   };
 }
 
-/** @returns {ArrayBuffer} */
-export function encodeSpectrumScanOut() {
-  const buf = new ArrayBuffer(C.MC_HID_OUT_SPECTRUM_LEN);
-  const v = new DataView(buf);
-  for (let o = 0; o < C.MC_HID_OUT_SPECTRUM_LEN; o++) v.setUint8(o, 0);
-  return buf;
-}
-
-/**
- * @returns {{
- *   recommended_channel: number,
- *   scan_seq: number,
- *   ap_count: number[],
- *   strongest_rssi: number[],
- * } | null}
- */
-export function decodeSpectrumIn(buf) {
-  const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-  if (v.byteLength < C.MC_HID_IN_SPECTRUM_LEN) return null;
-  let o = 0;
-  const recommended_channel = v.getUint8(o++);
-  const scan_seq = v.getUint8(o++);
-  const ap_count = [];
-  const strongest_rssi = [];
-  for (let i = 0; i < C.MC_WIFI_CH_24_MAX; i++) ap_count.push(v.getUint8(o++));
-  for (let i = 0; i < C.MC_WIFI_CH_24_MAX; i++) strongest_rssi.push(v.getInt8(o++));
-  return { recommended_channel, scan_seq, ap_count, strongest_rssi };
-}
-
-/** Busy score (lower = quieter channel). Matches dongle heuristic. */
-export function spectrumBusyScore(apCount, strongestRssiDbm) {
-  const rssiTerm = strongestRssiDbm > -120 ? 100 + strongestRssiDbm : 0;
-  return apCount * 25 + rssiTerm;
-}
-
 /** Build joystick_packet_t fields from Gamepad and sequence */
 export function gamepadToJoystick(seq, gp, aux) {
   const ax = (i) => (gp && gp.axes[i] !== undefined ? Math.round(gp.axes[i] * 32767) : 0);

@@ -1,6 +1,5 @@
 #include "espnow_bridge.h"
 
-#include <limits.h>
 #include <string.h>
 
 #include "esp_event.h"
@@ -17,8 +16,6 @@
 
 static const char *TAG = "minicore_en";
 
-enum { MC_SCAN_AP_MAX = 64 };
-
 static uint8_t s_channel = 6;
 static bool s_global_enabled;
 static uint8_t s_error_flags;
@@ -26,93 +23,6 @@ static uint8_t s_paired_mac[MC_MAX_ROBOTS][6];
 static bool s_paired_valid[MC_MAX_ROBOTS];
 static bool s_discovery_active;
 static esp_timer_handle_t s_disc_timer;
-static TaskHandle_t s_spectrum_task;
-static uint8_t s_scan_seq;
-
-static int spectrum_score(uint8_t apc, int8_t rssi)
-{
-    int rssi_term = (rssi > -120) ? (100 + rssi) : 0;
-    return (int)apc * 25 + rssi_term;
-}
-
-static void spectrum_task(void *arg)
-{
-    (void)arg;
-    for (;;) {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
-        spectrum_scan_result_t out;
-        memset(&out, 0, sizeof(out));
-        out.scan_seq = ++s_scan_seq;
-        for (int i = 0; i < (int)MC_WIFI_CH_24_MAX; i++) {
-            out.strongest_rssi[i] = -127;
-        }
-
-        wifi_scan_config_t sc = {0};
-        sc.ssid = NULL;
-        sc.bssid = NULL;
-        sc.channel = 0;
-        sc.show_hidden = true;
-        sc.scan_type = WIFI_SCAN_TYPE_ACTIVE;
-        sc.scan_time.active.min = 120;
-        sc.scan_time.active.max = 150;
-
-        esp_err_t err = esp_wifi_scan_start(&sc, true);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "wifi scan failed: %s", esp_err_to_name(err));
-            out.recommended_channel = 0;
-            esp_wifi_set_channel(s_channel, WIFI_SECOND_CHAN_NONE);
-            if (tud_mounted()) {
-                tud_hid_report(MC_HID_RID_SPECTRUM_IN, (uint8_t *)&out, sizeof(out));
-            }
-            continue;
-        }
-
-        uint16_t ap_num = 0;
-        esp_wifi_scan_get_ap_num(&ap_num);
-        uint16_t n = ap_num > MC_SCAN_AP_MAX ? MC_SCAN_AP_MAX : ap_num;
-        wifi_ap_record_t recs[MC_SCAN_AP_MAX];
-        if (n > 0) {
-            esp_wifi_scan_get_ap_records(&n, recs);
-        } else {
-            n = 0;
-        }
-
-        for (uint16_t i = 0; i < n; i++) {
-            uint8_t ch = recs[i].primary;
-            if (ch < 1 || ch > MC_WIFI_CH_24_MAX) {
-                continue;
-            }
-            int idx = (int)ch - 1;
-            out.ap_count[idx]++;
-            if (recs[i].rssi > out.strongest_rssi[idx]) {
-                out.strongest_rssi[idx] = recs[i].rssi;
-            }
-        }
-
-        int best_score = INT_MAX;
-        uint8_t best = 6;
-        const uint8_t candidates[] = {1, 6, 11};
-        for (unsigned c = 0; c < sizeof(candidates); c++) {
-            uint8_t ch = candidates[c];
-            int idx = (int)ch - 1;
-            int s = spectrum_score(out.ap_count[idx], out.strongest_rssi[idx]);
-            if (s < best_score) {
-                best_score = s;
-                best = ch;
-            }
-        }
-        out.recommended_channel = best;
-
-        esp_wifi_set_channel(s_channel, WIFI_SECOND_CHAN_NONE);
-
-        if (tud_mounted()) {
-            tud_hid_report(MC_HID_RID_SPECTRUM_IN, (uint8_t *)&out, sizeof(out));
-        }
-        ESP_LOGI(TAG, "spectrum seq=%u recommend ch%u (score %d)", out.scan_seq, out.recommended_channel,
-                 best_score);
-    }
-}
 
 static void discovery_timer_cb(void *arg)
 {
@@ -201,8 +111,6 @@ void minicore_espnow_init(uint8_t wifi_channel)
 
     const esp_timer_create_args_t targs = {.callback = &discovery_timer_cb, .name = "disc"};
     ESP_ERROR_CHECK(esp_timer_create(&targs, &s_disc_timer));
-
-    xTaskCreate(spectrum_task, "spectrum", 8192, NULL, 4, &s_spectrum_task);
 
     ESP_LOGI(TAG, "ESP-NOW on channel %u", s_channel);
 }
@@ -323,11 +231,6 @@ void minicore_hid_output(uint8_t report_id, const uint8_t *buf, size_t len)
         memset(s_paired_mac[idx], 0, 6);
         break;
     }
-    case MC_HID_RID_SPECTRUM_SCAN:
-        if (s_spectrum_task) {
-            xTaskNotifyGive(s_spectrum_task);
-        }
-        break;
     default:
         break;
     }

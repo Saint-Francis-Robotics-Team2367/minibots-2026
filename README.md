@@ -9,7 +9,7 @@ End-to-end MiniCore system from [MINICORE_CLAUDE.md](MINICORE_CLAUDE.md): a **br
 | [firmware/common/minicore_protocol.h](firmware/common/minicore_protocol.h) | Shared C structs, USB VID/PID, HID report IDs (keep in sync with JS). |
 | [firmware/esp32s3-dongle/](firmware/esp32s3-dongle/) | ESP-IDF project for the Waveshare ESP32-S3-LCD-1.47 class USB HID dongle. |
 | [firmware/esp32-robot/](firmware/esp32-robot/) | PlatformIO / Arduino robot firmware (classic ESP32). |
-| [web/](web/) | Static driver station (Chrome or Edge; HTTPS or localhost). Deployed on [Firebase Hosting](https://firebase.google.com/docs/hosting). |
+| [web/](web/) | Static driver station (Chrome or Edge; HTTPS or localhost). |
 
 ## USB identity (WebHID filter)
 
@@ -52,24 +52,14 @@ Customize robot name and pins via [platformio.ini](firmware/esp32-robot/platform
 
 ## Web driver station
 
-**Production:** [https://minibots-2367.web.app](https://minibots-2367.web.app) (HTTPS; WebHID works on this origin). Connect the dongle, run **Scan**, **Pair** a slot to a robot, enable **Global enable**, and use gamepads at indices **0–3** matching each slot.
-
-**Deploy** (from repo root; requires [Firebase CLI](https://firebase.google.com/docs/cli) and access to the `minibots-2367` project):
-
-```bash
-firebase deploy --only hosting
-```
-
-Config: [firebase.json](firebase.json) (public root is [web/](web/)), [`.firebaserc`](.firebaserc).
-
-**Local development:** serve [web/](web/) over **HTTPS** or **http://localhost** (WebHID requirement):
+Serve [web/](web/) over **HTTPS** or **http://localhost** (WebHID requirement):
 
 ```bash
 cd web
 python3 -m http.server 8080
 ```
 
-Open `http://localhost:8080` for the same workflow as production.
+Open `http://localhost:8080`, connect the dongle, run **Scan**, **Pair** a slot to a robot, enable **Global enable**, and use gamepads at indices **0–3** matching each slot.
 
 ## Security
 
