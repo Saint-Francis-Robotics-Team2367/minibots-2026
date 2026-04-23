@@ -1,0 +1,39 @@
+# Build MiniCore ESP32-S3 dongle firmware on every change; upload flashable artifacts.
+# Physical USB flash is local: firmware/esp32s3-dongle/scripts/deploy.sh
+name: esp32s3-dongle
+
+on:
+  push:
+    paths:
+      - "firmware/esp32s3-dongle/**"
+      - ".github/workflows/esp32s3-dongle.yml"
+  pull_request:
+    paths:
+      - "firmware/esp32s3-dongle/**"
+      - ".github/workflows/esp32s3-dongle.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:release-v5.3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set target and build
+        working-directory: firmware/esp32s3-dongle
+        run: |
+          idf.py set-target esp32s3
+          idf.py build
+
+      - name: Upload firmware bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: minicore_dongle_fw
+          path: |
+            firmware/esp32s3-dongle/build/bootloader/bootloader.bin
+            firmware/esp32s3-dongle/build/flash_args
+            firmware/esp32s3-dongle/build/minicore_dongle.bin
+            firmware/esp32s3-dongle/build/partition_table/partition-table.bin
+          if-no-files-found: error

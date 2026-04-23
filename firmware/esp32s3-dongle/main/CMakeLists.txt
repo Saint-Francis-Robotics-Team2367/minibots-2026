@@ -1,10 +1,9 @@
 idf_component_register(
     SRCS
-        "main.c"
-        "usb_descriptors.c"
-        "hid_handler.c"
-        "espnow_bridge.c"
-        "board_ui.c"
+        "minicore_app.c"
+        "minicore_usb.c"
+        "minicore_bridge.c"
+        "waveshare_s3_lcd147_ui.c"
     INCLUDE_DIRS
         "."
         "${CMAKE_CURRENT_SOURCE_DIR}/../../common"
@@ -15,13 +14,14 @@ idf_component_register(
         esp_event
         esp_driver_spi
         esp_driver_gpio
+        esp_driver_ledc
         esp_lcd
         esp_timer
-        tinyusb
+        espressif__esp_tinyusb
         driver
         freertos
         esp_hw_support
-        esp_now
+        esp_system
         led_strip
         esp_lvgl_port
         lvgl

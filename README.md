@@ -20,7 +20,7 @@ End-to-end MiniCore system from [MINICORE_CLAUDE.md](MINICORE_CLAUDE.md): a **br
 
 ESP-NOW requires the same **802.11 channel** on the dongle and every robot.
 
-- Dongle: default channel **6** at boot ([main.c](firmware/esp32s3-dongle/main/main.c) `CONFIG_MINICORE_WIFI_CHANNEL`, or add `CONFIG_MINICORE_WIFI_CHANNEL` via `sdkconfig`).
+- Dongle: default channel **6** at boot ([minicore_app.c](firmware/esp32s3-dongle/main/minicore_app.c) `CONFIG_MINICORE_WIFI_CHANNEL`, or add `CONFIG_MINICORE_WIFI_CHANNEL` via `sdkconfig`).
 - Robot: [platformio.ini](firmware/esp32-robot/platformio.ini) `MINICORE_WIFI_CHANNEL=6` (must match the dongle).
 
 ## ESP32-S3 dongle (ESP-IDF)
@@ -35,11 +35,11 @@ idf.py build flash monitor
 
 **USB flashing (native USB, no UART bridge):** enter download mode: hold **BOOT**, press **RESET**, release **RESET**, release **BOOT**; then flash.
 
-**Note:** ESP-IDF’s `tinyusb_config_t` layout changed across minor versions. This project uses the **flat** fields (`device_descriptor`, `string_descriptor`, `configuration_descriptor`) as in ESP-IDF v5.3 `tusb_hid` examples. If your IDF uses the newer `TINYUSB_DEFAULT_CONFIG()` / nested `descriptor` struct, adjust [main.c](firmware/esp32s3-dongle/main/main.c) accordingly.
+**Note:** ESP-IDF’s `tinyusb_config_t` layout changed across minor versions. This project uses the **flat** fields (`device_descriptor`, `string_descriptor`, `configuration_descriptor`) as in ESP-IDF v5.3 `tusb_hid` examples. If your IDF uses the newer `TINYUSB_DEFAULT_CONFIG()` / nested `descriptor` struct, adjust [minicore_usb.c](firmware/esp32s3-dongle/main/minicore_usb.c) accordingly.
 
 Managed components ([main/idf_component.yml](firmware/esp32s3-dongle/main/idf_component.yml)) are fetched on first build (LVGL, `esp_lvgl_port`, addressable LED on GPIO38).
 
-**LCD (ST7789)** uses Waveshare’s pinout: MOSI 45, SCLK 40, CS 42, DC 41, RST 39, backlight 48 ([wiki](https://www.waveshare.com/wiki/ESP32-S3-LCD-1.47)).
+**LCD (ST7789)** uses Waveshare’s pinout: MOSI 45, SCLK 40, CS 42, DC 41, RST 39, backlight 48 ([wiki](https://www.waveshare.com/wiki/ESP32-S3-LCD-1.47)). That module is **ESP32-S3R8** with **8 MB Octal PSRAM**; [sdkconfig.defaults](firmware/esp32s3-dongle/sdkconfig.defaults) turns PSRAM on for LVGL. If your `sdkconfig` predates that, run `idf.py fullclean` once, then `idf.py set-target esp32s3` and `idf.py build` so PSRAM options apply.
 
 ## Robot (PlatformIO)
 

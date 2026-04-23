@@ -1,13 +1,18 @@
-/*
- * USB: device descriptor + HID report/configuration descriptors for MiniCore.
- * Matches ESP-IDF TinyUSB HID device example (tusb_hid).
+/**
+ * TinyUSB composite HID: report layout matches web/js/constants.js and minicore_protocol.h.
  */
+
+#include "minicore_usb.h"
+
+#include <stddef.h>
+
+#include "esp_check.h"
+#include "tinyusb.h"
 #include "class/hid/hid_device.h"
+#include "minicore_bridge.h"
 #include "minicore_protocol.h"
 #include "tusb_config.h"
 #include "tusb.h"
-
-#include <stddef.h>
 
 #define TUSB_DESC_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN)
 
@@ -71,22 +76,13 @@ static uint8_t const hid_report_desc[] = {
     0x75, 0x08,
     0x95, 0x10,
     0x81, 0x02,
-    0xC0};
+    0xC0,
+};
 
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance)
 {
     (void)instance;
     return hid_report_desc;
-}
-
-const uint8_t *minicore_hid_report_desc_ptr(void)
-{
-    return hid_report_desc;
-}
-
-size_t minicore_hid_report_desc_size(void)
-{
-    return sizeof(hid_report_desc);
 }
 
 static const tusb_desc_device_t minicore_device_descriptor = {
@@ -103,24 +99,15 @@ static const tusb_desc_device_t minicore_device_descriptor = {
     .iManufacturer = 0x01,
     .iProduct = 0x02,
     .iSerialNumber = 0x03,
-    .bNumConfigurations = 0x01};
+    .bNumConfigurations = 0x01,
+};
 
 static const uint8_t minicore_configuration_descriptor[] = {
     TUD_CONFIG_DESCRIPTOR(1, 1, 0, TUSB_DESC_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
     TUD_HID_DESCRIPTOR(0, 4, false, sizeof(hid_report_desc), 0x81, 64, 10),
 };
 
-const tusb_desc_device_t *minicore_device_descriptor_ptr(void)
-{
-    return &minicore_device_descriptor;
-}
-
-const uint8_t *minicore_configuration_descriptor_ptr(void)
-{
-    return minicore_configuration_descriptor;
-}
-
-const char *minicore_string_descriptor[] = {
+static const char *minicore_string_descriptor[] = {
     (char[]){0x09, 0x04},
     "Lancer Robotics",
     "MiniCore Dongle",
@@ -128,7 +115,38 @@ const char *minicore_string_descriptor[] = {
     "MiniCore HID",
 };
 
-size_t minicore_string_descriptor_count(void)
+void minicore_usb_start(void)
 {
-    return sizeof(minicore_string_descriptor) / sizeof(minicore_string_descriptor[0]);
+    const tinyusb_config_t tusb_cfg = {
+        .device_descriptor = &minicore_device_descriptor,
+        .string_descriptor = minicore_string_descriptor,
+        .string_descriptor_count = (int)(sizeof(minicore_string_descriptor) / sizeof(minicore_string_descriptor[0])),
+        .external_phy = false,
+        .configuration_descriptor = minicore_configuration_descriptor,
+    };
+    ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
+}
+
+uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t *buffer,
+                               uint16_t reqlen)
+{
+    (void)instance;
+    (void)report_id;
+    (void)report_type;
+    (void)buffer;
+    (void)reqlen;
+    return 0;
+}
+
+void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const *buffer,
+                           uint16_t bufsize)
+{
+    (void)instance;
+    if (report_type != HID_REPORT_TYPE_OUTPUT) {
+        return;
+    }
+    if (buffer == NULL || bufsize == 0) {
+        return;
+    }
+    minicore_bridge_hid_output(report_id, buffer, bufsize);
 }

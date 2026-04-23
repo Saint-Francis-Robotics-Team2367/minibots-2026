@@ -1,0 +1,53 @@
+# macOS / Windows
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- ESP-IDF (idf.py fetch on build from main/idf_component.yml) ---
+managed_components/
+build/
+firmware/**/.cache/
+sdkconfig.old
+
+# --- PlatformIO: firmware/esp32-robot ---
+.pio/
+.pioenvs/
+.piolibdeps/
+.clang_complete
+
+# --- Python (scripts, automation) ---
+__pycache__/
+*.py[cod]
+$py.class
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node / web tooling (if used) ---
+node_modules/
+dist/
+.pnpm-store/
+npm-debug.log*
+yarn-error.log
+pnpm-debug.log
+*.tsbuildinfo
+
+# --- Rust (if used) ---
+**/target/
+
+# --- IDEs and editors ---
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Debug / local ---
+.gdb_history
+
+# --- Local env (never commit) ---
+.env
+.env.local
+.env.*.local
