@@ -1,5 +1,6 @@
 /* LCD wiring and specs: https://www.waveshare.com/wiki/ESP32-S3-LCD-1.47 (ST7789, 172×320, GPIOs below).
- * Not added to main/CMakeLists.txt — the built-in UI is waveshare_s3_lcd147_ui.c; keep this file in sync for reference. */
+ * Not added to main/CMakeLists.txt — on-device UI is waveshare_s3_lcd147_ui.c (full-width status layout, bar, errors).
+ * Keep this file in sync for reference or delete when no longer needed. */
 
 #include "board_ui.h"
 
