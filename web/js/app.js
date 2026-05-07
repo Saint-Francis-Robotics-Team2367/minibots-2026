@@ -233,7 +233,6 @@ function startGamepadLoop() {
       raf = requestAnimationFrame(tick);
       return;
     }
-    const gps = navigator.getGamepads ? navigator.getGamepads() : [];
     for (let slot = 0; slot < MC_MAX_ROBOTS; slot++) {
       if (!pairMac[slot]) {
         continue;
