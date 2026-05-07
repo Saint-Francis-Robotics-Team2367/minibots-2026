@@ -145,7 +145,8 @@ function buildSlots() {
     const row = document.createElement("div");
     row.className = "slot-row";
     row.innerHTML = `<span>Slot ${i}</span>
-      <select class="slot-pair" data-idx="${i}"><option value="">— none —</option></select>
+      <select class="slot-pair" data-idx="${i}"><option value="">— robot —</option></select>
+      <select class="slot-gamepad" data-idx="${i}"><option value="">— gamepad —</option></select>
       <button type="button" class="btn-pair" data-idx="${i}">Pair</button>`;
     root.appendChild(row);
   }
@@ -169,9 +170,67 @@ function buildSlots() {
   });
 }
 
+function renderGamepads() {
+  const gps = navigator.getGamepads ? navigator.getGamepads() : [];
+  const list = document.getElementById("gamepadList");
+  if (!list) return;
+  list.innerHTML = "";
+  
+  const selects = document.querySelectorAll("select.slot-gamepad");
+  selects.forEach((sel) => {
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— gamepad —</option>';
+    for (let i = 0; i < gps.length; i++) {
+      const gp = gps[i];
+      if (gp) {
+        const opt = document.createElement("option");
+        opt.value = i;
+        opt.textContent = `${i}: ${gp.id}`;
+        sel.appendChild(opt);
+      }
+    }
+    sel.value = cur;
+  });
+
+  for (let i = 0; i < gps.length; i++) {
+    const gp = gps[i];
+    if (gp) {
+      const li = document.createElement("li");
+      li.id = `gp-item-${i}`;
+      li.textContent = `Index ${i}: ${gp.id}`;
+      list.appendChild(li);
+    }
+  }
+}
+
+window.addEventListener("gamepadconnected", renderGamepads);
+window.addEventListener("gamepaddisconnected", renderGamepads);
+
 function startGamepadLoop() {
   const tick = async () => {
+    const gps = navigator.getGamepads ? navigator.getGamepads() : [];
+    
+    // Update active visual state for gamepads
+    for (let i = 0; i < gps.length; i++) {
+      const gp = gps[i];
+      if (gp) {
+        let active = false;
+        for (let j = 0; j < gp.axes.length; j++) {
+          if (Math.abs(gp.axes[j]) > 0.1) active = true;
+        }
+        for (let j = 0; j < gp.buttons.length; j++) {
+          if (gp.buttons[j].pressed) active = true;
+        }
+        const el = document.getElementById(`gp-item-${i}`);
+        if (el) {
+          if (active) el.classList.add("active");
+          else el.classList.remove("active");
+        }
+      }
+    }
+
     if (!device || !device.opened) {
+      raf = requestAnimationFrame(tick);
       return;
     }
     const gps = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -179,7 +238,11 @@ function startGamepadLoop() {
       if (!pairMac[slot]) {
         continue;
       }
-      const gp = gps[slot];
+      const sel = document.querySelector(`select.slot-gamepad[data-idx="${slot}"]`);
+      if (!sel || sel.value === "") continue;
+      
+      const gpIdx = Number(sel.value);
+      const gp = gps[gpIdx];
       if (!gp) {
         continue;
       }

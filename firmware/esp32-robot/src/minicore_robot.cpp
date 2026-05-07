@@ -149,10 +149,18 @@ static void on_recv(const uint8_t *mac, const uint8_t *data, int len)
             break;
         }
         s_last_joystick_ms = millis();
-        int ly = map_axis_to_pwm(jp.axis_ly);
-        int ry = map_axis_to_pwm(jp.axis_ry);
-        motor_write(LEFT_MOTOR_PIN, ly);
-        motor_write(RIGHT_MOTOR_PIN, ry);
+        int32_t forward = -jp.axis_ly; // Joystick Y is negative when pushed up
+        int32_t turn = jp.axis_rx;     // Joystick X is positive when pushed right
+        
+        int32_t left = forward + turn;
+        int32_t right = forward - turn;
+        
+        // Constrain to typical int16 bounds
+        left = constrain(left, -32767, 32767);
+        right = constrain(right, -32767, 32767);
+        
+        motor_write(LEFT_MOTOR_PIN, map_axis_to_pwm(left));
+        motor_write(RIGHT_MOTOR_PIN, map_axis_to_pwm(right));
         break;
     }
     default:
@@ -171,9 +179,11 @@ void minicore_robot_setup(void)
     ESP_LOGI(TAG, "MiniCore robot %s", MINICORE_ROBOT_NAME);
 
     WiFi.mode(WIFI_STA);
-    WiFi.disconnect(true, true);
+    WiFi.disconnect(false, true);
     WiFi.setSleep(false);
+    esp_wifi_set_promiscuous(true);
     esp_wifi_set_channel(MINICORE_WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_promiscuous(false);
 
     if (esp_now_init() != ESP_OK) {
         ESP_LOGE(TAG, "esp_now_init failed");

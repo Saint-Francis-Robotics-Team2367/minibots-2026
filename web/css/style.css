@@ -62,7 +62,7 @@ button:disabled {
 }
 .slot-row {
   display: grid;
-  grid-template-columns: 4rem 1fr auto;
+  grid-template-columns: 4rem 1fr 1fr auto;
   gap: 0.5rem;
   align-items: center;
   margin-bottom: 0.4rem;
@@ -75,6 +75,25 @@ button:disabled {
   color: #e8eef4;
   border: 1px solid #3d4f63;
   border-radius: 4px;
+}
+#gamepadList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.85rem;
+}
+#gamepadList li {
+  padding: 0.4rem 0.5rem;
+  margin-bottom: 0.25rem;
+  border-radius: 4px;
+  background: #1e2a38;
+  border: 1px solid #3d4f63;
+  transition: all 0.1s ease;
+}
+#gamepadList li.active {
+  background: #1e4d2e;
+  border-color: #2e8b57;
+  color: #fff;
 }
 #robotList {
   list-style: none;
