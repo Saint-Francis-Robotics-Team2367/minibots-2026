@@ -30,6 +30,10 @@ cd minibots-2026
 > `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, or launch each with
 > `powershell -ExecutionPolicy Bypass -File .\setup.ps1`. After `setup.ps1` installs
 > PlatformIO, open a **new** terminal so `pio` is on PATH.
+>
+> The scripts pause on error (they won't flash-and-close). If you still can't read the
+> output, run from an open PowerShell window and tee it to a file:
+> `powershell -ExecutionPolicy Bypass -File .\setup.ps1 *>&1 | Tee-Object setup.log`
 
 The setup script is idempotent (safe to re-run). It installs PlatformIO via pip and clones
 ESP-IDF into a repo-local, git-ignored `.esp-idf/`; the flash scripts source that SDK

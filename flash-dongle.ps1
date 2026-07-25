@@ -32,6 +32,22 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Keep the window open if double-clicked / "Run with PowerShell", so errors
+# are readable instead of flashing and vanishing.
+function Pause-IfInteractive {
+  if ([Environment]::UserInteractive -and $Host.Name -eq 'ConsoleHost') {
+    Read-Host 'Press Enter to close'
+  }
+}
+trap {
+  Write-Host ''
+  Write-Host "[error] $($_.Exception.Message)" -ForegroundColor Red
+  if ($_.ScriptStackTrace) { Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray }
+  Pause-IfInteractive
+  exit 1
+}
+
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Proj = Join-Path $Root 'firmware\esp32s3-dongle'
 
@@ -44,8 +60,7 @@ if (-not (Get-Command idf.py -ErrorAction SilentlyContinue)) {
     $export = Join-Path $Root '.esp-idf\export.ps1'
   }
   if (-not $export) {
-    Write-Host '[error] ESP-IDF not found. Run .\setup.ps1 first, or set $env:IDF_PATH.' -ForegroundColor Red
-    exit 1
+    throw 'ESP-IDF not found. Run .\setup.ps1 first, or set $env:IDF_PATH.'
   }
   # export.ps1 expects IDF_PATH to point at the SDK tree.
   if (-not $env:IDF_PATH) { $env:IDF_PATH = Split-Path -Parent $export }
@@ -55,18 +70,18 @@ if (-not (Get-Command idf.py -ErrorAction SilentlyContinue)) {
 Push-Location $Proj
 try {
   & idf.py set-target esp32s3   # no-op once configured; ensures fresh clones build
-  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  if ($LASTEXITCODE -ne 0) { throw "idf.py set-target failed (exit $LASTEXITCODE)." }
   & idf.py build
-  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  if ($LASTEXITCODE -ne 0) { throw "idf.py build failed (exit $LASTEXITCODE)." }
 
-  if ($BuildOnly) { exit 0 }
+  if ($BuildOnly) { return }
 
   $targets = @()
   if ($Port) { $targets += @('-p', $Port) }
   $targets += 'flash'
   if ($Monitor) { $targets += 'monitor' }
   & idf.py @targets
-  exit $LASTEXITCODE
+  if ($LASTEXITCODE -ne 0) { throw "idf.py $($targets -join ' ') failed (exit $LASTEXITCODE)." }
 }
 finally {
   Pop-Location

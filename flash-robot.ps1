@@ -29,25 +29,41 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Keep the window open if double-clicked / "Run with PowerShell", so errors
+# are readable instead of flashing and vanishing.
+function Pause-IfInteractive {
+  if ([Environment]::UserInteractive -and $Host.Name -eq 'ConsoleHost') {
+    Read-Host 'Press Enter to close'
+  }
+}
+trap {
+  Write-Host ''
+  Write-Host "[error] $($_.Exception.Message)" -ForegroundColor Red
+  if ($_.ScriptStackTrace) { Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray }
+  Pause-IfInteractive
+  exit 1
+}
+
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Proj = Join-Path $Root 'firmware\esp32-robot'
 
 if (-not (Get-Command pio -ErrorAction SilentlyContinue)) {
-  Write-Host "[error] 'pio' not found. Run .\setup.ps1 first, then open a NEW terminal." -ForegroundColor Red
-  exit 1
+  throw "'pio' not found. Run .\setup.ps1 first, then open a NEW terminal."
 }
 
 Push-Location $Proj
 try {
   if ($BuildOnly) {
     & pio run
-    exit $LASTEXITCODE
+    if ($LASTEXITCODE -ne 0) { throw "pio run failed (exit $LASTEXITCODE)." }
+    return
   }
 
   $uploadArgs = @('run', '-t', 'upload')
   if ($Port) { $uploadArgs += @('--upload-port', $Port) }
   & pio @uploadArgs
-  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  if ($LASTEXITCODE -ne 0) { throw "pio upload failed (exit $LASTEXITCODE)." }
 
   if ($Monitor) { & pio device monitor }
 }

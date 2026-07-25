@@ -24,6 +24,23 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
+# Keep the window open if the script was double-clicked / "Run with PowerShell",
+# so errors are readable instead of flashing and vanishing.
+function Pause-IfInteractive {
+  # Only pause when running in an interactive console (double-click / Run with
+  # PowerShell). Skip when piped, redirected, or non-interactive (e.g. CI).
+  if ([Environment]::UserInteractive -and $Host.Name -eq 'ConsoleHost') {
+    Read-Host 'Press Enter to close'
+  }
+}
+trap {
+  Write-Host ''
+  Write-Host "[error] $($_.Exception.Message)" -ForegroundColor Red
+  if ($_.ScriptStackTrace) { Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray }
+  Pause-IfInteractive
+  exit 1
+}
+
 # --- version pin (keep in sync with firmware/esp32s3-dongle/dependencies.lock) ---
 $IdfVersion = 'v5.3.2'
 
@@ -32,7 +49,7 @@ $IdfDir = Join-Path $Root '.esp-idf'
 
 function Info($m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Warn($m) { Write-Host "[warn] $m" -ForegroundColor Yellow }
-function Die($m)  { Write-Host "[error] $m" -ForegroundColor Red; exit 1 }
+function Die($m)  { throw $m }   # caught by trap above -> prints + pauses
 function Have($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 
 # -----------------------------------------------------------------------------
@@ -100,3 +117,4 @@ Write-Host 'Build & flash the dongle (ESP32-S3, ESP-IDF):'
 Write-Host '    .\flash-dongle.ps1'
 Write-Host ''
 Write-Host 'The dongle script auto-sources ESP-IDF from .esp-idf — no manual export needed.'
+Pause-IfInteractive
