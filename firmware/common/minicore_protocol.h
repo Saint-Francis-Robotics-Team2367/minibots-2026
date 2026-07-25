@@ -42,7 +42,7 @@ extern "C" {
 #define MC_HID_OUT_PAIR_LEN 8u
 #define MC_HID_OUT_UNPAIR_LEN 8u
 
-#define MC_HID_IN_HEARTBEAT_LEN 20u
+#define MC_HID_IN_HEARTBEAT_LEN 26u
 #define MC_HID_IN_DISCOVERY_LEN 24u
 #define MC_HID_IN_STATUS_LEN 16u
 
@@ -79,6 +79,7 @@ typedef struct {
 
 typedef struct {
     uint8_t type;           /* MC_MSG_HEARTBEAT */
+    uint8_t mac[6];
     uint8_t robot_id_len;
     char robot_id[MC_ROBOT_ID_MAX];
     uint8_t battery_pct;    /* 0-100 or 0xFF unknown */
@@ -111,7 +112,7 @@ typedef struct {
 #if defined(__GNUC__) || defined(__clang__)
 _Static_assert(sizeof(joystick_packet_t) == 24, "joystick_packet_t size");
 _Static_assert(sizeof(enable_packet_t) == 8, "enable_packet_t size");
-_Static_assert(sizeof(heartbeat_packet_t) == 20, "heartbeat_packet_t size");
+_Static_assert(sizeof(heartbeat_packet_t) == 26, "heartbeat_packet_t size");
 _Static_assert(sizeof(discovery_request_t) == 2, "discovery_request_t size");
 _Static_assert(sizeof(discovery_response_t) == 24, "discovery_response_t size");
 _Static_assert(sizeof(dongle_status_t) == 16, "dongle_status_t size");

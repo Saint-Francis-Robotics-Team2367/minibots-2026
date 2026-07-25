@@ -28,6 +28,6 @@ export const MC_HID_OUT_DISCOVERY_LEN = 8;
 export const MC_HID_OUT_PAIR_LEN = 8;
 export const MC_HID_OUT_UNPAIR_LEN = 8;
 
-export const MC_HID_IN_HEARTBEAT_LEN = 20;
+export const MC_HID_IN_HEARTBEAT_LEN = 26;
 export const MC_HID_IN_DISCOVERY_LEN = 24;
 export const MC_HID_IN_STATUS_LEN = 16;

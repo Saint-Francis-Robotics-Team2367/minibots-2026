@@ -78,6 +78,8 @@ export function decodeHeartbeatIn(buf) {
   let o = 0;
   const type = v.getUint8(o++);
   if (type !== C.MC_MSG_HEARTBEAT) return null;
+  const mac = new Uint8Array(6);
+  for (let i = 0; i < 6; i++) mac[i] = v.getUint8(o++);
   const robot_id_len = v.getUint8(o++);
   const idBytes = new Uint8Array(C.MC_ROBOT_ID_MAX);
   for (let i = 0; i < C.MC_ROBOT_ID_MAX; i++) idBytes[i] = v.getUint8(o++);
@@ -86,7 +88,7 @@ export function decodeHeartbeatIn(buf) {
   const robot_id = dec.decode(nullIdx >= 0 ? idBytes.subarray(0, nullIdx) : idBytes);
   const battery_pct = v.getUint8(o++);
   const status_flags = v.getUint8(o++);
-  return { type, robot_id_len, robot_id, battery_pct, status_flags };
+  return { type, mac, robot_id_len, robot_id, battery_pct, status_flags };
 }
 
 export function decodeDiscoveryIn(buf) {

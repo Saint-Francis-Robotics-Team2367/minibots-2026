@@ -40,7 +40,6 @@ function log(...args) {
 function setDongleUi(connected) {
   document.getElementById("dongleState").textContent = connected ? "connected" : "disconnected";
   document.getElementById("dongleState").className = "badge" + (connected ? " ok" : "");
-  document.getElementById("btnScan").disabled = !connected;
   document.getElementById("chkGlobalEn").disabled = !connected;
   document.getElementById("btnDisconnect").disabled = !connected;
   document.getElementById("btnConnect").disabled = connected;
@@ -59,13 +58,24 @@ function onInputReport(e) {
     const h = decodeHeartbeatIn(buf);
     if (h) {
       log("heartbeat", h.robot_id, h.battery_pct);
+      const k = macKey(h.mac);
+      if (!discovered.has(k)) {
+        discovered.set(k, { mac: h.mac, id: h.robot_id, lastSeen: Date.now() });
+        renderRobots();
+      } else {
+        discovered.get(k).lastSeen = Date.now();
+      }
     }
   } else if (reportId === MC_HID_RID_DISCOVERY_IN) {
     const d = decodeDiscoveryIn(buf);
     if (d) {
       const k = macKey(d.mac);
-      discovered.set(k, { mac: d.mac, id: d.robot_id });
-      renderRobots();
+      if (!discovered.has(k)) {
+        discovered.set(k, { mac: d.mac, id: d.robot_id, lastSeen: Date.now() });
+        renderRobots();
+      } else {
+        discovered.get(k).lastSeen = Date.now();
+      }
       log("discovered", d.robot_id, k);
     }
   } else if (reportId === MC_HID_RID_DONGLE_STATUS) {
@@ -259,13 +269,6 @@ function startGamepadLoop() {
 
 document.getElementById("btnConnect").addEventListener("click", () => connectDongle().catch((e) => log(String(e))));
 document.getElementById("btnDisconnect").addEventListener("click", disconnectDongle);
-document.getElementById("btnScan").addEventListener("click", async () => {
-  const ch = Number(document.getElementById("chanDisp").textContent) || 6;
-  discovered.clear();
-  renderRobots();
-  await sendReport(MC_HID_RID_DISCOVERY, encodeDiscoveryOut(ch));
-  log("scan sent ch", ch);
-});
 document.getElementById("chkGlobalEn").addEventListener("change", async (e) => {
   const on = e.target.checked;
   const b = new Uint8Array(6);
@@ -276,4 +279,18 @@ document.getElementById("chkGlobalEn").addEventListener("change", async (e) => {
 
 buildSlots();
 setDongleUi(false);
-log("Ready. Connect dongle, scan, pair a slot, enable, then use gamepads at indices 0–3.");
+log("Ready. Connect dongle, pair a slot, enable, then use gamepads at indices 0–3.");
+
+setInterval(() => {
+  const now = Date.now();
+  let changed = false;
+  for (const [k, v] of discovered.entries()) {
+    if (now - v.lastSeen > 5000) {
+      discovered.delete(k);
+      changed = true;
+    }
+  }
+  if (changed) {
+    renderRobots();
+  }
+}, 1000);
