@@ -8,6 +8,11 @@ managed_components/
 build/
 firmware/**/.cache/
 sdkconfig.old
+# Generated per-machine from sdkconfig.defaults; do not commit.
+firmware/esp32s3-dongle/sdkconfig
+
+# --- Local ESP-IDF SDK installed by setup.sh ---
+/.esp-idf/
 
 # --- PlatformIO: firmware/esp32-robot ---
 .pio/
@@ -25,6 +30,9 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# --- Firebase Hosting (web/) deploy cache ---
+.firebase/
 
 # --- Node / web tooling (if used) ---
 node_modules/
