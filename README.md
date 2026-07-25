@@ -9,7 +9,7 @@ End-to-end MiniCore system from [MINICORE_CLAUDE.md](MINICORE_CLAUDE.md): a **br
 ```bash
 git clone <this-repo> minibots-2026
 cd minibots-2026
-./setup.sh            # installs PlatformIO + pinned ESP-IDF v5.3.2 (~1-2 GB, one time)
+./setup.sh            # installs PlatformIO + pinned ESP-IDF v5.3.2 (one time; see note)
 
 ./flash-robot.sh      # build + flash the ESP32 robot   (PlatformIO)
 ./flash-dongle.sh     # build + flash the ESP32-S3 dongle (ESP-IDF)
@@ -20,7 +20,7 @@ cd minibots-2026
 ```bat
 git clone <this-repo> minibots-2026
 cd minibots-2026
-setup.cmd             :: installs PlatformIO + pinned ESP-IDF v5.3.2 (~1-2 GB, one time)
+setup.cmd             :: installs PlatformIO + pinned ESP-IDF v5.3.2 (one time; see note)
 
 flash-robot.cmd       :: build + flash the ESP32 robot   (PlatformIO)
 flash-dongle.cmd      :: build + flash the ESP32-S3 dongle (ESP-IDF)
@@ -42,6 +42,12 @@ no machine-wide setting to change. Flags pass through, e.g. `flash-robot.cmd -Po
 The setup script is idempotent (safe to re-run). It installs PlatformIO via pip and clones
 ESP-IDF into a repo-local, git-ignored `.esp-idf/`; the flash scripts source that SDK
 automatically — no manual `export` step.
+
+> **Download size.** The ESP-IDF clone is shallow (`--depth 1 --shallow-submodules`), so it
+> pulls current source only — a few hundred MB, not the multi-GB full history. The larger
+> one-time cost is the compiler toolchain that `install` downloads into a per-user ESP-IDF
+> cache (`~/.espressif`), shared across projects. All of it is one-time; re-running `setup` is
+> incremental.
 
 **Prerequisites** the script expects already present: `git`, **Python 3.9–3.12**, and
 `cmake`/`ninja` (for ESP-IDF).

@@ -112,8 +112,11 @@ if (Test-Path (Join-Path $IdfDir '.git')) {
     Warn 'Delete .esp-idf and re-run to switch versions.'
   }
 } else {
-  Info "Cloning ESP-IDF $IdfVersion into .esp-idf (this downloads ~1-2 GB)"
-  & git clone --branch $IdfVersion --depth 1 --recursive `
+  Info "Cloning ESP-IDF $IdfVersion into .esp-idf (shallow; ~a few hundred MB)"
+  # --shallow-submodules: depth-1 for every submodule, not just the main repo,
+  #   avoiding full submodule history. -j 8: parallel submodule fetch.
+  & git clone --branch $IdfVersion --depth 1 `
+    --recurse-submodules --shallow-submodules -j 8 `
     https://github.com/espressif/esp-idf.git $IdfDir
   if ($LASTEXITCODE -ne 0) { Die 'ESP-IDF clone failed.' }
 }

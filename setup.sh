@@ -88,8 +88,14 @@ if [[ -d "${IDF_DIR}/.git" ]]; then
     warn "Delete .esp-idf and re-run to switch versions."
   fi
 else
-  info "Cloning ESP-IDF ${IDF_VERSION} into .esp-idf (this downloads ~1-2 GB)"
-  git clone --branch "${IDF_VERSION}" --depth 1 --recursive \
+  info "Cloning ESP-IDF ${IDF_VERSION} into .esp-idf (shallow; ~a few hundred MB)"
+  # --shallow-submodules: depth-1 for every submodule (mbedtls, esptool, ...),
+  #   not just the main repo -> avoids downloading full submodule history.
+  # -j: fetch submodules in parallel. This still pulls all submodules ESP-IDF
+  #   declares; skipping specific ones (mqtt, unity, ...) risks breaking the
+  #   build since Wi-Fi/TLS/USB pull in shared components transitively.
+  git clone --branch "${IDF_VERSION}" --depth 1 \
+    --recurse-submodules --shallow-submodules -j 8 \
     https://github.com/espressif/esp-idf.git "${IDF_DIR}" \
     || die "ESP-IDF clone failed."
 fi
