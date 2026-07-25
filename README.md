@@ -43,11 +43,17 @@ The setup script is idempotent (safe to re-run). It installs PlatformIO via pip 
 ESP-IDF into a repo-local, git-ignored `.esp-idf/`; the flash scripts source that SDK
 automatically — no manual `export` step.
 
-**Prerequisites** the script expects already present: `git`, Python 3.9+, and `cmake`/`ninja`
-(for ESP-IDF).
-- macOS: `brew install cmake ninja dfu-util`
-- Debian/Ubuntu: `sudo apt-get install -y cmake ninja-build dfu-util`
-- Windows: install [Git for Windows](https://git-scm.com), [Python](https://python.org)
+**Prerequisites** the script expects already present: `git`, **Python 3.9–3.12**, and
+`cmake`/`ninja` (for ESP-IDF).
+
+> **Python version matters.** ESP-IDF v5.3.2 is only tested against **Python 3.9–3.12** —
+> **3.11 is recommended**. Newer Pythons (3.13/3.14) can fail to install ESP-IDF's pinned
+> tooling, so `setup` refuses to run on them. ESP-IDF creates its own virtualenv, so 3.11
+> only needs to be on PATH for `setup` — it doesn't have to be your system default.
+
+- macOS: `brew install python@3.11 cmake ninja dfu-util` (then run `setup.sh` with `python3.11` on PATH)
+- Debian/Ubuntu: `sudo apt-get install -y python3.11 cmake ninja-build dfu-util`
+- Windows: install [Git for Windows](https://git-scm.com), [Python 3.11](https://python.org/downloads/release/python-3119/)
   (check *Add to PATH*), and `winget install Kitware.CMake`.
 
 ### Flash script options

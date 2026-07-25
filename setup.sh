@@ -35,6 +35,22 @@ info "Checking prerequisites"
 command -v git     >/dev/null 2>&1 || die "git not found. Install git and re-run."
 command -v python3 >/dev/null 2>&1 || die "python3 not found. Install Python 3.9+ and re-run."
 
+# ESP-IDF v5.3.2 (2024) is tested against Python 3.9-3.12; its pinned tooling can
+# fail to install on 3.13+. Require the supported range, recommend 3.11.
+PY_VER="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+PY_MAJOR="${PY_VER%%.*}"; PY_MINOR="${PY_VER#*.}"
+if [[ "${MINICORE_SKIP_PYCHECK:-0}" == "1" ]]; then
+  warn "Skipping Python version check (MINICORE_SKIP_PYCHECK=1); using ${PY_VER}."
+elif [[ "$PY_MAJOR" -ne 3 || "$PY_MINOR" -lt 9 || "$PY_MINOR" -gt 12 ]]; then
+  die "Python ${PY_VER} is not supported by ESP-IDF v${IDF_VERSION#v}.
+       Use Python 3.9-3.12 (3.11 recommended). ESP-IDF installs its own venv, so
+       3.11 only needs to be on PATH here — it need not be your system default.
+       macOS:   brew install python@3.11   (then re-run with python3.11)
+       Windows: install 3.11 from https://python.org
+       Override at your own risk: set MINICORE_SKIP_PYCHECK=1"
+fi
+info "Python ${PY_VER} OK"
+
 if ! command -v cmake >/dev/null 2>&1; then
   warn "cmake not found — required by ESP-IDF."
   case "$OS" in

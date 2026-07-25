@@ -60,7 +60,25 @@ if (-not (Have git))    { Die 'git not found. Install Git for Windows (https://g
 
 $Python = $null
 foreach ($c in 'python','python3','py') { if (Have $c) { $Python = $c; break } }
-if (-not $Python) { Die 'Python not found. Install Python 3.9+ (https://python.org, check "Add to PATH") and re-run.' }
+if (-not $Python) { Die 'Python not found. Install Python 3.11 (https://python.org, check "Add to PATH") and re-run.' }
+
+# ESP-IDF v5.3.2 (2024) is tested against Python 3.9-3.12; its pinned tooling can
+# fail to install on 3.13+. Require the supported range, recommend 3.11.
+$pyVer = & $Python -c 'import sys; print("%d.%d" % sys.version_info[:2])'
+$pyMajor = [int]($pyVer.Split('.')[0]); $pyMinor = [int]($pyVer.Split('.')[1])
+if ($env:MINICORE_SKIP_PYCHECK -eq '1') {
+  Warn "Skipping Python version check (MINICORE_SKIP_PYCHECK=1); using $pyVer."
+} elseif ($pyMajor -ne 3 -or $pyMinor -lt 9 -or $pyMinor -gt 12) {
+  Die @"
+Python $pyVer is not supported by ESP-IDF v$($IdfVersion.TrimStart('v')).
+       Use Python 3.9-3.12 (3.11 recommended). Install 3.11 from https://python.org
+       (check "Add to PATH"), then re-run. ESP-IDF installs its own venv, so 3.11
+       only needs to be on PATH here — it need not be your system default.
+       Override at your own risk: `$env:MINICORE_SKIP_PYCHECK='1'
+"@
+} else {
+  Info "Python $pyVer OK"
+}
 
 if (-not (Have cmake)) {
   Warn 'cmake not found — required by ESP-IDF. Install with:  winget install Kitware.CMake'
