@@ -15,24 +15,28 @@ cd minibots-2026
 ./flash-dongle.sh     # build + flash the ESP32-S3 dongle (ESP-IDF)
 ```
 
-**Windows (PowerShell):**
+**Windows:** use the `.cmd` launchers — **double-click** them, or run from a terminal:
 
-```powershell
+```bat
 git clone <this-repo> minibots-2026
 cd minibots-2026
-.\setup.ps1           # installs PlatformIO + pinned ESP-IDF v5.3.2 (~1-2 GB, one time)
+setup.cmd             :: installs PlatformIO + pinned ESP-IDF v5.3.2 (~1-2 GB, one time)
 
-.\flash-robot.ps1     # build + flash the ESP32 robot   (PlatformIO)
-.\flash-dongle.ps1    # build + flash the ESP32-S3 dongle (ESP-IDF)
+flash-robot.cmd       :: build + flash the ESP32 robot   (PlatformIO)
+flash-dongle.cmd      :: build + flash the ESP32-S3 dongle (ESP-IDF)
 ```
 
-> If PowerShell blocks the scripts ("running scripts is disabled"), either run
-> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, or launch each with
-> `powershell -ExecutionPolicy Bypass -File .\setup.ps1`. After `setup.ps1` installs
-> PlatformIO, open a **new** terminal so `pio` is on PATH.
+The `.cmd` files launch the matching `.ps1` with `-ExecutionPolicy Bypass`, so they work even
+when PowerShell's execution policy blocks `.ps1` files directly
+([about_Execution_Policies](https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_execution_policies)) —
+no machine-wide setting to change. Flags pass through, e.g. `flash-robot.cmd -Port COM5`.
+
+> **Advanced:** to call the `.ps1` scripts directly, first allow local scripts once with
+> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or invoke ad-hoc with
+> `powershell -ExecutionPolicy Bypass -File .\setup.ps1`.
 >
-> The scripts pause on error (they won't flash-and-close). If you still can't read the
-> output, run from an open PowerShell window and tee it to a file:
+> After `setup` installs PlatformIO, open a **new** terminal so `pio` is on PATH. The scripts
+> pause on error (they won't flash-and-close). To capture a full log:
 > `powershell -ExecutionPolicy Bypass -File .\setup.ps1 *>&1 | Tee-Object setup.log`
 
 The setup script is idempotent (safe to re-run). It installs PlatformIO via pip and clones
@@ -69,8 +73,8 @@ source of truth for the pinned versions.
 
 | Path | Description |
 |------|-------------|
-| [setup.sh](setup.sh) / [setup.ps1](setup.ps1) | One-shot toolchain bootstrap (PlatformIO + ESP-IDF v5.3.2), macOS/Linux and Windows. |
-| [flash-robot.sh](flash-robot.sh) / [flash-dongle.sh](flash-dongle.sh) (+ `.ps1`) | Build + flash helpers for each firmware. |
+| [setup.sh](setup.sh) (macOS/Linux) / [setup.cmd](setup.cmd) + [setup.ps1](setup.ps1) (Windows) | One-shot toolchain bootstrap (PlatformIO + ESP-IDF v5.3.2). |
+| `flash-robot.*` / `flash-dongle.*` (`.sh`, `.cmd`, `.ps1`) | Build + flash helpers for each firmware. Windows: use the `.cmd` launchers. |
 | [firmware/common/minicore_protocol.h](firmware/common/minicore_protocol.h) | Shared C structs, USB VID/PID, HID report IDs (keep in sync with JS). |
 | [firmware/esp32s3-dongle/](firmware/esp32s3-dongle/) | ESP-IDF project for the Waveshare ESP32-S3-LCD-1.47 class USB HID dongle. |
 | [firmware/esp32-robot/](firmware/esp32-robot/) | PlatformIO / Arduino robot firmware (classic ESP32). |
