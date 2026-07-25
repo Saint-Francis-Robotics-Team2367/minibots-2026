@@ -4,6 +4,8 @@ End-to-end MiniCore system from [MINICORE_CLAUDE.md](MINICORE_CLAUDE.md): a **br
 
 ## Quickstart (fresh machine)
 
+**macOS / Linux:**
+
 ```bash
 git clone <this-repo> minibots-2026
 cd minibots-2026
@@ -13,33 +15,58 @@ cd minibots-2026
 ./flash-dongle.sh     # build + flash the ESP32-S3 dongle (ESP-IDF)
 ```
 
-`setup.sh` is idempotent (safe to re-run) and works on **macOS and Linux**. It installs
-PlatformIO via pip and clones ESP-IDF into a repo-local, git-ignored `.esp-idf/`. The
-flash scripts source that SDK automatically — no manual `export.sh` step.
+**Windows (PowerShell):**
 
-**Prerequisites** the script expects already present: `git`, `python3` (3.9+), and
-`cmake`/`ninja` (for ESP-IDF). On macOS: `brew install cmake ninja dfu-util`. On Debian/Ubuntu:
-`sudo apt-get install -y cmake ninja-build dfu-util`.
+```powershell
+git clone <this-repo> minibots-2026
+cd minibots-2026
+.\setup.ps1           # installs PlatformIO + pinned ESP-IDF v5.3.2 (~1-2 GB, one time)
+
+.\flash-robot.ps1     # build + flash the ESP32 robot   (PlatformIO)
+.\flash-dongle.ps1    # build + flash the ESP32-S3 dongle (ESP-IDF)
+```
+
+> If PowerShell blocks the scripts ("running scripts is disabled"), either run
+> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, or launch each with
+> `powershell -ExecutionPolicy Bypass -File .\setup.ps1`. After `setup.ps1` installs
+> PlatformIO, open a **new** terminal so `pio` is on PATH.
+
+The setup script is idempotent (safe to re-run). It installs PlatformIO via pip and clones
+ESP-IDF into a repo-local, git-ignored `.esp-idf/`; the flash scripts source that SDK
+automatically — no manual `export` step.
+
+**Prerequisites** the script expects already present: `git`, Python 3.9+, and `cmake`/`ninja`
+(for ESP-IDF).
+- macOS: `brew install cmake ninja dfu-util`
+- Debian/Ubuntu: `sudo apt-get install -y cmake ninja-build dfu-util`
+- Windows: install [Git for Windows](https://git-scm.com), [Python](https://python.org)
+  (check *Add to PATH*), and `winget install Kitware.CMake`.
 
 ### Flash script options
 
-Both `flash-robot.sh` and `flash-dongle.sh` accept:
-
-| Flag | Effect |
-|------|--------|
-| `--port /dev/…` (`-p`) | Target a specific serial port (otherwise auto-detected). |
-| `--build-only` | Compile without flashing. |
-| `--monitor` (`-m`) | Open the serial monitor after flashing. |
+| bash (`--flag`) | PowerShell (`-Flag`) | Effect |
+|-----------------|----------------------|--------|
+| `--port /dev/…` (`-p`) | `-Port COM5` | Target a specific serial port (otherwise auto-detected). |
+| `--build-only` | `-BuildOnly` | Compile without flashing. |
+| `--monitor` (`-m`) | `-Monitor` | Open the serial monitor after flashing. |
 
 **Dongle in download mode** (if flashing fails on native USB): hold **BOOT**, press+release
-**RESET**, release **BOOT**, then re-run `./flash-dongle.sh`.
+**RESET**, release **BOOT**, then re-run the dongle flash script.
+
+### VSCode
+
+VSCode works on any OS with the CLI flow above via its integrated terminal. For a
+button-driven experience you can also install the **PlatformIO IDE** extension (open the
+`firmware/esp32-robot` folder → Build/Upload in the status bar) and the **Espressif ESP-IDF**
+extension (open `firmware/esp32s3-dongle`, target `esp32s3`). The scripts remain the
+source of truth for the pinned versions.
 
 ## Repository layout
 
 | Path | Description |
 |------|-------------|
-| [setup.sh](setup.sh) | One-shot toolchain bootstrap (PlatformIO + ESP-IDF v5.3.2). |
-| [flash-robot.sh](flash-robot.sh) / [flash-dongle.sh](flash-dongle.sh) | Build + flash helpers for each firmware. |
+| [setup.sh](setup.sh) / [setup.ps1](setup.ps1) | One-shot toolchain bootstrap (PlatformIO + ESP-IDF v5.3.2), macOS/Linux and Windows. |
+| [flash-robot.sh](flash-robot.sh) / [flash-dongle.sh](flash-dongle.sh) (+ `.ps1`) | Build + flash helpers for each firmware. |
 | [firmware/common/minicore_protocol.h](firmware/common/minicore_protocol.h) | Shared C structs, USB VID/PID, HID report IDs (keep in sync with JS). |
 | [firmware/esp32s3-dongle/](firmware/esp32s3-dongle/) | ESP-IDF project for the Waveshare ESP32-S3-LCD-1.47 class USB HID dongle. |
 | [firmware/esp32-robot/](firmware/esp32-robot/) | PlatformIO / Arduino robot firmware (classic ESP32). |

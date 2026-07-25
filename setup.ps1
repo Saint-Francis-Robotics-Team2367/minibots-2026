@@ -1,0 +1,102 @@
+<#
+.SYNOPSIS
+  minibots-2026 — one-shot toolchain bootstrap (Windows / PowerShell).
+
+.DESCRIPTION
+  Windows equivalent of setup.sh. Installs everything needed to build & flash
+  BOTH firmwares from a fresh machine:
+    * PlatformIO Core  -> robot firmware  (firmware/esp32-robot, Arduino)
+    * ESP-IDF v5.3.2   -> dongle firmware (firmware/esp32s3-dongle, ESP32-S3)
+
+  ESP-IDF is cloned into .\.esp-idf (repo-local, git-ignored). Re-running is
+  safe and idempotent. After this finishes, use:
+    .\flash-robot.ps1      .\flash-dongle.ps1
+
+.EXAMPLE
+  # From a PowerShell prompt in the repo root:
+  .\setup.ps1
+
+  # If script execution is blocked, launch with:
+  powershell -ExecutionPolicy Bypass -File .\setup.ps1
+#>
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+
+# --- version pin (keep in sync with firmware/esp32s3-dongle/dependencies.lock) ---
+$IdfVersion = 'v5.3.2'
+
+$Root   = Split-Path -Parent $MyInvocation.MyCommand.Path
+$IdfDir = Join-Path $Root '.esp-idf'
+
+function Info($m) { Write-Host "==> $m" -ForegroundColor Cyan }
+function Warn($m) { Write-Host "[warn] $m" -ForegroundColor Yellow }
+function Die($m)  { Write-Host "[error] $m" -ForegroundColor Red; exit 1 }
+function Have($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
+
+# -----------------------------------------------------------------------------
+# 0. Prerequisites: git, python, cmake
+# -----------------------------------------------------------------------------
+Info 'Checking prerequisites'
+if (-not (Have git))    { Die 'git not found. Install Git for Windows (https://git-scm.com) and re-run.' }
+
+$Python = $null
+foreach ($c in 'python','python3','py') { if (Have $c) { $Python = $c; break } }
+if (-not $Python) { Die 'Python not found. Install Python 3.9+ (https://python.org, check "Add to PATH") and re-run.' }
+
+if (-not (Have cmake)) {
+  Warn 'cmake not found — required by ESP-IDF. Install with:  winget install Kitware.CMake'
+}
+
+# -----------------------------------------------------------------------------
+# 1. PlatformIO (robot firmware)
+# -----------------------------------------------------------------------------
+if (Have pio) {
+  Info "PlatformIO already installed: $(pio --version)"
+} else {
+  Info 'Installing PlatformIO Core via pip'
+  & $Python -m pip install --user --upgrade platformio
+  if ($LASTEXITCODE -ne 0) { Die "pip install platformio failed. Try:  $Python -m pip install --user platformio" }
+  if (-not (Have pio)) {
+    Warn "'pio' is not on PATH yet. Add your Python user Scripts dir to PATH, e.g.:"
+    Warn '  %APPDATA%\Python\Python3X\Scripts   (see the pip install output above for the exact path)'
+    Warn 'Then open a NEW terminal before running the flash scripts.'
+  }
+}
+
+# -----------------------------------------------------------------------------
+# 2. ESP-IDF (dongle firmware) — clone pinned version + run installer
+# -----------------------------------------------------------------------------
+if (Test-Path (Join-Path $IdfDir '.git')) {
+  $current = (& git -C $IdfDir describe --tags) 2>$null
+  if (-not $current) { $current = 'unknown' }
+  Info "ESP-IDF already present at .esp-idf ($current)"
+  if ($current -ne $IdfVersion) {
+    Warn "Installed ESP-IDF is $current, project expects $IdfVersion."
+    Warn 'Delete .esp-idf and re-run to switch versions.'
+  }
+} else {
+  Info "Cloning ESP-IDF $IdfVersion into .esp-idf (this downloads ~1-2 GB)"
+  & git clone --branch $IdfVersion --depth 1 --recursive `
+    https://github.com/espressif/esp-idf.git $IdfDir
+  if ($LASTEXITCODE -ne 0) { Die 'ESP-IDF clone failed.' }
+}
+
+Info 'Installing ESP-IDF tools for esp32s3 (compiler, openocd, etc.)'
+& (Join-Path $IdfDir 'install.bat') esp32s3
+if ($LASTEXITCODE -ne 0) { Die 'ESP-IDF install.bat failed.' }
+
+# -----------------------------------------------------------------------------
+# Done
+# -----------------------------------------------------------------------------
+Write-Host ''
+Write-Host 'Setup complete.' -ForegroundColor Green
+Write-Host ''
+Write-Host 'Build & flash the robot (ESP32, PlatformIO):'
+Write-Host '    .\flash-robot.ps1'
+Write-Host ''
+Write-Host 'Build & flash the dongle (ESP32-S3, ESP-IDF):'
+Write-Host '    .\flash-dongle.ps1'
+Write-Host ''
+Write-Host 'The dongle script auto-sources ESP-IDF from .esp-idf — no manual export needed.'
