@@ -2,23 +2,23 @@
 # =============================================================================
 # minibots-2026 — one-shot toolchain bootstrap (macOS / Linux)
 #
-#   git clone <repo> && cd minibots-2026 && ./setup.sh
+#   git clone <repo> && cd minibots-2026 && ./scripts/setup.sh
 #
 # Installs everything needed to build & flash BOTH firmwares from a fresh
 # machine:
-#   * PlatformIO Core  -> robot firmware (firmware/esp32-robot, Arduino)
-#   * ESP-IDF v5.3.2   -> dongle firmware (firmware/esp32s3-dongle, ESP32-S3)
+#   * esptool + mpremote -> robot (firmware/esp32-robot, MicroPython)
+#   * ESP-IDF v5.3.2     -> dongle firmware (firmware/esp32s3-dongle, ESP32-S3)
 #
 # ESP-IDF is cloned into ./.esp-idf (repo-local, git-ignored). Re-running is
 # safe and idempotent. After this finishes, use:
-#   ./flash-robot.sh      ./flash-dongle.sh
+#   ./scripts/flash-robot.sh      ./scripts/flash-dongle.sh
 # =============================================================================
 set -euo pipefail
 
 # --- version pin (keep in sync with firmware/esp32s3-dongle/dependencies.lock) ---
 IDF_VERSION="v5.3.2"
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IDF_DIR="${ROOT}/.esp-idf"
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
@@ -60,16 +60,19 @@ if ! command -v cmake >/dev/null 2>&1; then
 fi
 
 # -----------------------------------------------------------------------------
-# 1. PlatformIO (robot firmware)
+# 1. esptool + mpremote (robot firmware — MicroPython)
 # -----------------------------------------------------------------------------
-if command -v pio >/dev/null 2>&1; then
-  info "PlatformIO already installed: $(pio --version)"
+if command -v esptool.py >/dev/null 2>&1 || command -v esptool >/dev/null 2>&1; then
+  info "esptool already installed"
+fi
+if command -v mpremote >/dev/null 2>&1 && { command -v esptool.py >/dev/null 2>&1 || command -v esptool >/dev/null 2>&1; }; then
+  info "esptool + mpremote already installed"
 else
-  info "Installing PlatformIO Core via pip"
-  python3 -m pip install --user --upgrade platformio \
-    || die "pip install platformio failed. Try: python3 -m pip install --user platformio"
-  if ! command -v pio >/dev/null 2>&1; then
-    warn "'pio' is not on PATH yet. Add your user bin dir to PATH, e.g.:"
+  info "Installing esptool + mpremote via pip (MicroPython flash + upload tools)"
+  python3 -m pip install --user --upgrade esptool mpremote \
+    || die "pip install esptool mpremote failed. Try: python3 -m pip install --user esptool mpremote"
+  if ! command -v mpremote >/dev/null 2>&1; then
+    warn "'mpremote' is not on PATH yet. Add your user bin dir to PATH, e.g.:"
     case "$OS" in
       Darwin) warn "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc && source ~/.zshrc" ;;
       Linux)  warn "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc && source ~/.bashrc" ;;
@@ -109,10 +112,12 @@ info "Installing ESP-IDF tools for esp32s3 (compiler, openocd, etc.)"
 echo
 bold "Setup complete."
 echo
-echo "Build & flash the robot (ESP32, PlatformIO):"
-echo "    ./flash-robot.sh"
+echo "Flash the robot (ESP32, MicroPython):"
+echo "    ./scripts/flash-robot.sh --firmware   # one-time: install MicroPython"
+echo "    ./scripts/flash-robot.sh              # upload your main.py"
+echo "  (download the MicroPython .bin first — see firmware/esp32-robot/micropython/README.md)"
 echo
 echo "Build & flash the dongle (ESP32-S3, ESP-IDF):"
-echo "    ./flash-dongle.sh"
+echo "    ./scripts/flash-dongle.sh"
 echo
 echo "The dongle scripts auto-source ESP-IDF from .esp-idf — no manual export needed."

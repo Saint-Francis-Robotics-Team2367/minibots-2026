@@ -243,16 +243,20 @@ The browser communicates with the ESP32-S3 dongle over USB HID. This requires de
 
 ## Robot-Side Firmware Logic
 
+> Implemented in **MicroPython**: the framework steps below live in `minibot.py`
+> (`Minibot.begin()` / `Minibot.update()`), and the tank-drive mixing is the default
+> student code in `main.py`. Students can replace the mixing with any behavior.
+
 ```
-setup():
+setup()  [minibot.py: Minibot.begin()]:
     Initialize ESP-NOW
     Set Wi-Fi channel to match control station
     Register ESP-NOW receive callback
     Initialize PWM outputs for ESCs
     Set robot_enabled = false
-    Set robot_name from config (stored in flash or hardcoded)
+    Set robot_name from config (the Minibot(...) constructor in main.py)
 
-loop():
+loop()  [minibot.py: Minibot.update(), then student main.py]:
     if received 0x04 discovery request:
         Send 0x05 discovery response (name + MAC) back to sender
 
@@ -261,14 +265,16 @@ loop():
 
     if received 0x01 joystick state AND robot_enabled:
         Update last_packet_time
-        Map joystick axes to tank drive (left stick Y = left motor, right stick Y = right motor)
-        Map auxiliary channels to servos/pneumatics
-        Write PWM values to ESCs
+        Decode joystick axes/buttons (student reads via get_left_y(), etc.)
 
-    if (millis() - last_packet_time > 250):
+    if (now - last_packet_time > 250ms) or not enabled:
         Stop all motors (safety timeout)
 
     Periodically send 0x03 heartbeat to control station MAC (every ~1 second)
+
+    # student main.py then maps inputs to motors, e.g. tank drive:
+    #   bot.drive_left_motor(-bot.get_left_y())
+    #   bot.drive_right_motor(-bot.get_right_y())
 ```
 
 ### Tank Drive Mixing
@@ -315,8 +321,8 @@ Fallback options if 2.4GHz is completely unusable:
 
 ### Robot (ESP32)
 
-- **Framework**: Arduino or ESP-IDF
-- **Key libraries**: `esp_now.h`, ESP32 PWM/LEDC for ESC control
+- **Framework**: **MicroPython** (students write `main.py`; the `Minibot` library in `minibot.py` wraps ESP-NOW + PWM). See `firmware/esp32-robot/`.
+- **Key modules**: `espnow`, `network`, `machine.PWM` (50 Hz servo/ESC pulses via `duty_ns()`)
 
 ### Browser UI
 

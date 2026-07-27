@@ -12,13 +12,13 @@
   Open the serial monitor after flashing.
 
 .EXAMPLE
-  .\flash-dongle.ps1
-  .\flash-dongle.ps1 -Port COM7
-  .\flash-dongle.ps1 -BuildOnly
-  .\flash-dongle.ps1 -Monitor
+  .\scripts\flash-dongle.ps1
+  .\scripts\flash-dongle.ps1 -Port COM7
+  .\scripts\flash-dongle.ps1 -BuildOnly
+  .\scripts\flash-dongle.ps1 -Monitor
 
 .NOTES
-  ESP-IDF is auto-sourced from .\.esp-idf (installed by .\setup.ps1). To use a
+  ESP-IDF is auto-sourced from .\.esp-idf (installed by .\scripts\setup.ps1). To use a
   system ESP-IDF instead, set $env:IDF_PATH before running.
 
   USB download mode (if flashing fails): hold BOOT, press+release RESET,
@@ -48,7 +48,7 @@ trap {
   exit 1
 }
 
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Proj = Join-Path $Root 'firmware\esp32s3-dongle'
 
 # --- locate & source ESP-IDF (export.ps1 puts idf.py + tools on PATH) ---
@@ -60,7 +60,7 @@ if (-not (Get-Command idf.py -ErrorAction SilentlyContinue)) {
     $export = Join-Path $Root '.esp-idf\export.ps1'
   }
   if (-not $export) {
-    throw 'ESP-IDF not found. Run .\setup.ps1 first, or set $env:IDF_PATH.'
+    throw 'ESP-IDF not found. Run .\scripts\setup.ps1 first, or set $env:IDF_PATH.'
   }
   # export.ps1 expects IDF_PATH to point at the SDK tree.
   if (-not $env:IDF_PATH) { $env:IDF_PATH = Split-Path -Parent $export }

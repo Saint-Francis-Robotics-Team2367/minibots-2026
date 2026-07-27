@@ -5,19 +5,19 @@
 .DESCRIPTION
   Windows equivalent of setup.sh. Installs everything needed to build & flash
   BOTH firmwares from a fresh machine:
-    * PlatformIO Core  -> robot firmware  (firmware/esp32-robot, Arduino)
-    * ESP-IDF v5.3.2   -> dongle firmware (firmware/esp32s3-dongle, ESP32-S3)
+    * esptool + mpremote -> robot  (firmware/esp32-robot, MicroPython)
+    * ESP-IDF v5.3.2     -> dongle firmware (firmware/esp32s3-dongle, ESP32-S3)
 
   ESP-IDF is cloned into .\.esp-idf (repo-local, git-ignored). Re-running is
   safe and idempotent. After this finishes, use:
-    .\flash-robot.ps1      .\flash-dongle.ps1
+    .\scripts\flash-robot.ps1      .\scripts\flash-dongle.ps1
 
 .EXAMPLE
   # From a PowerShell prompt in the repo root:
-  .\setup.ps1
+  .\scripts\setup.ps1
 
   # If script execution is blocked, launch with:
-  powershell -ExecutionPolicy Bypass -File .\setup.ps1
+  powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
 #>
 [CmdletBinding()]
 param()
@@ -44,7 +44,7 @@ trap {
 # --- version pin (keep in sync with firmware/esp32s3-dongle/dependencies.lock) ---
 $IdfVersion = 'v5.3.2'
 
-$Root   = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Root   = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $IdfDir = Join-Path $Root '.esp-idf'
 
 function Info($m) { Write-Host "==> $m" -ForegroundColor Cyan }
@@ -85,16 +85,16 @@ if (-not (Have cmake)) {
 }
 
 # -----------------------------------------------------------------------------
-# 1. PlatformIO (robot firmware)
+# 1. esptool + mpremote (robot firmware — MicroPython)
 # -----------------------------------------------------------------------------
-if (Have pio) {
-  Info "PlatformIO already installed: $(pio --version)"
+if (((Have esptool.py) -or (Have esptool)) -and (Have mpremote)) {
+  Info 'esptool + mpremote already installed'
 } else {
-  Info 'Installing PlatformIO Core via pip'
-  & $Python -m pip install --user --upgrade platformio
-  if ($LASTEXITCODE -ne 0) { Die "pip install platformio failed. Try:  $Python -m pip install --user platformio" }
-  if (-not (Have pio)) {
-    Warn "'pio' is not on PATH yet. Add your Python user Scripts dir to PATH, e.g.:"
+  Info 'Installing esptool + mpremote via pip (MicroPython flash + upload tools)'
+  & $Python -m pip install --user --upgrade esptool mpremote
+  if ($LASTEXITCODE -ne 0) { Die "pip install esptool mpremote failed. Try:  $Python -m pip install --user esptool mpremote" }
+  if (-not (Have mpremote)) {
+    Warn "'mpremote' is not on PATH yet. Add your Python user Scripts dir to PATH, e.g.:"
     Warn '  %APPDATA%\Python\Python3X\Scripts   (see the pip install output above for the exact path)'
     Warn 'Then open a NEW terminal before running the flash scripts.'
   }
@@ -131,11 +131,13 @@ if ($LASTEXITCODE -ne 0) { Die 'ESP-IDF install.bat failed.' }
 Write-Host ''
 Write-Host 'Setup complete.' -ForegroundColor Green
 Write-Host ''
-Write-Host 'Build & flash the robot (ESP32, PlatformIO):'
-Write-Host '    .\flash-robot.ps1'
+Write-Host 'Flash the robot (ESP32, MicroPython):'
+Write-Host '    .\scripts\flash-robot.ps1 -Firmware   # one-time: install MicroPython'
+Write-Host '    .\scripts\flash-robot.ps1             # upload your main.py'
+Write-Host '  (download the MicroPython .bin first — see firmware\esp32-robot\micropython\README.md)'
 Write-Host ''
 Write-Host 'Build & flash the dongle (ESP32-S3, ESP-IDF):'
-Write-Host '    .\flash-dongle.ps1'
+Write-Host '    .\scripts\flash-dongle.ps1'
 Write-Host ''
 Write-Host 'The dongle script auto-sources ESP-IDF from .esp-idf — no manual export needed.'
 Pause-IfInteractive

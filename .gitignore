@@ -14,11 +14,14 @@ firmware/esp32s3-dongle/sdkconfig
 # --- Local ESP-IDF SDK installed by setup.sh ---
 /.esp-idf/
 
-# --- PlatformIO: firmware/esp32-robot ---
+# --- PlatformIO: legacy robot firmware (old-code/esp32-robot-cpp) ---
 .pio/
 .pioenvs/
 .piolibdeps/
 .clang_complete
+
+# --- MicroPython robot firmware image (download per micropython/README.md) ---
+firmware/esp32-robot/micropython/*.bin
 
 # --- Python (scripts, automation) ---
 __pycache__/
