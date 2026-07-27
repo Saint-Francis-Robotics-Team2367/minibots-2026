@@ -4,16 +4,21 @@ End-to-end MiniCore system from [MINICORE_CLAUDE.md](docs/MINICORE_CLAUDE.md): a
 
 ## Quickstart (fresh machine)
 
+There's **no separate setup step** — each flash script installs the toolchain it
+needs on its first run, then flashes. `flash-robot.*` installs `esptool` + `mpremote`
+(pip); `flash-dongle.*` clones the pinned **ESP-IDF v5.3.2** into a repo-local,
+git-ignored `.esp-idf/` and runs its installer. Both checks are idempotent, so
+subsequent runs skip straight to flashing.
+
 **macOS / Linux:**
 
 ```bash
 git clone <this-repo> minibots-2026
 cd minibots-2026
-./scripts/setup.sh                   # installs esptool + mpremote + pinned ESP-IDF v5.3.2 (one time; see note)
 
-./scripts/flash-robot.sh --firmware  # ONE-TIME: install MicroPython on the ESP32 robot
+./scripts/flash-robot.sh --firmware  # first run installs esptool+mpremote, then installs MicroPython on the ESP32 robot
 ./scripts/flash-robot.sh             # upload your robot code (main.py + minibot.py)
-./scripts/flash-dongle.sh            # build + flash the ESP32-S3 dongle (ESP-IDF)
+./scripts/flash-dongle.sh            # first run installs ESP-IDF v5.3.2, then builds + flashes the ESP32-S3 dongle
 ```
 
 **Windows:** use the `.cmd` launchers — **double-click** them, or run from a terminal:
@@ -21,11 +26,10 @@ cd minibots-2026
 ```bat
 git clone <this-repo> minibots-2026
 cd minibots-2026
-setup.cmd                    :: installs esptool + mpremote + pinned ESP-IDF v5.3.2 (one time; see note)
 
-flash-robot.cmd -Firmware    :: ONE-TIME: install MicroPython on the ESP32 robot
+flash-robot.cmd -Firmware    :: first run installs esptool+mpremote, then installs MicroPython on the ESP32 robot
 flash-robot.cmd              :: upload your robot code (main.py + minibot.py)
-flash-dongle.cmd             :: build + flash the ESP32-S3 dongle (ESP-IDF)
+flash-dongle.cmd             :: first run installs ESP-IDF v5.3.2, then builds + flashes the ESP32-S3 dongle
 ```
 
 > **Robot MicroPython image.** Before `flash-robot.sh --firmware`, download the ESP32 MicroPython
@@ -39,31 +43,36 @@ no machine-wide setting to change. Flags pass through, e.g. `flash-robot.cmd -Po
 
 > **Advanced:** to call the `.ps1` scripts directly, first allow local scripts once with
 > `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or invoke ad-hoc with
-> `powershell -ExecutionPolicy Bypass -File .\setup.ps1`.
+> `powershell -ExecutionPolicy Bypass -File .\scripts\flash-robot.ps1`.
 >
-> After `setup` installs the tools, open a **new** terminal so `mpremote`/`esptool` are on
-> PATH. The scripts pause on error (they won't flash-and-close). To capture a full log:
-> `powershell -ExecutionPolicy Bypass -File .\setup.ps1 *>&1 | Tee-Object setup.log`
+> The flash scripts add pip's user Scripts dir to PATH for their own run; if `mpremote`/`esptool`
+> still aren't found afterward, open a **new** terminal so they're on PATH. The scripts pause on
+> error (they won't flash-and-close). To capture a full log:
+> `powershell -ExecutionPolicy Bypass -File .\scripts\flash-dongle.ps1 *>&1 | Tee-Object flash.log`
+>
+> Already have the tools (or a system ESP-IDF)? Pass `--skip-setup` / `-SkipSetup` to bypass the
+> first-run install check.
 
-The setup script is idempotent (safe to re-run). It installs `esptool` + `mpremote` via pip and
-clones ESP-IDF into a repo-local, git-ignored `.esp-idf/`; the dongle flash script sources that
-SDK automatically — no manual `export` step.
+The first-run install baked into each flash script is idempotent (safe to re-run). `flash-robot.*`
+installs `esptool` + `mpremote` via pip; `flash-dongle.*` clones ESP-IDF into a repo-local,
+git-ignored `.esp-idf/` and sources that SDK automatically — no manual `export` step.
 
 > **Download size.** The ESP-IDF clone is shallow (`--depth 1 --shallow-submodules`), so it
 > pulls current source only — a few hundred MB, not the multi-GB full history. The larger
 > one-time cost is the compiler toolchain that `install` downloads into a per-user ESP-IDF
-> cache (`~/.espressif`), shared across projects. All of it is one-time; re-running `setup` is
-> incremental.
+> cache (`~/.espressif`), shared across projects. All of it is one-time; the flash script's
+> first-run install is incremental on later runs.
 
-**Prerequisites** the script expects already present: `git`, **Python 3.9–3.12**, and
-`cmake`/`ninja` (for ESP-IDF).
+**Prerequisites** the scripts expect already present: `git`, **Python 3.9–3.12**, and
+`cmake`/`ninja` (for the dongle's ESP-IDF).
 
 > **Python version matters.** ESP-IDF v5.3.2 is only tested against **Python 3.9–3.12** —
 > **3.11 is recommended**. Newer Pythons (3.13/3.14) can fail to install ESP-IDF's pinned
-> tooling, so `setup` refuses to run on them. ESP-IDF creates its own virtualenv, so 3.11
-> only needs to be on PATH for `setup` — it doesn't have to be your system default.
+> tooling, so `flash-dongle` refuses its first-run install on them (the robot flash has no such
+> restriction). ESP-IDF creates its own virtualenv, so 3.11 only needs to be on PATH when
+> `flash-dongle` installs it — it doesn't have to be your system default.
 
-- macOS: `brew install python@3.11 cmake ninja dfu-util` (then run `setup.sh` with `python3.11` on PATH)
+- macOS: `brew install python@3.11 cmake ninja dfu-util` (then run `flash-dongle.sh` with `python3.11` on PATH)
 - Debian/Ubuntu: `sudo apt-get install -y python3.11 cmake ninja-build dfu-util`
 - Windows: install [Git for Windows](https://git-scm.com), [Python 3.11](https://python.org/downloads/release/python-3119/)
   (check *Add to PATH*), and `winget install Kitware.CMake`.
@@ -77,10 +86,11 @@ SDK automatically — no manual `export` step.
 | `--port /dev/…` (`-p`) | `-Port COM5` | Target a specific serial port (otherwise auto-detected). |
 | `--firmware` | `-Firmware` | One-time: erase + write the MicroPython `.bin`. |
 | `--repl` | `-Repl` | Open a live MicroPython prompt (see `print()` output). |
+| `--skip-setup` | `-SkipSetup` | Skip the first-run `esptool` + `mpremote` install check. |
 | *(no flag)* | *(no flag)* | Upload `main.py` + `minibot.py` and reboot into it. |
 
 **Dongle** (`flash-dongle.*`, ESP-IDF): `--port`/`-Port`, `--build-only`/`-BuildOnly`,
-`--monitor`/`-Monitor`.
+`--monitor`/`-Monitor`, `--skip-setup`/`-SkipSetup` (skip the first-run ESP-IDF install check).
 
 **Dongle in download mode** (if flashing fails on native USB): hold **BOOT**, press+release
 **RESET**, release **BOOT**, then re-run the dongle flash script.
@@ -98,8 +108,7 @@ scripts remain the source of truth for the pinned versions.
 
 | Path | Description |
 |------|-------------|
-| [setup.sh](scripts/setup.sh) (macOS/Linux) / [setup.cmd](scripts/setup.cmd) + [setup.ps1](scripts/setup.ps1) (Windows) | One-shot toolchain bootstrap (esptool + mpremote + ESP-IDF v5.3.2). |
-| `flash-robot.*` / `flash-dongle.*` (`.sh`, `.cmd`, `.ps1`) | Flash helpers for each firmware. Windows: use the `.cmd` launchers. |
+| `flash-robot.*` / `flash-dongle.*` (`.sh`, `.cmd`, `.ps1`) | Flash helpers for each firmware; each installs its own toolchain on first run (robot: esptool + mpremote; dongle: ESP-IDF v5.3.2). Windows: use the `.cmd` launchers. |
 | [firmware/common/minicore_protocol.h](firmware/common/minicore_protocol.h) | Shared C structs, USB VID/PID, HID report IDs (keep in sync with JS + `minibot.py`). |
 | [firmware/esp32s3-dongle/](firmware/esp32s3-dongle/) | ESP-IDF project for the Waveshare ESP32-S3-LCD-1.47 class USB HID dongle. |
 | [firmware/esp32-robot/](firmware/esp32-robot/) | MicroPython robot code (classic ESP32) — students edit `main.py`. |

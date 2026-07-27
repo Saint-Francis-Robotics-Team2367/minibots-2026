@@ -31,6 +31,7 @@ esptool.py --chip esp32 --port <PORT> write_flash -z 0x1000 ESP32_GENERIC-*.bin
 
 ## Notes
 
-- Requires `esptool` and `mpremote` (installed by `scripts/setup.sh` / `scripts/setup.ps1`).
+- Requires `esptool` and `mpremote` (installed automatically on the first run of
+  `scripts/flash-robot.sh` / `scripts/flash-robot.ps1`).
 - The ESP-NOW and PWM APIs used by `minibot.py` are part of the standard ESP32
   MicroPython build — no custom firmware needed.
