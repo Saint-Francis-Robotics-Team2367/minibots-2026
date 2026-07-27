@@ -37,6 +37,11 @@ the robot:
 ./scripts/flash-robot.sh --repl                # open a live Python prompt / see print() output
 ```
 
+On power-up the robot waits ~1.5 s before running your `main.py` (you'll see a
+`[boot] Starting in 1500 ms…` message). That pause is the window the upload
+tool uses to interrupt the board, so uploads work even though `main.py` runs a
+tight loop. It's handled in `boot.py` — you don't need to do anything.
+
 ## Writing robot code
 
 Open `main.py`. The `Minibot` object gives you everything:
