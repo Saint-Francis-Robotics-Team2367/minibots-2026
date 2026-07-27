@@ -1,6 +1,6 @@
 /**
  * Wi-Fi channel lock + ESP-NOW bridge between WebHID (TinyUSB) and robots.
- * Protocol: firmware/common/minicore_protocol.h (MINICORE_CLAUDE.md).
+ * Protocol: firmware/common/minicore_protocol.h (docs/MINICORE_CLAUDE.md).
  */
 
 #include "minicore_bridge.h"

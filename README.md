@@ -1,6 +1,6 @@
 # minibots-2026 — MiniCore stack
 
-End-to-end MiniCore system from [MINICORE_CLAUDE.md](MINICORE_CLAUDE.md): a **browser driver station** (Gamepad API + WebHID), an **ESP32-S3** USB HID dongle (ESP-NOW + optional ST7789 + RGB), and **ESP32** robot firmware (ESP-NOW, tank drive, 250 ms failsafe).
+End-to-end MiniCore system from [MINICORE_CLAUDE.md](docs/MINICORE_CLAUDE.md): a **browser driver station** (Gamepad API + WebHID), an **ESP32-S3** USB HID dongle (ESP-NOW + optional ST7789 + RGB), and an **ESP32** robot running **MicroPython** (ESP-NOW, tank drive, 250 ms failsafe) — students program the robot in Python (`firmware/esp32-robot/main.py`).
 
 ## Quickstart (fresh machine)
 
@@ -9,10 +9,11 @@ End-to-end MiniCore system from [MINICORE_CLAUDE.md](MINICORE_CLAUDE.md): a **br
 ```bash
 git clone <this-repo> minibots-2026
 cd minibots-2026
-./setup.sh            # installs PlatformIO + pinned ESP-IDF v5.3.2 (one time; see note)
+./scripts/setup.sh                   # installs esptool + mpremote + pinned ESP-IDF v5.3.2 (one time; see note)
 
-./flash-robot.sh      # build + flash the ESP32 robot   (PlatformIO)
-./flash-dongle.sh     # build + flash the ESP32-S3 dongle (ESP-IDF)
+./scripts/flash-robot.sh --firmware  # ONE-TIME: install MicroPython on the ESP32 robot
+./scripts/flash-robot.sh             # upload your robot code (main.py + minibot.py)
+./scripts/flash-dongle.sh            # build + flash the ESP32-S3 dongle (ESP-IDF)
 ```
 
 **Windows:** use the `.cmd` launchers — **double-click** them, or run from a terminal:
@@ -20,11 +21,16 @@ cd minibots-2026
 ```bat
 git clone <this-repo> minibots-2026
 cd minibots-2026
-setup.cmd             :: installs PlatformIO + pinned ESP-IDF v5.3.2 (one time; see note)
+setup.cmd                    :: installs esptool + mpremote + pinned ESP-IDF v5.3.2 (one time; see note)
 
-flash-robot.cmd       :: build + flash the ESP32 robot   (PlatformIO)
-flash-dongle.cmd      :: build + flash the ESP32-S3 dongle (ESP-IDF)
+flash-robot.cmd -Firmware    :: ONE-TIME: install MicroPython on the ESP32 robot
+flash-robot.cmd              :: upload your robot code (main.py + minibot.py)
+flash-dongle.cmd             :: build + flash the ESP32-S3 dongle (ESP-IDF)
 ```
+
+> **Robot MicroPython image.** Before `flash-robot.sh --firmware`, download the ESP32 MicroPython
+> `.bin` into `firmware/esp32-robot/micropython/` — see
+> [that folder's README](firmware/esp32-robot/micropython/README.md).
 
 The `.cmd` files launch the matching `.ps1` with `-ExecutionPolicy Bypass`, so they work even
 when PowerShell's execution policy blocks `.ps1` files directly
@@ -35,13 +41,13 @@ no machine-wide setting to change. Flags pass through, e.g. `flash-robot.cmd -Po
 > `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or invoke ad-hoc with
 > `powershell -ExecutionPolicy Bypass -File .\setup.ps1`.
 >
-> After `setup` installs PlatformIO, open a **new** terminal so `pio` is on PATH. The scripts
-> pause on error (they won't flash-and-close). To capture a full log:
+> After `setup` installs the tools, open a **new** terminal so `mpremote`/`esptool` are on
+> PATH. The scripts pause on error (they won't flash-and-close). To capture a full log:
 > `powershell -ExecutionPolicy Bypass -File .\setup.ps1 *>&1 | Tee-Object setup.log`
 
-The setup script is idempotent (safe to re-run). It installs PlatformIO via pip and clones
-ESP-IDF into a repo-local, git-ignored `.esp-idf/`; the flash scripts source that SDK
-automatically — no manual `export` step.
+The setup script is idempotent (safe to re-run). It installs `esptool` + `mpremote` via pip and
+clones ESP-IDF into a repo-local, git-ignored `.esp-idf/`; the dongle flash script sources that
+SDK automatically — no manual `export` step.
 
 > **Download size.** The ESP-IDF clone is shallow (`--depth 1 --shallow-submodules`), so it
 > pulls current source only — a few hundred MB, not the multi-GB full history. The larger
@@ -64,32 +70,39 @@ automatically — no manual `export` step.
 
 ### Flash script options
 
+**Robot** (`flash-robot.*`, MicroPython):
+
 | bash (`--flag`) | PowerShell (`-Flag`) | Effect |
 |-----------------|----------------------|--------|
 | `--port /dev/…` (`-p`) | `-Port COM5` | Target a specific serial port (otherwise auto-detected). |
-| `--build-only` | `-BuildOnly` | Compile without flashing. |
-| `--monitor` (`-m`) | `-Monitor` | Open the serial monitor after flashing. |
+| `--firmware` | `-Firmware` | One-time: erase + write the MicroPython `.bin`. |
+| `--repl` | `-Repl` | Open a live MicroPython prompt (see `print()` output). |
+| *(no flag)* | *(no flag)* | Upload `main.py` + `minibot.py` and reboot into it. |
+
+**Dongle** (`flash-dongle.*`, ESP-IDF): `--port`/`-Port`, `--build-only`/`-BuildOnly`,
+`--monitor`/`-Monitor`.
 
 **Dongle in download mode** (if flashing fails on native USB): hold **BOOT**, press+release
 **RESET**, release **BOOT**, then re-run the dongle flash script.
 
 ### VSCode
 
-VSCode works on any OS with the CLI flow above via its integrated terminal. For a
-button-driven experience you can also install the **PlatformIO IDE** extension (open the
-`firmware/esp32-robot` folder → Build/Upload in the status bar) and the **Espressif ESP-IDF**
-extension (open `firmware/esp32s3-dongle`, target `esp32s3`). The scripts remain the
-source of truth for the pinned versions.
+VSCode works on any OS with the CLI flow above via its integrated terminal. For the robot,
+edit `firmware/esp32-robot/main.py` and re-run `./scripts/flash-robot.sh`; the
+[MicroPython (`ms-python`/` pico-w-go`-style)](https://marketplace.visualstudio.com/) extensions
+can also upload over the same serial port if you prefer a button. For the dongle you can install
+the **Espressif ESP-IDF** extension (open `firmware/esp32s3-dongle`, target `esp32s3`). The
+scripts remain the source of truth for the pinned versions.
 
 ## Repository layout
 
 | Path | Description |
 |------|-------------|
-| [setup.sh](setup.sh) (macOS/Linux) / [setup.cmd](setup.cmd) + [setup.ps1](setup.ps1) (Windows) | One-shot toolchain bootstrap (PlatformIO + ESP-IDF v5.3.2). |
-| `flash-robot.*` / `flash-dongle.*` (`.sh`, `.cmd`, `.ps1`) | Build + flash helpers for each firmware. Windows: use the `.cmd` launchers. |
-| [firmware/common/minicore_protocol.h](firmware/common/minicore_protocol.h) | Shared C structs, USB VID/PID, HID report IDs (keep in sync with JS). |
+| [setup.sh](scripts/setup.sh) (macOS/Linux) / [setup.cmd](scripts/setup.cmd) + [setup.ps1](scripts/setup.ps1) (Windows) | One-shot toolchain bootstrap (esptool + mpremote + ESP-IDF v5.3.2). |
+| `flash-robot.*` / `flash-dongle.*` (`.sh`, `.cmd`, `.ps1`) | Flash helpers for each firmware. Windows: use the `.cmd` launchers. |
+| [firmware/common/minicore_protocol.h](firmware/common/minicore_protocol.h) | Shared C structs, USB VID/PID, HID report IDs (keep in sync with JS + `minibot.py`). |
 | [firmware/esp32s3-dongle/](firmware/esp32s3-dongle/) | ESP-IDF project for the Waveshare ESP32-S3-LCD-1.47 class USB HID dongle. |
-| [firmware/esp32-robot/](firmware/esp32-robot/) | PlatformIO / Arduino robot firmware (classic ESP32). |
+| [firmware/esp32-robot/](firmware/esp32-robot/) | MicroPython robot code (classic ESP32) — students edit `main.py`. |
 | [web/](web/) | Static driver station (Chrome or Edge; HTTPS or localhost). |
 
 ## USB identity (WebHID filter)
@@ -102,17 +115,23 @@ source of truth for the pinned versions.
 ESP-NOW requires the same **802.11 channel** on the dongle and every robot.
 
 - Dongle: default channel **6** at boot ([minicore_app.c](firmware/esp32s3-dongle/main/minicore_app.c) `CONFIG_MINICORE_WIFI_CHANNEL`, or add `CONFIG_MINICORE_WIFI_CHANNEL` via `sdkconfig`).
-- Robot: [platformio.ini](firmware/esp32-robot/platformio.ini) `MINICORE_WIFI_CHANNEL=6` (must match the dongle).
+- Robot: the `channel=` argument to `Minibot(...)` in [main.py](firmware/esp32-robot/main.py) (must match the dongle).
 
-## Robot firmware (PlatformIO) — details
+## Robot code (MicroPython) — details
 
-Customize robot name and pins via [platformio.ini](firmware/esp32-robot/platformio.ini) build
-flags (`MINICORE_ROBOT_NAME`, `LEFT_MOTOR_PIN`, `RIGHT_MOTOR_PIN`). Requires **arduino-esp32**
-with ESP-IDF 5-style `esp_now_recv_info_t` receive callback (Arduino ESP32 core 3.x) —
-PlatformIO fetches this automatically on first build.
+Students write robot behavior in [firmware/esp32-robot/main.py](firmware/esp32-robot/main.py)
+using the `Minibot` class from `minibot.py`. Set the robot name, motor pins, and Wi-Fi channel
+in the `Minibot(...)` constructor there — no rebuild, just re-upload.
 
-`./flash-robot.sh` wraps `pio run -t upload` in `firmware/esp32-robot`; you can still run
-`pio` directly there if you prefer.
+- **One-time:** `./scripts/flash-robot.sh --firmware` installs the MicroPython runtime (download the
+  `.bin` first — see [firmware/esp32-robot/micropython/README.md](firmware/esp32-robot/micropython/README.md)).
+- **Each change:** `./scripts/flash-robot.sh` copies `main.py` + `minibot.py` to the board with
+  `mpremote` and reboots; `./scripts/flash-robot.sh --repl` opens a live prompt to see `print()` output.
+
+`minibot.py` handles ESP-NOW discovery/enable/joystick/heartbeat and the 250 ms motor failsafe,
+speaking the same wire protocol as before ([minicore_protocol.h](firmware/common/minicore_protocol.h)),
+so the dongle and web driver station are unchanged. See
+[firmware/esp32-robot/README.md](firmware/esp32-robot/README.md) for the full student API.
 
 ## Dongle firmware (ESP-IDF) — details
 
@@ -123,7 +142,7 @@ PlatformIO fetches this automatically on first build.
 
 `sdkconfig` is **generated per-machine** from
 [sdkconfig.defaults](firmware/esp32s3-dongle/sdkconfig.defaults) and is git-ignored, so a fresh
-clone always gets a correct config. `./flash-dongle.sh` runs `idf.py set-target esp32s3 && build`
+clone always gets a correct config. `./scripts/flash-dongle.sh` runs `idf.py set-target esp32s3 && build`
 for you. If you ever change `sdkconfig.defaults`, run a one-time
 `idf.py fullclean` in `firmware/esp32s3-dongle` so the new options apply.
 

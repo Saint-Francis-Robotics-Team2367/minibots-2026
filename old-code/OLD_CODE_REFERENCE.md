@@ -2,6 +2,10 @@
 
 This document describes how the original **driver station** (`driverStation.py`) and the **firmware** (`minibots/minibot.*` + `minibots.ino`) fit together: architecture, threads, UDP messaging, and the binary controller format. Use it when replacing transports (e.g. WebSockets, BLE) or the frontend while preserving behavior.
 
+> **Two generations of retired robot code live here.**
+> - `minibots/` — the original UDP-based `Minibot` Arduino library + `driverStation.py` (documented below).
+> - `esp32-robot-cpp/` — the **C++/PlatformIO ESP-NOW robot firmware** that preceded the MicroPython migration (2026). It spoke the current `firmware/common/minicore_protocol.h` wire protocol but hardcoded tank drive inside `minicore_robot.cpp`'s ESP-NOW receive callback, with no student-editable behavior layer. The MicroPython replacement (`firmware/esp32-robot/`) keeps that exact ESP-NOW protocol but moves behavior into a student-facing `main.py` + `minibot.py`. Kept for reference when tuning PWM calibration (center 1758 µs ± 391 µs) or the discovery/enable/heartbeat/joystick handling.
+
 ---
 
 ## 1. Repository layout (`old-code/`)

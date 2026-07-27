@@ -1,6 +1,6 @@
 /**
  * MiniCore control-station dongle: native USB HID (TinyUSB) + ESP-NOW + Waveshare 1.47" UI.
- * See MINICORE_CLAUDE.md, ESP32_DONGLE.md, and https://www.waveshare.com/wiki/ESP32-S3-LCD-1.47
+ * See docs/MINICORE_CLAUDE.md, docs/ESP32_DONGLE.md, and https://www.waveshare.com/wiki/ESP32-S3-LCD-1.47
  */
 
 #include <string.h>

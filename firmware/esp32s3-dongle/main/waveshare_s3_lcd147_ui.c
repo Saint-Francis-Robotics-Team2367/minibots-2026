@@ -1,6 +1,6 @@
 /**
  * Waveshare ESP32-S3-LCD-1.47: ST7789 172×320 SPI, GPIO48 backlight PWM, WS2812 GPIO38.
- * Pinout: https://www.waveshare.com/wiki/ESP32-S3-LCD-1.47 — layout notes in ESP32_DONGLE.md.
+ * Pinout: https://www.waveshare.com/wiki/ESP32-S3-LCD-1.47 — layout notes in docs/ESP32_DONGLE.md.
  * Logical UI after 90° rotation: 320×172 landscape; layout uses the full area (column, padded).
  */
 
