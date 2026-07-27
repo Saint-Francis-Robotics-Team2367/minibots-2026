@@ -52,12 +52,25 @@ find_python() {
   return 1
 }
 
-# Path to the venv's python (this is what we invoke everything through — no PATH
+# Path to the venv's python — this is what we invoke everything through (no PATH
 # lookups, no console-script shims, so a $PATH that lacks pip's bin dir is fine).
-PYBIN="${VENV_DIR}/bin/python"
+# The layout differs by OS: POSIX puts it in bin/, Windows (incl. Git Bash) in
+# Scripts/python.exe. Resolve to whichever actually exists instead of guessing.
+PYBIN=""
+resolve_pybin() {
+  local p
+  for p in "${VENV_DIR}/bin/python" "${VENV_DIR}/bin/python3" \
+           "${VENV_DIR}/Scripts/python.exe" "${VENV_DIR}/Scripts/python"; do
+    if [[ -x "$p" || -f "$p" ]]; then
+      PYBIN="$p"; return 0
+    fi
+  done
+  return 1
+}
+resolve_pybin || true  # may be empty until the venv is created below
 
-# True if the venv python can already import both tools.
-tools_ready() { [[ -x "$PYBIN" ]] && "$PYBIN" -c 'import esptool, mpremote' >/dev/null 2>&1; }
+# True if we have a venv python that can import both tools.
+tools_ready() { [[ -n "$PYBIN" ]] && "$PYBIN" -c 'import esptool, mpremote' >/dev/null 2>&1; }
 
 # --- ensure flash tools (esptool + mpremote) — first-run setup, then a no-op ---
 ensure_tools() {
@@ -69,10 +82,15 @@ ensure_tools() {
     exit 1
   }
 
-  if [[ ! -x "$PYBIN" ]]; then
+  if ! resolve_pybin; then
     echo "[info] Creating tool virtualenv at ${VENV_DIR} (one time)"
     "$py" -m venv "$VENV_DIR" || {
       echo "[error] Failed to create virtualenv at ${VENV_DIR} with '$py -m venv'." >&2
+      exit 1
+    }
+    resolve_pybin || {
+      echo "[error] Created ${VENV_DIR} but found no python inside it (looked in bin/ and Scripts/)." >&2
+      echo "        Delete ${VENV_DIR} and re-run, or install esptool + mpremote yourself." >&2
       exit 1
     }
   fi
