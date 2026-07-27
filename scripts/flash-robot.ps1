@@ -28,7 +28,7 @@
 
 .NOTES
   On first run this installs its own tools (esptool + mpremote) into a private
-  virtualenv at .venv-flash\ — no separate setup step, nothing installed
+  virtualenv at .venv-flash\ -- no separate setup step, nothing installed
   system-wide, and no PATH changes required. The check is idempotent, so later
   runs are instant.
 
@@ -77,7 +77,7 @@ function Tools-Ready {
   return ($LASTEXITCODE -eq 0)
 }
 
-# --- ensure flash tools (esptool + mpremote) — first-run setup, then a no-op ---
+# --- ensure flash tools (esptool + mpremote) -- first-run setup, then a no-op ---
 function Ensure-Tools {
   if (Tools-Ready) { return }
 
@@ -107,7 +107,7 @@ if (-not $SkipSetup) { Ensure-Tools }
 
 if (-not (Tools-Ready)) { throw 'esptool + mpremote unavailable. Re-run without -SkipSetup to install them.' }
 
-# Invoke the tools as modules through the venv python — never via PATH.
+# Invoke the tools as modules through the venv python -- never via PATH.
 # Splat these after $PyBin, e.g.  & $PyBin @EsptoolArgs --chip esp32 ...
 $EsptoolArgs  = @('-m', 'esptool')
 $MpremoteArgs = @('-m', 'mpremote')
@@ -160,7 +160,7 @@ for ($try = 1; $try -le $UploadTries; $try++) {
 
 if (-not $uploaded) {
   throw "Could not upload after $UploadTries tries: mpremote can't interrupt the program running on the robot. " +
-        "Try again — if it keeps failing, hold the board's BOOT button while you start this script, " +
+        "Try again - if it keeps failing, hold the board's BOOT button while you start this script, " +
         "or reflash the MicroPython runtime with:  .\scripts\flash-robot.ps1 -Firmware"
 }
 
