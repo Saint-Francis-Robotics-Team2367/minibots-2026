@@ -12,8 +12,10 @@
 #   --repl              open a live MicroPython prompt (see print() output)
 #   --skip-setup        don't check/install esptool + mpremote before flashing
 #
-# On first run this installs its own tools (esptool + mpremote via pip) — no
-# separate setup step. The check is idempotent, so later runs are instant.
+# On first run this installs its own tools (esptool + mpremote) into a private
+# virtualenv at .venv-flash/ — no separate setup step, nothing installed
+# system-wide, and no PATH changes required. The check is idempotent, so later
+# runs are instant.
 #
 # Students normally edit firmware/esp32-robot/main.py, then run ./scripts/flash-robot.sh.
 set -euo pipefail
@@ -21,6 +23,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJ="${ROOT}/firmware/esp32-robot"
 MPY_DIR="${PROJ}/micropython"
+VENV_DIR="${ROOT}/.venv-flash"
 
 PORT=""
 DO_FIRMWARE=0
@@ -36,51 +39,75 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-OS="$(uname -s)"
 have() { command -v "$1" >/dev/null 2>&1; }
-have_esptool() { have esptool.py || have esptool; }
+
+# Pick a Python to build the venv with (venv module is stdlib in Python 3).
+find_python() {
+  local c
+  for c in python3 python; do
+    if have "$c" && "$c" -c 'import sys,venv; sys.exit(0 if sys.version_info>=(3,8) else 1)' >/dev/null 2>&1; then
+      echo "$c"; return 0
+    fi
+  done
+  return 1
+}
+
+# Path to the venv's python (this is what we invoke everything through — no PATH
+# lookups, no console-script shims, so a $PATH that lacks pip's bin dir is fine).
+PYBIN="${VENV_DIR}/bin/python"
+
+# True if the venv python can already import both tools.
+tools_ready() { [[ -x "$PYBIN" ]] && "$PYBIN" -c 'import esptool, mpremote' >/dev/null 2>&1; }
 
 # --- ensure flash tools (esptool + mpremote) — first-run setup, then a no-op ---
 ensure_tools() {
-  if have_esptool && have mpremote; then
-    return
-  fi
-  command -v python3 >/dev/null 2>&1 || {
-    echo "[error] python3 not found. Install Python 3 and re-run (needed to install esptool + mpremote)." >&2
+  tools_ready && return 0
+
+  local py
+  py="$(find_python)" || {
+    echo "[error] Python 3.8+ not found. Install Python 3 and re-run (needed to install esptool + mpremote)." >&2
     exit 1
   }
-  echo "[info] Installing esptool + mpremote via pip (one time)"
-  python3 -m pip install --user --upgrade esptool mpremote \
-    || { echo "[error] pip install esptool mpremote failed. Try: python3 -m pip install --user esptool mpremote" >&2; exit 1; }
 
-  # pip's --user scripts may not be on PATH in this shell yet; add the usual dir
-  # so the freshly-installed tools are usable without opening a new terminal.
-  if ! have mpremote; then
-    USER_BIN="$(python3 -c 'import site,os; print(os.path.join(site.getuserbase(), "bin"))' 2>/dev/null || true)"
-    [[ -n "$USER_BIN" && -d "$USER_BIN" ]] && export PATH="$USER_BIN:$PATH"
+  if [[ ! -x "$PYBIN" ]]; then
+    echo "[info] Creating tool virtualenv at ${VENV_DIR} (one time)"
+    "$py" -m venv "$VENV_DIR" || {
+      echo "[error] Failed to create virtualenv at ${VENV_DIR} with '$py -m venv'." >&2
+      exit 1
+    }
   fi
-  if ! have mpremote; then
-    echo "[error] 'mpremote' installed but not on PATH. Add your pip user bin dir to PATH, e.g.:" >&2
-    case "$OS" in
-      Darwin) echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc && source ~/.zshrc" >&2 ;;
-      *)      echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc && source ~/.bashrc" >&2 ;;
-    esac
+
+  echo "[info] Installing esptool + mpremote (one time)"
+  "$PYBIN" -m pip install --quiet --upgrade pip >/dev/null 2>&1 || true
+  "$PYBIN" -m pip install --upgrade esptool mpremote || {
+    echo "[error] Failed to install esptool + mpremote into ${VENV_DIR}." >&2
+    echo "        You can retry, or run manually: '$PYBIN -m pip install esptool mpremote'" >&2
     exit 1
-  fi
+  }
+
+  tools_ready || {
+    echo "[error] esptool/mpremote still not importable from ${VENV_DIR} after install." >&2
+    exit 1
+  }
 }
 
 (( SKIP_SETUP )) || ensure_tools
 
-have_esptool || { echo "[error] 'esptool' not found (try without --skip-setup)." >&2; exit 1; }
-have mpremote || { echo "[error] 'mpremote' not found (try without --skip-setup)." >&2; exit 1; }
-ESPTOOL="$(command -v esptool.py || command -v esptool)"
+tools_ready || {
+  echo "[error] esptool + mpremote unavailable. Re-run without --skip-setup to install them." >&2
+  exit 1
+}
+
+# Invoke the tools as modules through the venv python — never via PATH.
+ESPTOOL=("$PYBIN" -m esptool)
+MPREMOTE=("$PYBIN" -m mpremote)
 
 # mpremote device selector, e.g. "connect COM5" / "connect /dev/cu.xxx"
 MPR_DEV=()
 [[ -n "$PORT" ]] && MPR_DEV=(connect "$PORT")
 
 if (( DO_REPL )); then
-  exec mpremote "${MPR_DEV[@]}" repl
+  exec "${MPREMOTE[@]}" ${MPR_DEV[@]+"${MPR_DEV[@]}"} repl
 fi
 
 if (( DO_FIRMWARE )); then
@@ -94,14 +121,14 @@ if (( DO_FIRMWARE )); then
   PORT_ARGS=()
   [[ -n "$PORT" ]] && PORT_ARGS=(--port "$PORT")
   echo "[info] Flashing MicroPython: $(basename "$BIN")"
-  "$ESPTOOL" --chip esp32 "${PORT_ARGS[@]}" erase_flash
-  "$ESPTOOL" --chip esp32 "${PORT_ARGS[@]}" write_flash -z 0x1000 "$BIN"
+  "${ESPTOOL[@]}" --chip esp32 ${PORT_ARGS[@]+"${PORT_ARGS[@]}"} erase_flash
+  "${ESPTOOL[@]}" --chip esp32 ${PORT_ARGS[@]+"${PORT_ARGS[@]}"} write_flash -z 0x1000 "$BIN"
   echo "[info] MicroPython installed. Now run ./scripts/flash-robot.sh to upload your code."
   exit 0
 fi
 
 # Default: upload student code and reboot into it.
 echo "[info] Uploading main.py + minibot.py"
-mpremote "${MPR_DEV[@]}" fs cp "${PROJ}/minibot.py" "${PROJ}/main.py" :
-mpremote "${MPR_DEV[@]}" reset
+"${MPREMOTE[@]}" ${MPR_DEV[@]+"${MPR_DEV[@]}"} fs cp "${PROJ}/minibot.py" "${PROJ}/main.py" :
+"${MPREMOTE[@]}" ${MPR_DEV[@]+"${MPR_DEV[@]}"} reset
 echo "[info] Uploaded and reset. Use --repl to watch output."

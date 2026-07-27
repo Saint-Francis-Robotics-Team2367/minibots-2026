@@ -29,6 +29,8 @@ __pycache__/
 $py.class
 .venv/
 venv/
+# Private virtualenv the flash-robot scripts create for esptool + mpremote.
+.venv-flash/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
