@@ -25,6 +25,13 @@ PROJ="${ROOT}/firmware/esp32-robot"
 MPY_DIR="${PROJ}/micropython"
 VENV_DIR="${ROOT}/.venv-flash"
 
+# Pinned MicroPython firmware for the classic ESP32 (auto-downloaded by
+# --firmware if not already present in MPY_DIR). Keep in sync with
+# firmware/esp32-robot/micropython/README.md.
+MPY_BIN_NAME="ESP32_GENERIC-20260406-v1.28.0.bin"
+MPY_BIN_URL="https://micropython.org/resources/firmware/${MPY_BIN_NAME}"
+MPY_BIN_SHA256="cd7820d02c35d34dd403b44263129c6a511b350aea8446c229890753fe240784"
+
 PORT=""
 DO_FIRMWARE=0
 DO_REPL=0
@@ -130,12 +137,39 @@ fi
 
 if (( DO_FIRMWARE )); then
   BIN="$(ls -1 "${MPY_DIR}"/ESP32_GENERIC-*.bin 2>/dev/null | sort | tail -n1 || true)"
-  [[ -n "$BIN" ]] || {
-    echo "[error] No ESP32_GENERIC-*.bin in ${MPY_DIR}." >&2
-    echo "        Download it from https://micropython.org/download/ESP32_GENERIC/" >&2
-    echo "        (see ${MPY_DIR}/README.md) and place it there." >&2
-    exit 1
-  }
+
+  # No firmware image yet? Download the pinned one automatically (verified by
+  # SHA256). We fetch through the venv Python so this works the same in
+  # PowerShell, Git Bash, macOS and Linux without needing curl/wget on PATH.
+  if [[ -z "$BIN" ]]; then
+    mkdir -p "$MPY_DIR"
+    DEST="${MPY_DIR}/${MPY_BIN_NAME}"
+    echo "[info] No firmware image found. Downloading MicroPython ${MPY_BIN_NAME} (one time)"
+    if ! "$PYBIN" - "$MPY_BIN_URL" "$DEST" "$MPY_BIN_SHA256" <<'PY'
+import sys, hashlib, urllib.request
+url, dest, want = sys.argv[1], sys.argv[2], sys.argv[3].lower()
+try:
+    with urllib.request.urlopen(url, timeout=60) as r, open(dest, "wb") as f:
+        data = r.read()
+        f.write(data)
+except Exception as e:
+    print("[error] download failed: %s" % e, file=sys.stderr); sys.exit(1)
+got = hashlib.sha256(data).hexdigest()
+if got != want:
+    import os; os.remove(dest)
+    print("[error] SHA256 mismatch: got %s, expected %s" % (got, want), file=sys.stderr)
+    sys.exit(1)
+print("[info] Downloaded and verified %d bytes" % len(data))
+PY
+    then
+      echo "[error] Could not download the firmware automatically." >&2
+      echo "        Download ${MPY_BIN_NAME} from https://micropython.org/download/ESP32_GENERIC/" >&2
+      echo "        and place it in ${MPY_DIR} (see its README.md), then re-run." >&2
+      exit 1
+    fi
+    BIN="$DEST"
+  fi
+
   PORT_ARGS=()
   [[ -n "$PORT" ]] && PORT_ARGS=(--port "$PORT")
   echo "[info] Flashing MicroPython: $(basename "$BIN")"

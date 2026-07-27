@@ -64,6 +64,13 @@ $Proj = Join-Path $Root 'firmware\esp32-robot'
 $MpyDir = Join-Path $Proj 'micropython'
 $VenvDir = Join-Path $Root '.venv-flash'
 
+# Pinned MicroPython firmware for the classic ESP32 (auto-downloaded by
+# -Firmware if not already present in $MpyDir). Keep in sync with
+# firmware\esp32-robot\micropython\README.md.
+$MpyBinName   = 'ESP32_GENERIC-20260406-v1.28.0.bin'
+$MpyBinUrl    = "https://micropython.org/resources/firmware/$MpyBinName"
+$MpyBinSha256 = 'cd7820d02c35d34dd403b44263129c6a511b350aea8446c229890753fe240784'
+
 function Have($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 
 # The venv's python (Windows puts it under Scripts\). Everything runs through
@@ -124,10 +131,30 @@ if ($Repl) {
 if ($Firmware) {
   $Bin = Get-ChildItem -Path (Join-Path $MpyDir 'ESP32_GENERIC-*.bin') -ErrorAction SilentlyContinue |
          Sort-Object Name | Select-Object -Last 1
+
+  # No firmware image yet? Download the pinned one automatically (verified by
+  # SHA256), so the user never has to fetch it by hand.
   if (-not $Bin) {
-    throw "No ESP32_GENERIC-*.bin in $MpyDir. Download it from " +
-          "https://micropython.org/download/ESP32_GENERIC/ (see $MpyDir\README.md) and place it there."
+    if (-not (Test-Path $MpyDir)) { New-Item -ItemType Directory -Path $MpyDir -Force | Out-Null }
+    $dest = Join-Path $MpyDir $MpyBinName
+    Write-Host "[info] No firmware image found. Downloading MicroPython $MpyBinName (one time)"
+    try {
+      $ProgressPreference = 'SilentlyContinue'  # faster, quieter download
+      Invoke-WebRequest -Uri $MpyBinUrl -OutFile $dest -UseBasicParsing
+    } catch {
+      throw "Could not download the firmware automatically ($($_.Exception.Message)). " +
+            "Download $MpyBinName from https://micropython.org/download/ESP32_GENERIC/ " +
+            "and place it in $MpyDir (see its README.md), then re-run."
+    }
+    $got = (Get-FileHash -Path $dest -Algorithm SHA256).Hash.ToLower()
+    if ($got -ne $MpyBinSha256) {
+      Remove-Item -Path $dest -Force -ErrorAction SilentlyContinue
+      throw "Firmware SHA256 mismatch: got $got, expected $MpyBinSha256. Download aborted; please re-run."
+    }
+    Write-Host "[info] Downloaded and verified $((Get-Item $dest).Length) bytes"
+    $Bin = Get-Item $dest
   }
+
   $portArgs = @()
   if ($Port) { $portArgs = @('--port', $Port) }
   Write-Host "[info] Flashing MicroPython: $($Bin.Name)"

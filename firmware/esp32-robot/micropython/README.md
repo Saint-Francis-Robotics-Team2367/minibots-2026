@@ -5,17 +5,19 @@ firmware image (`.bin`) lives so `scripts/flash-robot.sh --firmware` can find it
 
 ## Getting the firmware
 
-The `.bin` is **not committed** to the repo (it's large and versioned upstream).
-Download it once from the official site:
+**You normally don't need to do anything here.** The `.bin` is **not committed**
+to the repo (it's large and versioned upstream), so on the first
+`scripts/flash-robot.sh --firmware` (or `.ps1 -Firmware`) the script
+**downloads the pinned firmware into this folder automatically and verifies it
+by SHA256**.
 
-- Download page: <https://micropython.org/download/ESP32_GENERIC/>
 - Pinned version: **v1.28.0** → `ESP32_GENERIC-20260406-v1.28.0.bin`
+- Source: <https://micropython.org/download/ESP32_GENERIC/>
 
-Save the `.bin` into **this folder** (`firmware/esp32-robot/micropython/`).
-`scripts/flash-robot.sh --firmware` picks up the newest `ESP32_GENERIC-*.bin` here.
-
-> Verify the download against the SHA256 published on the download page before
-> flashing.
+Manual fallback (only if the auto-download can't reach the internet): grab that
+`.bin` from the download page and save it into **this folder**
+(`firmware/esp32-robot/micropython/`). `--firmware` picks up the newest
+`ESP32_GENERIC-*.bin` here.
 
 ## What the flash does
 

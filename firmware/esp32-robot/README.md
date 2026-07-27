@@ -14,7 +14,8 @@ firmware/esp32-robot/
 ## One-time: flash MicroPython onto the board
 
 You only do this **once per robot** (or when upgrading MicroPython). It installs
-the Python runtime onto the ESP32.
+the Python runtime onto the ESP32. The firmware image is downloaded and verified
+automatically on first use — you don't need to fetch anything by hand.
 
 ```bash
 # from the repo root
