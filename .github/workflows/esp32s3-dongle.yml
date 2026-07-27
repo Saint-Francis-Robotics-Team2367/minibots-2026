@@ -23,7 +23,11 @@ jobs:
 
       - name: Set target and build
         working-directory: firmware/esp32s3-dongle
+        shell: bash
         run: |
+          # The espressif/idf container ships the SDK but does not put idf.py on
+          # PATH for non-login shells — source the export script first.
+          . "$IDF_PATH/export.sh"
           idf.py set-target esp32s3
           idf.py build
 
