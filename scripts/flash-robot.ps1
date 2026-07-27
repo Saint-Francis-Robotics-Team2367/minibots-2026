@@ -140,8 +140,29 @@ if ($Firmware) {
 }
 
 # Default: upload student code and reboot into it.
+#
+# Opening the serial port resets the ESP32, so mpremote's Ctrl-C to break into
+# the REPL races against the robot's boot + Wi-Fi/ESP-NOW init (during which
+# Python can't be interrupted). When it loses that race you get
+# "could not enter raw repl". Retrying re-runs the race and one attempt lands
+# while the board is interruptible, so a small bounded retry loop is reliable.
 Write-Host "[info] Uploading main.py + minibot.py"
-& $PyBin @MpremoteArgs @MprDev fs cp (Join-Path $Proj 'minibot.py') (Join-Path $Proj 'main.py') :
-if ($LASTEXITCODE -ne 0) { throw "mpremote cp failed (exit $LASTEXITCODE)." }
+$UploadTries = 5
+$uploaded = $false
+for ($try = 1; $try -le $UploadTries; $try++) {
+  & $PyBin @MpremoteArgs @MprDev fs cp (Join-Path $Proj 'minibot.py') (Join-Path $Proj 'main.py') :
+  if ($LASTEXITCODE -eq 0) { $uploaded = $true; break }
+  if ($try -lt $UploadTries) {
+    Write-Host "[warn] Couldn't reach the board (attempt $try/$UploadTries); the running program may be blocking the REPL. Retrying..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 1
+  }
+}
+
+if (-not $uploaded) {
+  throw "Could not upload after $UploadTries tries: mpremote can't interrupt the program running on the robot. " +
+        "Try again — if it keeps failing, hold the board's BOOT button while you start this script, " +
+        "or reflash the MicroPython runtime with:  .\scripts\flash-robot.ps1 -Firmware"
+}
+
 & $PyBin @MpremoteArgs @MprDev reset
 Write-Host "[info] Uploaded and reset. Use -Repl to watch output."

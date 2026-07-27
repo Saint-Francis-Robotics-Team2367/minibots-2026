@@ -128,7 +128,32 @@ if (( DO_FIRMWARE )); then
 fi
 
 # Default: upload student code and reboot into it.
+#
+# Opening the serial port resets the ESP32, so mpremote's Ctrl-C to break into
+# the REPL races against the robot's boot + Wi-Fi/ESP-NOW init (during which
+# Python can't be interrupted). When it loses that race you get
+# "could not enter raw repl". Retrying re-runs the race and one attempt lands
+# while the board is interruptible, so a small bounded retry loop is reliable.
 echo "[info] Uploading main.py + minibot.py"
-"${MPREMOTE[@]}" ${MPR_DEV[@]+"${MPR_DEV[@]}"} fs cp "${PROJ}/minibot.py" "${PROJ}/main.py" :
+UPLOAD_TRIES=5
+uploaded=0
+for (( try=1; try<=UPLOAD_TRIES; try++ )); do
+  if "${MPREMOTE[@]}" ${MPR_DEV[@]+"${MPR_DEV[@]}"} fs cp "${PROJ}/minibot.py" "${PROJ}/main.py" : ; then
+    uploaded=1
+    break
+  fi
+  if (( try < UPLOAD_TRIES )); then
+    echo "[warn] Couldn't reach the board (attempt ${try}/${UPLOAD_TRIES}); the running program may be blocking the REPL. Retrying..." >&2
+    sleep 1
+  fi
+done
+
+if (( ! uploaded )); then
+  echo "[error] Could not upload after ${UPLOAD_TRIES} tries: mpremote can't interrupt the program running on the robot." >&2
+  echo "        Try again — if it keeps failing, hold the board's BOOT button while you start this script," >&2
+  echo "        or reflash the MicroPython runtime with:  ./scripts/flash-robot.sh --firmware" >&2
+  exit 1
+fi
+
 "${MPREMOTE[@]}" ${MPR_DEV[@]+"${MPR_DEV[@]}"} reset
 echo "[info] Uploaded and reset. Use --repl to watch output."
