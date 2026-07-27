@@ -19,13 +19,14 @@ automatically on first use — you don't need to fetch anything by hand.
 
 ```bash
 # from the repo root
-./scripts/flash-robot.sh --firmware            # auto-detects the port
-./scripts/flash-robot.sh --firmware -p /dev/cu.usbserial-XXXX
+./scripts/reset-robot.sh                       # auto-detects the port
+./scripts/reset-robot.sh -p /dev/cu.usbserial-XXXX
 ```
 
-Windows: double-click `scripts\flash-robot.cmd` or run `scripts\flash-robot.ps1 -Firmware`.
+Windows: double-click `scripts\reset-robot.cmd` or run `scripts\reset-robot.ps1`.
 
-See `micropython/README.md` for how to obtain the firmware `.bin`.
+(`reset-robot` is a shortcut for `flash-robot --firmware`; either works.)
+See `micropython/README.md` for details on the firmware `.bin`.
 
 ## Every time: upload your code
 
@@ -35,8 +36,10 @@ the robot:
 ```bash
 ./scripts/flash-robot.sh                       # copies main.py + minibot.py, then reboots
 ./scripts/flash-robot.sh -p /dev/cu.usbserial-XXXX
-./scripts/flash-robot.sh --repl                # open a live Python prompt / see print() output
+./scripts/repl-robot.sh                        # open a live Python prompt / see print() output
 ```
+
+Windows: use the matching `scripts\*.cmd` / `scripts\*.ps1` (e.g. `repl-robot.cmd`).
 
 On power-up the robot waits ~1.5 s before running your `main.py` (you'll see a
 `[boot] Starting in 1500 ms…` message). That pause is the window the upload

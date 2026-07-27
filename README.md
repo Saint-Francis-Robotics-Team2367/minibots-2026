@@ -16,8 +16,9 @@ subsequent runs skip straight to flashing.
 git clone <this-repo> minibots-2026
 cd minibots-2026
 
-./scripts/flash-robot.sh --firmware  # first run installs esptool+mpremote, then installs MicroPython on the ESP32 robot
+./scripts/reset-robot.sh             # first run installs tools + MicroPython on the ESP32 robot (firmware image auto-downloaded)
 ./scripts/flash-robot.sh             # upload your robot code (main.py + minibot.py)
+./scripts/repl-robot.sh              # open a live MicroPython prompt (see print() output)
 ./scripts/flash-dongle.sh            # first run installs ESP-IDF v5.3.2, then builds + flashes the ESP32-S3 dongle
 ```
 
@@ -27,14 +28,16 @@ cd minibots-2026
 git clone <this-repo> minibots-2026
 cd minibots-2026
 
-flash-robot.cmd -Firmware    :: first run installs esptool+mpremote, then installs MicroPython on the ESP32 robot
+reset-robot.cmd              :: first run installs tools + MicroPython on the ESP32 robot (firmware image auto-downloaded)
 flash-robot.cmd              :: upload your robot code (main.py + minibot.py)
+repl-robot.cmd               :: open a live MicroPython prompt (see print() output)
 flash-dongle.cmd             :: first run installs ESP-IDF v5.3.2, then builds + flashes the ESP32-S3 dongle
 ```
 
-> **Robot MicroPython image.** Before `flash-robot.sh --firmware`, download the ESP32 MicroPython
-> `.bin` into `firmware/esp32-robot/micropython/` — see
-> [that folder's README](firmware/esp32-robot/micropython/README.md).
+> **Robot MicroPython image.** `reset-robot` downloads and verifies the pinned ESP32 MicroPython
+> `.bin` into `firmware/esp32-robot/micropython/` automatically — no manual download needed. See
+> [that folder's README](firmware/esp32-robot/micropython/README.md) for the pinned version and an
+> offline fallback.
 
 The `.cmd` files launch the matching `.ps1` with `-ExecutionPolicy Bypass`, so they work even
 when PowerShell's execution policy blocks `.ps1` files directly
@@ -79,13 +82,15 @@ git-ignored `.esp-idf/` and sources that SDK automatically — no manual `export
 
 ### Flash script options
 
-**Robot** (`flash-robot.*`, MicroPython):
+**Robot** (`flash-robot.*`, MicroPython). There are also two convenience
+wrappers: **`reset-robot.*`** (= `flash-robot --firmware`) and **`repl-robot.*`**
+(= `flash-robot --repl`).
 
 | bash (`--flag`) | PowerShell (`-Flag`) | Effect |
 |-----------------|----------------------|--------|
 | `--port /dev/…` (`-p`) | `-Port COM5` | Target a specific serial port (otherwise auto-detected). |
-| `--firmware` | `-Firmware` | One-time: erase + write the MicroPython `.bin`. |
-| `--repl` | `-Repl` | Open a live MicroPython prompt (see `print()` output). |
+| `--firmware` | `-Firmware` | One-time: erase + write MicroPython (image auto-downloaded). Same as `reset-robot.*`. |
+| `--repl` | `-Repl` | Open a live MicroPython prompt (see `print()` output). Same as `repl-robot.*`. |
 | `--skip-setup` | `-SkipSetup` | Skip the first-run `esptool` + `mpremote` install check. |
 | *(no flag)* | *(no flag)* | Upload `main.py` + `minibot.py` and reboot into it. |
 
@@ -108,7 +113,7 @@ scripts remain the source of truth for the pinned versions.
 
 | Path | Description |
 |------|-------------|
-| `flash-robot.*` / `flash-dongle.*` (`.sh`, `.cmd`, `.ps1`) | Flash helpers for each firmware; each installs its own toolchain on first run (robot: esptool + mpremote; dongle: ESP-IDF v5.3.2). Windows: use the `.cmd` launchers. |
+| `flash-robot.*` / `reset-robot.*` / `repl-robot.*` / `flash-dongle.*` (`.sh`, `.cmd`, `.ps1`) | Flash helpers for each firmware; each installs its own toolchain on first run (robot: esptool + mpremote; dongle: ESP-IDF v5.3.2). `reset-robot` = firmware reset, `repl-robot` = live REPL (both wrap `flash-robot`). Windows: use the `.cmd` launchers. |
 | [firmware/common/minicore_protocol.h](firmware/common/minicore_protocol.h) | Shared C structs, USB VID/PID, HID report IDs (keep in sync with JS + `minibot.py`). |
 | [firmware/esp32s3-dongle/](firmware/esp32s3-dongle/) | ESP-IDF project for the Waveshare ESP32-S3-LCD-1.47 class USB HID dongle. |
 | [firmware/esp32-robot/](firmware/esp32-robot/) | MicroPython robot code (classic ESP32) — students edit `main.py`. |
