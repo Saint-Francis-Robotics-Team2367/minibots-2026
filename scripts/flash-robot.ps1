@@ -17,6 +17,9 @@
 .PARAMETER Repl
   Open a live MicroPython prompt (see print() output).
 
+.PARAMETER SkipSetup
+  Don't check/install esptool + mpremote before flashing.
+
 .EXAMPLE
   .\scripts\flash-robot.ps1 -Firmware
   .\scripts\flash-robot.ps1
@@ -24,13 +27,17 @@
   .\scripts\flash-robot.ps1 -Repl
 
 .NOTES
+  On first run this installs its own tools (esptool + mpremote via pip) — no
+  separate setup step. The check is idempotent, so later runs are instant.
+
   Students edit firmware\esp32-robot\main.py, then run .\scripts\flash-robot.ps1.
 #>
 [CmdletBinding()]
 param(
   [string]$Port,
   [switch]$Firmware,
-  [switch]$Repl
+  [switch]$Repl,
+  [switch]$SkipSetup
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,14 +61,43 @@ $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Proj = Join-Path $Root 'firmware\esp32-robot'
 $MpyDir = Join-Path $Proj 'micropython'
 
-if (-not (Get-Command esptool.py -ErrorAction SilentlyContinue) -and
-    -not (Get-Command esptool -ErrorAction SilentlyContinue)) {
-  throw "'esptool' not found. Run .\scripts\setup.ps1 first, then open a NEW terminal."
+function Have($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
+function Have-Esptool { (Have esptool.py) -or (Have esptool) }
+
+# --- ensure flash tools (esptool + mpremote) — first-run setup, then a no-op ---
+function Ensure-Tools {
+  if ((Have-Esptool) -and (Have mpremote)) { return }
+
+  $Python = $null
+  foreach ($c in 'python','python3','py') { if (Have $c) { $Python = $c; break } }
+  if (-not $Python) {
+    throw 'Python not found. Install Python 3 (https://python.org, check "Add to PATH") and re-run (needed to install esptool + mpremote).'
+  }
+
+  Write-Host '[info] Installing esptool + mpremote via pip (one time)'
+  & $Python -m pip install --user --upgrade esptool mpremote
+  if ($LASTEXITCODE -ne 0) { throw "pip install esptool mpremote failed. Try:  $Python -m pip install --user esptool mpremote" }
+
+  # pip's --user Scripts dir may not be on PATH in this session yet; add it so
+  # the freshly-installed tools are usable without opening a new terminal.
+  if (-not (Have mpremote)) {
+    $userBase = & $Python -c 'import site; print(site.getuserbase())' 2>$null
+    if ($userBase) {
+      $userScripts = Join-Path $userBase 'Scripts'
+      if (Test-Path $userScripts) { $env:PATH = "$userScripts;$env:PATH" }
+    }
+  }
+  if (-not (Have mpremote)) {
+    throw "'mpremote' installed but not on PATH. Add your Python user Scripts dir to PATH " +
+          '(e.g. %APPDATA%\Python\Python3X\Scripts — see the pip output above), then open a NEW terminal.'
+  }
 }
-if (-not (Get-Command mpremote -ErrorAction SilentlyContinue)) {
-  throw "'mpremote' not found. Run .\scripts\setup.ps1 first, then open a NEW terminal."
-}
-$Esptool = if (Get-Command esptool.py -ErrorAction SilentlyContinue) { 'esptool.py' } else { 'esptool' }
+
+if (-not $SkipSetup) { Ensure-Tools }
+
+if (-not (Have-Esptool)) { throw "'esptool' not found (try without -SkipSetup)." }
+if (-not (Have mpremote)) { throw "'mpremote' not found (try without -SkipSetup)." }
+$Esptool = if (Have esptool.py) { 'esptool.py' } else { 'esptool' }
 
 # mpremote device selector
 $MprDev = @()
