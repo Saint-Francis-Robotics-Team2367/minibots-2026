@@ -26,6 +26,12 @@
   separate setup step. Later runs just source that SDK and are fast. To use a
   system ESP-IDF instead, set $env:IDF_PATH before running.
 
+  If no ESP-IDF-supported Python (3.9-3.12) is found, this also downloads and
+  installs Python 3.11 for your user account — no administrator rights, checksum
+  verified, and it only touches your persistent PATH when you had no working
+  Python at all. Set $env:MINICORE_NO_PYINSTALL='1' to be told what to install
+  instead of having it done for you.
+
   USB download mode (if flashing fails): hold BOOT, press+release RESET,
   release BOOT, then re-run.
 #>
@@ -96,6 +102,48 @@ function Invoke-Tool {
 $PyMinorMin = 9
 $PyMinorMax = 12
 
+# Pinned interpreter installed automatically when the machine has no supported
+# one. amd64 on purpose, including on ARM64 Windows: the x64 build runs under
+# emulation there and has full wheel coverage, while the native ARM64 build is
+# still marked experimental by python.org and lacks wheels ESP-IDF wants.
+# The SHA256 was computed from the download and cross-checked against the MD5
+# published on https://www.python.org/downloads/release/python-3119/
+$PyInstallVersion = '3.11.9'
+$PyInstallUrl     = "https://www.python.org/ftp/python/$PyInstallVersion/python-$PyInstallVersion-amd64.exe"
+$PyInstallSha256  = '5ee42c4eee1e6b4464bb23722f90b45303f79442df63083f05322f1785f5fdde'
+
+# Run one candidate interpreter and describe it, or return $null if it doesn't
+# run or doesn't answer like a Python. Shared by discovery and post-install
+# verification so both judge an interpreter by the same evidence: its output.
+function Probe-Python($exe, $pre) {
+  # Normalise to a real array: an omitted or $null $pre must become @(), not
+  # @($null), which would hand python.exe a stray empty argument.
+  $preArgs = @(@($pre) | Where-Object { $_ })
+  $probe = 'import sys; print("%d.%d" % sys.version_info[:2]); print(sys.executable)'
+  # -Quiet: a Store stub or a missing `py -3.x` writes to stderr, which is an
+  # expected outcome of probing and must not surface as an error.
+  $out = Invoke-Tool $exe ($preArgs + @('-c', $probe)) -Quiet
+  if ($LASTEXITCODE -ne 0 -or -not $out) { return $null }
+  # Output may arrive as an array of lines or one embedded-newline string;
+  # normalise both, and Trim() takes care of any trailing CR.
+  $lines = @(@($out) | ForEach-Object { "$_" -split "`n" } |
+             ForEach-Object { $_.Trim() } | Where-Object { $_ })
+  if ($lines.Count -lt 2 -or $lines[0] -notmatch '^\d+\.\d+$') { return $null }
+  return [pscustomobject]@{
+    Exe     = $exe
+    Pre     = $preArgs
+    Version = $lines[0]
+    Home    = Split-Path -Parent $lines[1]
+    Label   = (@($exe) + $preArgs) -join ' '
+  }
+}
+
+function Test-PySupported($info) {
+  if (-not $info) { return $false }
+  $parts = $info.Version.Split('.')
+  return ([int]$parts[0] -eq 3 -and [int]$parts[1] -ge $PyMinorMin -and [int]$parts[1] -le $PyMinorMax)
+}
+
 # Find a Python that actually RUNS -- not merely one whose name resolves.
 #
 # Get-Command finds Windows' App Execution Aliases for 'python' and 'python3':
@@ -108,8 +156,6 @@ $PyMinorMax = 12
 # supports. The 'py' launcher is tried first and with explicit versions, since it
 # can reach a supported interpreter even when a too-new one owns bare 'python'.
 function Find-Python {
-  $probe = 'import sys; print("%d.%d" % sys.version_info[:2]); print(sys.executable)'
-
   $candidates = @()
   if (Have py) {
     foreach ($v in '3.12', '3.11', '3.10', '3.9') {
@@ -124,32 +170,110 @@ function Find-Python {
   $result = [pscustomobject]@{ Supported = $null; Working = $null; Tried = $candidates.Count }
 
   foreach ($c in $candidates) {
-    # -Quiet: a Store stub or a missing `py -3.x` writes to stderr, which is an
-    # expected outcome of probing and must not surface as an error.
-    $out = Invoke-Tool $c.Exe ($c.Pre + @('-c', $probe)) -Quiet
-    if ($LASTEXITCODE -ne 0 -or -not $out) { continue }
-    # Output may arrive as an array of lines or one embedded-newline string;
-    # normalise both, and Trim() takes care of any trailing CR.
-    $lines = @(@($out) | ForEach-Object { "$_" -split "`n" } |
-               ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    if ($lines.Count -lt 2 -or $lines[0] -notmatch '^\d+\.\d+$') { continue }
-
-    $info = [pscustomobject]@{
-      Exe     = $c.Exe
-      Pre     = $c.Pre
-      Version = $lines[0]
-      Home    = Split-Path -Parent $lines[1]
-      Label   = (@($c.Exe) + $c.Pre) -join ' '
-    }
+    $info = Probe-Python $c.Exe $c.Pre
+    if (-not $info) { continue }
     if (-not $result.Working) { $result.Working = $info }
-
-    $parts = $lines[0].Split('.')
-    if ([int]$parts[0] -eq 3 -and [int]$parts[1] -ge $PyMinorMin -and [int]$parts[1] -le $PyMinorMax) {
-      $result.Supported = $info
-      break
-    }
+    if (Test-PySupported $info) { $result.Supported = $info; break }
   }
   return $result
+}
+
+# Download and install the pinned Python for the current user, and return its
+# Probe-Python description (or $null if anything went wrong -- callers fall back
+# to manual instructions, so every failure here warns rather than throws).
+#
+# Per-user by design: it needs no administrator rights, so it can't stall behind
+# a UAC prompt the user may not be able to answer, and it's removable from
+# Settings > Apps like any other app.
+function Install-Python {
+  param(
+    # Add the new interpreter to the user's persistent PATH. Only safe when
+    # nothing else already owns the 'python' name -- see the caller.
+    [switch]$PrependUserPath
+  )
+
+  # Windows PowerShell 5.1 still negotiates TLS 1.0 by default on some machines,
+  # and python.org refuses that, so the download fails with a vague "could not
+  # create SSL/TLS secure channel". Opt this process into TLS 1.2 first.
+  try {
+    [Net.ServicePointManager]::SecurityProtocol =
+      [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+  } catch { }
+
+  $exeFile = Join-Path ([IO.Path]::GetTempPath()) "python-$PyInstallVersion-amd64.exe"
+  Info "No supported Python found — downloading Python $PyInstallVersion (~25 MB) from python.org"
+  try {
+    $ProgressPreference = 'SilentlyContinue'   # faster, quieter download
+    Invoke-WebRequest -Uri $PyInstallUrl -OutFile $exeFile -UseBasicParsing
+  } catch {
+    Warn "Python download failed: $($_.Exception.Message)"
+    return $null
+  }
+
+  # This runs an installer, so verifying the pin is a hard gate, not a nicety.
+  $got = (Get-FileHash -Path $exeFile -Algorithm SHA256).Hash.ToLower()
+  if ($got -ne $PyInstallSha256) {
+    Remove-Item $exeFile -Force -ErrorAction SilentlyContinue
+    Warn "Python installer SHA256 mismatch (got $got, expected $PyInstallSha256) — refusing to run it."
+    return $null
+  }
+
+  # Include_launcher registers the `py` launcher, which is what lets Find-Python
+  # reach this interpreter on every later run (as `py -3.11`) even when PATH
+  # never mentions it. Shortcuts/test suite/file associations are all off: this
+  # is a build dependency, not an interpreter the user asked to live with.
+  $instArgs = @(
+    '/quiet', 'InstallAllUsers=0', 'Include_launcher=1', 'Include_pip=1',
+    'Include_test=0', 'Include_doc=0', 'AssociateFiles=0', 'Shortcuts=0',
+    "PrependPath=$(if ($PrependUserPath) { '1' } else { '0' })"
+  )
+  Info 'Installing it for your user account (no administrator rights needed; takes a minute)'
+  # Start-Process -Wait rather than Invoke-Tool: this is a bootstrapper, and we
+  # need it to have finished -- and to hand back a real exit code -- before
+  # looking for python.exe on disk.
+  $code = 1
+  try {
+    $code = (Start-Process -FilePath $exeFile -ArgumentList $instArgs -Wait -PassThru).ExitCode
+  } catch {
+    Warn "Could not run the Python installer: $($_.Exception.Message)"
+    return $null
+  } finally {
+    Remove-Item $exeFile -Force -ErrorAction SilentlyContinue
+  }
+  if ($code -eq 3010) {
+    Warn 'Python installed but Windows wants a reboot (3010); continuing anyway.'
+  } elseif ($code -ne 0) {
+    # 1602 = cancelled, 1618 = another install in progress.
+    Warn "Python installer exited with code $code (1602 = cancelled, 1618 = another install already running)."
+    return $null
+  }
+
+  # A per-user install lands in a predictable place, and PATH edits made by the
+  # installer only reach *new* processes -- so locate python.exe directly rather
+  # than hoping this session can see it.
+  $minor = $PyInstallVersion.Split('.')[1]
+  $exe   = Join-Path $env:LOCALAPPDATA "Programs\Python\Python3$minor\python.exe"
+  if (-not (Test-Path $exe)) {
+    Warn "Python $PyInstallVersion reported success but $exe is missing."
+    return $null
+  }
+  $info = Probe-Python $exe @()
+  if (-not (Test-PySupported $info)) {
+    Warn "Installed Python at $exe did not verify as 3.$PyMinorMin-3.$PyMinorMax."
+    return $null
+  }
+
+  if ($PrependUserPath) {
+    Info "Installed Python $($info.Version) and added it to your PATH."
+  } else {
+    # Deliberately left the persistent PATH alone: another Python already owns
+    # the 'python' name on this machine, and silently repointing it could break
+    # the user's unrelated projects. The `py` launcher plus the process-PATH
+    # prepend in Ensure-Idf cover this build without that side effect.
+    Info "Installed Python $($info.Version) at $exe."
+    Warn "Left your PATH as it was, since another Python already owns 'python' — reach this one with 'py -3.$minor'."
+  }
+  return $info
 }
 
 # --- ensure the repo-local ESP-IDF exists (first-run setup, then a no-op) ---
@@ -158,30 +282,48 @@ function Ensure-Idf {
 
   $py = Find-Python
   $chosen = $py.Supported
+
+  # Nothing usable on this machine? Install the pinned Python instead of sending
+  # the user off to do it by hand. This script already bootstraps a whole
+  # ESP-IDF SDK into .esp-idf on first run, so fetching its one prerequisite is
+  # in keeping -- the difference is that Python can't be repo-local (ESP-IDF's
+  # installer wants a real interpreter, and per-user is the smallest footprint
+  # that gives one).
+  if (-not $chosen -and $env:MINICORE_NO_PYINSTALL -ne '1') {
+    # Take over the persistent PATH only when no working Python exists at all.
+    # If one does, it owns the 'python' name for a reason -- other projects may
+    # depend on it -- and this build doesn't need to win that argument.
+    $chosen = Install-Python -PrependUserPath:(-not $py.Working)
+  }
+
   if (-not $chosen) {
+    $manual = @"
+Install Python 3.11 from https://python.org (check "Add to PATH"), then re-run.
+       ESP-IDF installs its own venv, so 3.11 only needs to be reachable here — it
+       need not become your system default.
+"@
     if ($env:MINICORE_SKIP_PYCHECK -eq '1' -and $py.Working) {
       $chosen = $py.Working
       Warn "Skipping Python version check (MINICORE_SKIP_PYCHECK=1); using $($chosen.Version) ($($chosen.Label))."
     } elseif ($py.Working) {
       throw @"
-Python $($py.Working.Version) ($($py.Working.Label)) is not supported by ESP-IDF v$($IdfVersion.TrimStart('v')).
-       Use Python 3.$PyMinorMin-3.$PyMinorMax (3.11 recommended). Install 3.11 from
-       https://python.org (check "Add to PATH"), then re-run. ESP-IDF installs its own
-       venv, so 3.11 only needs to be on PATH here — it need not be your system default.
+Python $($py.Working.Version) ($($py.Working.Label)) is not supported by ESP-IDF v$($IdfVersion.TrimStart('v')),
+       and installing a supported one automatically didn't work (see above).
+       Use Python 3.$PyMinorMin-3.$PyMinorMax (3.11 recommended). $manual
        Override at your own risk: `$env:MINICORE_SKIP_PYCHECK='1'
 "@
     } elseif ($py.Tried -gt 0) {
       throw @"
-Python appears to be on PATH, but none of the interpreters found actually ran.
-       This is almost always the Microsoft Store stub: 'python' and 'python3'
-       exist under %LOCALAPPDATA%\Microsoft\WindowsApps even with no real Python
-       installed, and only open the Store.
-       Install Python 3.11 from https://python.org (check "Add to PATH"), or turn
-       the stubs off under Settings > Apps > Advanced app settings >
-       App execution aliases, then re-run.
+No working Python, and installing one automatically didn't work (see above).
+       The interpreters on PATH are almost certainly Microsoft Store stubs:
+       'python' and 'python3' exist under %LOCALAPPDATA%\Microsoft\WindowsApps
+       even with no real Python installed, and only open the Store.
+       $manual
+       You can also turn the stubs off under Settings > Apps > Advanced app
+       settings > App execution aliases.
 "@
     } else {
-      throw 'Python not found. Install Python 3.11 (https://python.org, check "Add to PATH") and re-run.'
+      throw "Python not found, and installing it automatically didn't work (see above).`n       $manual"
     }
   }
   Info "Using Python $($chosen.Version) ($($chosen.Label))"

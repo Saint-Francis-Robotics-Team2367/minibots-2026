@@ -46,22 +46,56 @@ die()  { printf '\033[1;31m[error]\033[0m %s\n' "$*" >&2; exit 1; }
 # Only runs when idf.py isn't already on PATH and no system IDF_PATH is set.
 ensure_idf() {
   command -v git >/dev/null 2>&1 || die "git not found. Install git and re-run."
-  command -v python3 >/dev/null 2>&1 || die "python3 not found. Install Python 3.9-3.12 and re-run."
 
   # ESP-IDF v5.3.2 (2024) is tested against Python 3.9-3.12; its pinned tooling can
   # fail to install on 3.13+. Require the supported range, recommend 3.11.
-  local py_ver py_major py_minor
-  py_ver="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
-  py_major="${py_ver%%.*}"; py_minor="${py_ver#*.}"
-  if [[ "${MINICORE_SKIP_PYCHECK:-0}" == "1" ]]; then
-    warn "Skipping Python version check (MINICORE_SKIP_PYCHECK=1); using ${py_ver}."
-  elif [[ "$py_major" -ne 3 || "$py_minor" -lt 9 || "$py_minor" -gt 12 ]]; then
-    die "Python ${py_ver} is not supported by ESP-IDF v${IDF_VERSION#v}.
-       Use Python 3.9-3.12 (3.11 recommended). ESP-IDF installs its own venv, so
-       3.11 only needs to be on PATH here — it need not be your system default.
-       macOS:   brew install python@3.11   (then re-run with python3.11)
-       Windows: install 3.11 from https://python.org
+  #
+  # Probe each candidate by running it and prefer a supported version, rather than
+  # committing to whatever owns the bare `python3` name: on an up-to-date macOS or
+  # distro that is often 3.13+, while a perfectly good python3.11 sits right beside
+  # it. Newest-supported-first so the closest-to-current interpreter wins.
+  PYTHON=""
+  py_ver=""
+  py_working=""
+  py_working_ver=""
+  for cand in python3.12 python3.11 python3.10 python3.9 python3 python; do
+    command -v "$cand" >/dev/null 2>&1 || continue
+    v="$("$cand" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)" || continue
+    [[ "$v" =~ ^3\.[0-9]+$ ]] || continue
+    [[ -n "$py_working" ]] || { py_working="$cand"; py_working_ver="$v"; }
+    minor="${v#*.}"
+    if (( minor >= 9 && minor <= 12 )); then PYTHON="$cand"; py_ver="$v"; break; fi
+  done
+
+  if [[ "${MINICORE_SKIP_PYCHECK:-0}" == "1" && -z "$PYTHON" && -n "$py_working" ]]; then
+    PYTHON="$py_working"; py_ver="$py_working_ver"
+    warn "Skipping Python version check (MINICORE_SKIP_PYCHECK=1); using ${py_ver} (${PYTHON})."
+  elif [[ -z "$PYTHON" ]]; then
+    # No auto-install here, unlike the Windows scripts: every mechanism available
+    # on this side is either privileged (apt/dnf need sudo) or reshapes a package
+    # manager the user owns (brew), and doing that unasked is worse than asking.
+    hint="       macOS:   brew install python@3.11
+       Debian/Ubuntu: sudo apt-get install -y python3.11 python3.11-venv"
+    if [[ -n "$py_working" ]]; then
+      die "Python ${py_working_ver} (${py_working}) is not supported by ESP-IDF v${IDF_VERSION#v}.
+       Use Python 3.9-3.12 (3.11 recommended); it only needs to be installed, not
+       your default — this script finds python3.11 on PATH by name.
+${hint}
        Override at your own risk: set MINICORE_SKIP_PYCHECK=1"
+    fi
+    die "No working Python found. Install Python 3.9-3.12 (3.11 recommended) and re-run.
+${hint}"
+  fi
+  info "Using Python ${py_ver} (${PYTHON})"
+
+  # ESP-IDF's install.sh runs bare `python3` from PATH rather than the interpreter
+  # chosen above, so give it a directory where `python3` IS that interpreter.
+  # Without this, selecting python3.11 here would still hand ESP-IDF whatever
+  # too-new python3 happens to be first on PATH.
+  if [[ "$PYTHON" != "python3" ]]; then
+    PY_SHIM_DIR="$(mktemp -d)"
+    ln -sf "$(command -v "$PYTHON")" "${PY_SHIM_DIR}/python3"
+    export PATH="${PY_SHIM_DIR}:${PATH}"
   fi
 
   if ! command -v cmake >/dev/null 2>&1; then

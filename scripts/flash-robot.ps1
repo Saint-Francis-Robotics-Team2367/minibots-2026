@@ -32,6 +32,11 @@
   system-wide, and no PATH changes required. The check is idempotent, so later
   runs are instant.
 
+  If no working Python is found at all, it also downloads and installs Python
+  3.11 for your user account (no administrator rights, checksum verified) and
+  adds it to your PATH. Set $env:MINICORE_NO_PYINSTALL='1' to be told what to
+  install instead of having it done for you.
+
   Students edit firmware\esp32-robot\main.py, then run .\scripts\flash-robot.ps1.
 #>
 [CmdletBinding()]
@@ -71,6 +76,8 @@ $MpyBinName   = 'ESP32_GENERIC-20260406-v1.28.0.bin'
 $MpyBinUrl    = "https://micropython.org/resources/firmware/$MpyBinName"
 $MpyBinSha256 = 'cd7820d02c35d34dd403b44263129c6a511b350aea8446c229890753fe240784'
 
+function Info($m) { Write-Host "[info] $m" }
+function Warn($m) { Write-Host "[warn] $m" -ForegroundColor Yellow }
 function Have($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 
 # Run an external tool (python/pip/esptool/mpremote) and let the CALLER decide
@@ -104,6 +111,100 @@ function Invoke-Tool {
   if ($Quiet) { & $Exe @Arguments *> $null } else { & $Exe @Arguments }
 }
 
+# Pinned interpreter installed automatically when the machine has no working
+# Python at all. Keep in sync with scripts\flash-dongle.ps1 -- the version is
+# chosen there, to satisfy ESP-IDF v5.3.2's supported 3.9-3.12 range; this script
+# only needs "some Python 3" and shares the pin so one machine ends up with one
+# interpreter. amd64 on purpose, including on ARM64 Windows: it runs under
+# emulation there and has full wheel coverage, while the native ARM64 build is
+# still experimental. The SHA256 was computed from the download and
+# cross-checked against the MD5 published on python.org.
+$PyInstallVersion = '3.11.9'
+$PyInstallUrl     = "https://www.python.org/ftp/python/$PyInstallVersion/python-$PyInstallVersion-amd64.exe"
+$PyInstallSha256  = '5ee42c4eee1e6b4464bb23722f90b45303f79442df63083f05322f1785f5fdde'
+
+# Download and install the pinned Python for the current user; return the path to
+# its python.exe, or $null if anything went wrong (the caller falls back to
+# manual instructions, so every failure here warns rather than throws).
+#
+# Per-user by design: no administrator rights, so it can't stall behind a UAC
+# prompt a student may not be able to answer, and it uninstalls from Settings >
+# Apps like any other app. PrependPath=1 is safe here because this only runs when
+# no working Python was found, so nothing else owns the 'python' name.
+function Install-Python {
+  # Windows PowerShell 5.1 still negotiates TLS 1.0 by default on some machines
+  # and python.org refuses that, failing with a vague "could not create SSL/TLS
+  # secure channel". Opt this process into TLS 1.2 first.
+  try {
+    [Net.ServicePointManager]::SecurityProtocol =
+      [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+  } catch { }
+
+  $exeFile = Join-Path ([IO.Path]::GetTempPath()) "python-$PyInstallVersion-amd64.exe"
+  Info "No Python found — downloading Python $PyInstallVersion (~25 MB) from python.org"
+  try {
+    $ProgressPreference = 'SilentlyContinue'   # faster, quieter download
+    Invoke-WebRequest -Uri $PyInstallUrl -OutFile $exeFile -UseBasicParsing
+  } catch {
+    Warn "Python download failed: $($_.Exception.Message)"
+    return $null
+  }
+
+  # This runs an installer, so verifying the pin is a hard gate, not a nicety.
+  $got = (Get-FileHash -Path $exeFile -Algorithm SHA256).Hash.ToLower()
+  if ($got -ne $PyInstallSha256) {
+    Remove-Item $exeFile -Force -ErrorAction SilentlyContinue
+    Warn "Python installer SHA256 mismatch (got $got, expected $PyInstallSha256) — refusing to run it."
+    return $null
+  }
+
+  # Include_launcher registers `py`, so later runs can find this interpreter even
+  # if PATH changes. Shortcuts/docs/test suite/file associations stay off: this is
+  # a build dependency, not an interpreter the user asked to live with.
+  $instArgs = @(
+    '/quiet', 'InstallAllUsers=0', 'PrependPath=1', 'Include_launcher=1',
+    'Include_pip=1', 'Include_test=0', 'Include_doc=0', 'AssociateFiles=0',
+    'Shortcuts=0'
+  )
+  Info 'Installing it for your user account (no administrator rights needed; takes a minute)'
+  # Start-Process -Wait rather than Invoke-Tool: this is a bootstrapper, and it
+  # must have finished -- and returned a real exit code -- before we look for
+  # python.exe on disk.
+  $code = 1
+  try {
+    $code = (Start-Process -FilePath $exeFile -ArgumentList $instArgs -Wait -PassThru).ExitCode
+  } catch {
+    Warn "Could not run the Python installer: $($_.Exception.Message)"
+    return $null
+  } finally {
+    Remove-Item $exeFile -Force -ErrorAction SilentlyContinue
+  }
+  if ($code -eq 3010) {
+    Warn 'Python installed but Windows wants a reboot (3010); continuing anyway.'
+  } elseif ($code -ne 0) {
+    # 1602 = cancelled, 1618 = another install in progress.
+    Warn "Python installer exited with code $code (1602 = cancelled, 1618 = another install already running)."
+    return $null
+  }
+
+  # PrependPath only reaches *new* processes, so this session still can't see the
+  # new interpreter by name. A per-user install lands in a predictable place --
+  # use the full path, and confirm it actually runs before trusting it.
+  $minor = $PyInstallVersion.Split('.')[1]
+  $exe   = Join-Path $env:LOCALAPPDATA "Programs\Python\Python3$minor\python.exe"
+  if (-not (Test-Path $exe)) {
+    Warn "Python $PyInstallVersion reported success but $exe is missing."
+    return $null
+  }
+  Invoke-Tool $exe @('-c', 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)') -Quiet
+  if ($LASTEXITCODE -ne 0) {
+    Warn "Installed Python at $exe did not run as Python 3."
+    return $null
+  }
+  Info "Installed Python $PyInstallVersion and added it to your PATH."
+  return $exe
+}
+
 # The venv's python (Windows puts it under Scripts\). Everything runs through
 # this as `python -m ...`, so no console-script shim or PATH entry is needed.
 $PyBin = Join-Path $VenvDir 'Scripts\python.exe'
@@ -133,19 +234,31 @@ function Ensure-Tools {
     Invoke-Tool $c @('-c', 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)') -Quiet
     if ($LASTEXITCODE -eq 0) { $Python = $c; break }
   }
+  # No working interpreter? Install the pinned one rather than sending the user
+  # off to do it by hand. This script already bootstraps its own tools into
+  # .venv-flash on first run, so fetching the one prerequisite it can't put there
+  # is in keeping.
+  if (-not $Python -and $env:MINICORE_NO_PYINSTALL -ne '1') {
+    $Python = Install-Python
+  }
+
   if (-not $Python) {
     if ($tried -gt 0) {
       throw @"
-Python appears to be on PATH, but none of the interpreters found actually ran.
-       This is almost always the Microsoft Store stub: 'python' and 'python3'
-       exist under %LOCALAPPDATA%\Microsoft\WindowsApps even with no real Python
-       installed, and only open the Store.
+No working Python, and installing one automatically didn't work (see above).
+       The interpreters on PATH are almost certainly Microsoft Store stubs:
+       'python' and 'python3' exist under %LOCALAPPDATA%\Microsoft\WindowsApps
+       even with no real Python installed, and only open the Store.
        Install Python 3 from https://python.org (check "Add to PATH"), or turn the
        stubs off under Settings > Apps > Advanced app settings >
        App execution aliases, then re-run.
 "@
     }
-    throw 'Python not found. Install Python 3 (https://python.org, check "Add to PATH") and re-run (needed to install esptool + mpremote).'
+    throw @"
+Python not found, and installing it automatically didn't work (see above).
+       Install Python 3 from https://python.org (check "Add to PATH") and re-run
+       (it's needed to install esptool + mpremote).
+"@
   }
 
   # A venv directory can exist without a working python inside it (an

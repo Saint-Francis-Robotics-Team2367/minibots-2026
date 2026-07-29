@@ -69,19 +69,33 @@ git-ignored `.esp-idf/` and sources that SDK automatically — no manual `export
 > cache (`~/.espressif`), shared across projects. All of it is one-time; the flash script's
 > first-run install is incremental on later runs.
 
-**Prerequisites** the scripts expect already present: `git`, **Python 3.9–3.12**, and
-`cmake`/`ninja` (for the dongle's ESP-IDF).
+**Prerequisites** the scripts expect already present: `git` and `cmake`/`ninja` (for the
+dongle's ESP-IDF). **Python 3.9–3.12** is needed too, but on Windows the scripts install it
+for you if it's missing.
 
 > **Python version matters.** ESP-IDF v5.3.2 is only tested against **Python 3.9–3.12** —
 > **3.11 is recommended**. Newer Pythons (3.13/3.14) can fail to install ESP-IDF's pinned
-> tooling, so `flash-dongle` refuses its first-run install on them (the robot flash has no such
-> restriction). ESP-IDF creates its own virtualenv, so 3.11 only needs to be on PATH when
-> `flash-dongle` installs it — it doesn't have to be your system default.
+> tooling, so `flash-dongle` won't build with them (the robot flash has no such restriction).
+> Both scripts pick an interpreter by *running* each candidate, so an installed `python3.11`
+> is found even when a newer Python owns the plain `python`/`python3` name — 3.11 doesn't
+> have to be your system default.
 
-- macOS: `brew install python@3.11 cmake ninja dfu-util` (then run `flash-dongle.sh` with `python3.11` on PATH)
+> **Windows installs Python automatically.** If `flash-dongle.ps1`/`flash-robot.ps1` find no
+> supported interpreter, they download Python 3.11 from python.org, verify its SHA256, and
+> install it for your user account only (no administrator rights, no UAC prompt). They add it
+> to your PATH only when you had no working Python at all — if you already have one, it stays
+> in charge of the `python` name and the new one is reached via `py -3.11`. To be told what to
+> install instead, set `$env:MINICORE_NO_PYINSTALL='1'`.
+>
+> The `.sh` scripts don't auto-install: every option there is either privileged (`apt`/`dnf`
+> need `sudo`) or reshapes a package manager you own (`brew`), so they print the one command
+> to run instead.
+
+- macOS: `brew install python@3.11 cmake ninja dfu-util`
 - Debian/Ubuntu: `sudo apt-get install -y python3.11 cmake ninja-build dfu-util`
-- Windows: install [Git for Windows](https://git-scm.com), [Python 3.11](https://python.org/downloads/release/python-3119/)
-  (check *Add to PATH*), and `winget install Kitware.CMake`.
+- Windows: install [Git for Windows](https://git-scm.com) and `winget install Kitware.CMake`
+  (Python is handled for you; to do it by hand, use
+  [Python 3.11](https://python.org/downloads/release/python-3119/) with *Add to PATH* checked).
 
 ### Flash script options
 
