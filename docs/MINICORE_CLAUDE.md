@@ -322,7 +322,9 @@ Fallback options if 2.4GHz is completely unusable:
 ### Robot (ESP32)
 
 - **Framework**: **MicroPython** (students write `main.py`; the `Minibot` library in `minibot.py` wraps ESP-NOW + PWM). See `firmware/esp32-robot/`.
-- **Key modules**: `espnow`, `network`, `machine.PWM` (50 Hz servo/ESC pulses via `duty_ns()`)
+- **Key modules**: `espnow`, `network`, `machine.PWM` (50 Hz servo/ESC pulses via `duty_u16()`)
+- **PWM calibration** (from the retired C++/Arduino firmware, see `old-code/`): neutral **1758 µs**, ±**391 µs** at full stick, clamped to 1000–2500 µs. Stick deadband ±2000/32767.
+- **Neutral must be passed to the `PWM()` constructor** (`duty_u16=...`). A bare `PWM(pin, freq=50)` defaults to duty_u16 = 32768 on the ESP32 port — a 10 ms pulse, which ESCs read as far past full throttle, so the motors run the instant `begin()` executes. `duty_ns` can't be used in the constructor (it raises "PWM is inactive" before a timer is assigned), hence `duty_u16`.
 
 ### Browser UI
 

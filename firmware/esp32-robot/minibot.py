@@ -49,14 +49,34 @@ assert struct.calcsize(_FMT_DISCOVERY_REQ) == 2
 assert struct.calcsize(_FMT_DISCOVERY_RESP) == 24
 
 # --- PWM calibration (matches old C++ firmware) ---
+# The old code drove the ESCs with a 50 Hz / 10-bit LEDC timer and wrote duty
+# 90 for neutral: 90 / 1024 * 20000us = 1757.8us. Full stick was +/- 20 duty
+# counts = +/- 390.6us. Those are the numbers below.
+_PWM_FREQ_HZ = 50
 _PWM_CENTER_US = 1758   # neutral pulse width
 _PWM_RANGE_US = 391     # +/- swing at full stick
 _PWM_MIN_US = 1000
 _PWM_MAX_US = 2500
 
+# Stick deadband, as a fraction of full travel. Matches the old firmware's
+# `if (abs(axis) < 2000) axis = 0` (2000 / 32767). Without this, a controller
+# that rests slightly off-center makes the robot creep.
+_DEADBAND = 2000.0 / 32767.0
+
 
 def _clamp(v, lo, hi):
     return lo if v < lo else hi if v > hi else v
+
+
+def _us_to_duty_u16(us):
+    """Convert a servo pulse width (microseconds) to MicroPython's 16-bit duty.
+
+    We work in duty_u16 rather than duty_ns because duty_ns is rejected in the
+    PWM() constructor on the ESP32 port ("PWM is inactive" — it needs a timer
+    that isn't assigned yet), and we must set neutral in the constructor. See
+    _init_motor_pwm().
+    """
+    return int((us * 65536 * _PWM_FREQ_HZ + 500000) // 1000000)
 
 
 class Minibot:
@@ -97,7 +117,14 @@ class Minibot:
     # --- lifecycle -----------------------------------------------------------
 
     def begin(self):
-        """Bring up Wi-Fi, ESP-NOW and the motor outputs. Call once."""
+        """Bring up the motor outputs, Wi-Fi and ESP-NOW. Call once."""
+        # Motors FIRST, at neutral: bringing up Wi-Fi takes a moment, and until
+        # a PWM channel drives these pins they float, which some ESCs latch onto
+        # as a throttle command. Get a valid neutral pulse train out immediately.
+        self._left_pwm = self._init_motor_pwm(self._left_pin)
+        self._right_pwm = self._init_motor_pwm(self._right_pin)
+        self.stop_all_motors()
+
         # Wi-Fi STA on the shared channel (no AP association; ESP-NOW only).
         self._sta = network.WLAN(network.STA_IF)
         self._sta.active(True)
@@ -114,11 +141,6 @@ class Minibot:
         self._espnow.active(True)
         # Broadcast peer is required before we can send heartbeats/discovery.
         self._add_peer(_BROADCAST)
-
-        # Motor outputs as 50 Hz servo/ESC PWM.
-        self._left_pwm = PWM(Pin(self._left_pin), freq=50)
-        self._right_pwm = PWM(Pin(self._right_pin), freq=50)
-        self.stop_all_motors()
 
         now = time.ticks_ms()
         self._last_joystick_ms = now
@@ -139,10 +161,12 @@ class Minibot:
 
         now = time.ticks_ms()
 
-        # Failsafe: neutral motors when disabled or link is stale.
-        if not self._enabled:
-            self.stop_all_motors()
-        elif time.ticks_diff(now, self._last_joystick_ms) > MC_MOTOR_TIMEOUT_MS:
+        # Failsafe: neutral motors when disabled or link is stale. Also zero the
+        # cached axes, so a main.py that drives from the sticks can't be handed
+        # the last-known (possibly full-throttle) values from before the link
+        # dropped — otherwise it would immediately undo this stop.
+        if not self._enabled or time.ticks_diff(now, self._last_joystick_ms) > MC_MOTOR_TIMEOUT_MS:
+            self._zero_inputs()
             self.stop_all_motors()
 
         # Heartbeat so the dongle/web UI knows we're alive.
@@ -152,17 +176,22 @@ class Minibot:
 
     # --- inputs (normalized -1.0..1.0) --------------------------------------
 
+    def _stick(self, raw):
+        """Normalize a stick axis and swallow the resting-center jitter."""
+        value = raw / 32767.0
+        return 0.0 if -_DEADBAND < value < _DEADBAND else value
+
     def get_left_x(self):
-        return self._axis_lx / 32767.0
+        return self._stick(self._axis_lx)
 
     def get_left_y(self):
-        return self._axis_ly / 32767.0
+        return self._stick(self._axis_ly)
 
     def get_right_x(self):
-        return self._axis_rx / 32767.0
+        return self._stick(self._axis_rx)
 
     def get_right_y(self):
-        return self._axis_ry / 32767.0
+        return self._stick(self._axis_ry)
 
     def get_left_trigger(self):
         return self._axis_lt / 32767.0
@@ -204,6 +233,30 @@ class Minibot:
 
     # --- internals -----------------------------------------------------------
 
+    def _zero_inputs(self):
+        self._axis_lx = 0
+        self._axis_ly = 0
+        self._axis_rx = 0
+        self._axis_ry = 0
+        self._axis_lt = 0
+        self._axis_rt = 0
+        self._buttons = 0
+
+    def _init_motor_pwm(self, pin):
+        """Create a motor PWM that is already at neutral on its first output edge.
+
+        The duty MUST be passed to the PWM() constructor. If it isn't, the ESP32
+        port defaults the channel to duty_u16 = 32768 (50% of a 20 ms period =
+        a 10 ms pulse). ESCs read that as far beyond full throttle, so the wheels
+        spin the instant begin() runs — before the radio is even up. Setting the
+        duty afterwards is too late: the pin is already driving.
+        """
+        return PWM(
+            Pin(pin),
+            freq=_PWM_FREQ_HZ,
+            duty_u16=_us_to_duty_u16(_PWM_CENTER_US),
+        )
+
     def _motor_write(self, pwm, value):
         value = _clamp(value, -1.0, 1.0)
         self._pulse_us(pwm, _PWM_CENTER_US + int(value * _PWM_RANGE_US))
@@ -212,7 +265,7 @@ class Minibot:
         if pwm is None:
             return
         us = _clamp(us, _PWM_MIN_US, _PWM_MAX_US)
-        pwm.duty_ns(int(us) * 1000)
+        pwm.duty_u16(_us_to_duty_u16(us))
 
     def _add_peer(self, mac):
         try:
