@@ -323,7 +323,18 @@ Fallback options if 2.4GHz is completely unusable:
 
 - **Framework**: **MicroPython** (students write `main.py`; the `Minibot` library in `minibot.py` wraps ESP-NOW + PWM). See `firmware/esp32-robot/`.
 - **Key modules**: `espnow`, `network`, `machine.PWM` (50 Hz servo/ESC pulses via `duty_u16()`)
-- **PWM calibration** (from the retired C++/Arduino firmware, see `old-code/`): neutral **1758 µs**, ±**391 µs** at full stick, clamped to 1000–2500 µs. Stick deadband ±2000/32767.
+- **PWM calibration** — matched to the ESC datasheet:
+
+  | Spec | Datasheet | Code |
+  |------|-----------|------|
+  | Pulse high time | 1–2 ms nominal, 1.5 ms center | `_PWM_MIN_US=1000`, `_PWM_CENTER_US=1500`, `_PWM_MAX_US=2000` |
+  | Period | 2.9–100 ms (≈10–345 Hz) | `_PWM_FREQ_HZ=50` → 20 ms (mid-range) |
+  | Logic high min 1.0 V / low max 0.4 V | — | ESP32 GPIO drives 0/3.3 V push-pull ✓ |
+  | Input current | <1 mA | Direct GPIO, no buffer needed ✓ |
+  | Deadband | 4% default (0.1–25%) | ESC-side; our *stick* deadband is ±2000/32767 ≈ 6.1% (±30.5 µs), wider, so the ESC's is covered |
+
+  Overridable per robot via `Minibot(..., neutral_us=, range_us=)`; both are clamped into the 1–2 ms window so a typo can't emit an out-of-spec pulse.
+- **Do not reuse the old firmware's 1758 µs / ±391 µs.** Those came from the original Arduino library writing LEDC duty `90` on a 10-bit 50 Hz timer (`90/1024*20000 = 1757.8 µs`) — a trim value for that specific hardware, not a true neutral. The servo helper in that same old file used `0.01*angle + 1.5` (1500 µs at rest). Carrying 1758 µs into the MicroPython port made every robot hold ~50% throttle at "neutral", spinning the wheels on power-up.
 - **Neutral must be passed to the `PWM()` constructor** (`duty_u16=...`). A bare `PWM(pin, freq=50)` defaults to duty_u16 = 32768 on the ESP32 port — a 10 ms pulse, which ESCs read as far past full throttle, so the motors run the instant `begin()` executes. `duty_ns` can't be used in the constructor (it raises "PWM is inactive" before a timer is assigned), hence `duty_u16`.
 
 ### Browser UI

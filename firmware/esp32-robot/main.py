@@ -38,6 +38,11 @@ from minibot import Minibot
 # Create your robot. Put YOUR robot's name in the quotes so it shows up in the
 # driver station. Change the pins if your motors are wired differently, and
 # make sure `channel` matches the dongle (default 6).
+#
+# If your wheels creep or spin while the sticks are centered, your ESCs want a
+# different neutral pulse. Add neutral_us= and adjust it until the robot sits
+# still (1500 is the RC standard; try 20-30 us at a time):
+#     bot = Minibot("MiniBot1", ..., neutral_us=1500)
 bot = Minibot("MiniBot1", left_motor_pin=16, right_motor_pin=17, channel=6)
 
 bot.begin()

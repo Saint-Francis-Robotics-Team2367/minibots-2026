@@ -48,20 +48,34 @@ assert struct.calcsize(_FMT_HEARTBEAT) == 26
 assert struct.calcsize(_FMT_DISCOVERY_REQ) == 2
 assert struct.calcsize(_FMT_DISCOVERY_RESP) == 24
 
-# --- PWM calibration (matches old C++ firmware) ---
-# The old code drove the ESCs with a 50 Hz / 10-bit LEDC timer and wrote duty
-# 90 for neutral: 90 / 1024 * 20000us = 1757.8us. Full stick was +/- 20 duty
-# counts = +/- 390.6us. Those are the numbers below.
+# --- PWM calibration ---
+# Matched to the ESC datasheet:
+#   Pulse high time  1-2 ms nominal, 1.5 ms center   -> MIN/CENTER/MAX below
+#   Period           2.9-100 ms (~10-345 Hz)         -> 50 Hz = 20 ms, mid-range
+#   Logic high min   1.0 V / low max 0.4 V           -> ESP32 drives 0/3.3 V, fine
+#   Input current    <1 mA                           -> direct GPIO, no buffer
+#   Deadband         4% default (0.1-25% adjustable) -> see _DEADBAND note
+#
+# NOTE: the retired C++ firmware used 1758us +/- 391us (clamp 1000-2500us). The
+# very old Arduino library wrote LEDC duty 90 on a 10-bit 50 Hz timer
+# (90 / 1024 * 20000us = 1757.8us); that was a trim value for *that* hardware's
+# ESCs, not a real neutral -- the servo helper in the same old file used
+# `0.01 * angle + 1.5`, i.e. 1500us at rest. Carrying 1758us over meant every
+# robot held ~50% throttle at "neutral" and the wheels spun on power-up, and the
+# 2500us clamp allowed pulses 500us past this ESC's 2 ms maximum.
+# If your ESCs need a different center, pass neutral_us= (see Minibot.__init__).
 _PWM_FREQ_HZ = 50
-_PWM_CENTER_US = 1758   # neutral pulse width
-_PWM_RANGE_US = 391     # +/- swing at full stick
+_PWM_CENTER_US = 1500   # neutral pulse width (motors stopped)
+_PWM_RANGE_US = 500     # +/- swing at full stick
 _PWM_MIN_US = 1000
-_PWM_MAX_US = 2500
+_PWM_MAX_US = 2000
 
-# Stick deadband, as a fraction of full travel. Matches the old firmware's
-# `if (abs(axis) < 2000) axis = 0` (2000 / 32767). Without this, a controller
-# that rests slightly off-center makes the robot creep.
-_DEADBAND = 2000.0 / 32767.0
+# Stick deadband, as a fraction of full travel (carried over from the old
+# firmware's `if (abs(axis) < 2000) axis = 0`). This is a *stick* deadband, so a
+# controller resting off-center doesn't make the robot creep; it is separate
+# from -- and wider than -- the ESC's own 4% throttle deadband (+/-20us of the
+# 500us travel), so the ESC's deadband is fully covered either way.
+_DEADBAND = 2000.0 / 32767.0  # ~6.1% of stick travel = +/-30.5us of pulse
 
 
 def _clamp(v, lo, hi):
@@ -87,11 +101,22 @@ class Minibot:
     STANDBY = 0
     TELEOP = 1
 
-    def __init__(self, robot_id, left_motor_pin=16, right_motor_pin=17, channel=6):
+    def __init__(self, robot_id, left_motor_pin=16, right_motor_pin=17, channel=6,
+                 neutral_us=_PWM_CENTER_US, range_us=_PWM_RANGE_US):
+        """neutral_us / range_us calibrate the ESC pulse widths.
+
+        Defaults match the ESC datasheet: 1500 us center, +/- 500 us at full
+        stick (1-2 ms). If your robot creeps when the sticks are centered, nudge
+        neutral_us until it sits still (see the calibration note in main.py).
+        """
         self._robot_id = robot_id[:MC_ROBOT_ID_MAX]
         self._left_pin = left_motor_pin
         self._right_pin = right_motor_pin
         self._channel = channel
+        # Keep the calibration inside the ESC's 1-2 ms pulse window: a typo here
+        # would otherwise be driven straight to the motors as a real command.
+        self._neutral_us = _clamp(neutral_us, _PWM_MIN_US, _PWM_MAX_US)
+        self._range_us = _clamp(range_us, 0, _PWM_RANGE_US)
 
         # Controller state (raw int16 axes, -32767..32767; neutral 0)
         self._axis_lx = 0
@@ -228,8 +253,8 @@ class Minibot:
         self._motor_write(self._right_pwm, value)
 
     def stop_all_motors(self):
-        self._pulse_us(self._left_pwm, _PWM_CENTER_US)
-        self._pulse_us(self._right_pwm, _PWM_CENTER_US)
+        self._pulse_us(self._left_pwm, self._neutral_us)
+        self._pulse_us(self._right_pwm, self._neutral_us)
 
     # --- internals -----------------------------------------------------------
 
@@ -254,12 +279,12 @@ class Minibot:
         return PWM(
             Pin(pin),
             freq=_PWM_FREQ_HZ,
-            duty_u16=_us_to_duty_u16(_PWM_CENTER_US),
+            duty_u16=_us_to_duty_u16(self._neutral_us),
         )
 
     def _motor_write(self, pwm, value):
         value = _clamp(value, -1.0, 1.0)
-        self._pulse_us(pwm, _PWM_CENTER_US + int(value * _PWM_RANGE_US))
+        self._pulse_us(pwm, self._neutral_us + int(value * self._range_us))
 
     def _pulse_us(self, pwm, us):
         if pwm is None:
