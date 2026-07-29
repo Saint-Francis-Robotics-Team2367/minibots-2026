@@ -117,7 +117,7 @@ scripts remain the source of truth for the pinned versions.
 | [firmware/common/minicore_protocol.h](firmware/common/minicore_protocol.h) | Shared C structs, USB VID/PID, HID report IDs (keep in sync with JS + `minibot.py`). |
 | [firmware/esp32s3-dongle/](firmware/esp32s3-dongle/) | ESP-IDF project for the Waveshare ESP32-S3-LCD-1.47 class USB HID dongle. |
 | [firmware/esp32-robot/](firmware/esp32-robot/) | MicroPython robot code (classic ESP32) — students edit `main.py`. |
-| [web/](web/) | Static driver station (Chrome or Edge; HTTPS or localhost). |
+| [web/](web/) | Static driver station (Chrome or Edge; HTTPS or localhost). Deployed to <https://minibots.team2367.org>. |
 
 ## USB identity (WebHID filter)
 
@@ -176,15 +176,38 @@ CI builds the dongle firmware on every change and uploads flashable artifacts
 
 ## Web driver station
 
-Serve [web/](web/) over **HTTPS** or **http://localhost** (WebHID requirement):
+**Live: <https://minibots.team2367.org>** — the deployed driver station. Open it in Chrome or
+Edge, connect the dongle, run **Scan**, **Pair** a slot to a robot, enable **Global enable**, and
+use gamepads at indices **0–3** matching each slot.
+
+To run it locally instead, serve [web/](web/) over **HTTPS** or **http://localhost** (WebHID
+requirement) and open `http://localhost:8080`:
 
 ```bash
 cd web
 python3 -m http.server 8080
 ```
 
-Open `http://localhost:8080`, connect the dongle, run **Scan**, **Pair** a slot to a robot,
-enable **Global enable**, and use gamepads at indices **0–3** matching each slot.
+### Deploying
+
+`web/` is hosted on Firebase Hosting (project `minibots-2367`, configured in
+[firebase.json](firebase.json) / [.firebaserc](.firebaserc)). To publish changes:
+
+```bash
+firebase deploy --only hosting
+```
+
+`minibots.team2367.org` is a Firebase Hosting custom domain. Its two Cloudflare DNS records in the
+`team2367.org` zone must stay as-is:
+
+| Record | Name | Value | Proxy |
+| --- | --- | --- | --- |
+| `CNAME` | `minibots` | `minibots-2367.web.app` | **DNS only** (grey cloud) |
+| `TXT` | `_acme-challenge.minibots` | Firebase-issued challenge token | n/a |
+
+> The CNAME must stay **DNS only**. Turning on Cloudflare's orange-cloud proxy puts Cloudflare's
+> certificate in front of Firebase's and breaks the automatic cert renewal that reads the
+> `_acme-challenge` TXT record. Don't delete that TXT record either — Firebase reuses it to renew.
 
 ## Security
 
