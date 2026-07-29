@@ -14,7 +14,7 @@ firmware/esp32s3-dongle/sdkconfig
 # --- Local ESP-IDF SDK installed by setup.sh ---
 /.esp-idf/
 
-# --- PlatformIO: legacy robot firmware (old-code/esp32-robot-cpp) ---
+# --- PlatformIO ---
 .pio/
 .pioenvs/
 .piolibdeps/

@@ -16,25 +16,26 @@ subsequent runs skip straight to flashing.
 git clone <this-repo> minibots-2026
 cd minibots-2026
 
-./scripts/reset-robot.sh             # first run installs tools + MicroPython on the ESP32 robot (firmware image auto-downloaded)
+./scripts/flash-robot.sh --firmware  # first run installs tools + MicroPython on the ESP32 robot (firmware image auto-downloaded)
 ./scripts/flash-robot.sh             # upload your robot code (main.py + minibot.py)
-./scripts/repl-robot.sh              # open a live MicroPython prompt (see print() output)
+./scripts/flash-robot.sh --repl      # open a live MicroPython prompt (see print() output)
 ./scripts/flash-dongle.sh            # first run installs ESP-IDF v5.3.2, then builds + flashes the ESP32-S3 dongle
 ```
 
-**Windows:** use the `.cmd` launchers — **double-click** them, or run from a terminal:
+**Windows:** use the `.cmd` launchers — `flash-robot.cmd` sits at the repo root so you can
+**double-click** it to upload your code. For the flagged variants, run them from a terminal:
 
 ```bat
 git clone <this-repo> minibots-2026
 cd minibots-2026
 
-reset-robot.cmd              :: first run installs tools + MicroPython on the ESP32 robot (firmware image auto-downloaded)
-flash-robot.cmd              :: upload your robot code (main.py + minibot.py)
-repl-robot.cmd               :: open a live MicroPython prompt (see print() output)
-flash-dongle.cmd             :: first run installs ESP-IDF v5.3.2, then builds + flashes the ESP32-S3 dongle
+flash-robot.cmd -Firmware            :: first run installs tools + MicroPython on the ESP32 robot (firmware image auto-downloaded)
+flash-robot.cmd                      :: upload your robot code (main.py + minibot.py)
+flash-robot.cmd -Repl                :: open a live MicroPython prompt (see print() output)
+scripts\flash-dongle.cmd             :: first run installs ESP-IDF v5.3.2, then builds + flashes the ESP32-S3 dongle
 ```
 
-> **Robot MicroPython image.** `reset-robot` downloads and verifies the pinned ESP32 MicroPython
+> **Robot MicroPython image.** `flash-robot --firmware` downloads and verifies the pinned ESP32 MicroPython
 > `.bin` into `firmware/esp32-robot/micropython/` automatically — no manual download needed. See
 > [that folder's README](firmware/esp32-robot/micropython/README.md) for the pinned version and an
 > offline fallback.
@@ -43,6 +44,8 @@ The `.cmd` files launch the matching `.ps1` with `-ExecutionPolicy Bypass`, so t
 when PowerShell's execution policy blocks `.ps1` files directly
 ([about_Execution_Policies](https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_execution_policies)) —
 no machine-wide setting to change. Flags pass through, e.g. `flash-robot.cmd -Port COM5`.
+`flash-robot.cmd` lives at the repo root and drives `scripts\flash-robot.ps1`; `flash-dongle.cmd`
+stays in `scripts\` next to its own `.ps1`.
 
 > **Advanced:** to call the `.ps1` scripts directly, first allow local scripts once with
 > `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or invoke ad-hoc with
@@ -82,15 +85,13 @@ git-ignored `.esp-idf/` and sources that SDK automatically — no manual `export
 
 ### Flash script options
 
-**Robot** (`flash-robot.*`, MicroPython). There are also two convenience
-wrappers: **`reset-robot.*`** (= `flash-robot --firmware`) and **`repl-robot.*`**
-(= `flash-robot --repl`).
+**Robot** (`flash-robot.*`, MicroPython).
 
 | bash (`--flag`) | PowerShell (`-Flag`) | Effect |
 |-----------------|----------------------|--------|
 | `--port /dev/…` (`-p`) | `-Port COM5` | Target a specific serial port (otherwise auto-detected). |
-| `--firmware` | `-Firmware` | One-time: erase + write MicroPython (image auto-downloaded). Same as `reset-robot.*`. |
-| `--repl` | `-Repl` | Open a live MicroPython prompt (see `print()` output). Same as `repl-robot.*`. |
+| `--firmware` | `-Firmware` | One-time: erase + write MicroPython (image auto-downloaded). |
+| `--repl` | `-Repl` | Open a live MicroPython prompt (see `print()` output). |
 | `--skip-setup` | `-SkipSetup` | Skip the first-run `esptool` + `mpremote` install check. |
 | *(no flag)* | *(no flag)* | Upload `main.py` + `minibot.py` and reboot into it. |
 
@@ -113,7 +114,8 @@ scripts remain the source of truth for the pinned versions.
 
 | Path | Description |
 |------|-------------|
-| `flash-robot.*` / `reset-robot.*` / `repl-robot.*` / `flash-dongle.*` (`.sh`, `.cmd`, `.ps1`) | Flash helpers for each firmware; each installs its own toolchain on first run (robot: esptool + mpremote; dongle: ESP-IDF v5.3.2). `reset-robot` = firmware reset, `repl-robot` = live REPL (both wrap `flash-robot`). Windows: use the `.cmd` launchers. |
+| `flash-robot.cmd` (repo root) | Windows one-stop launcher for the robot — **double-click** it, or pass flags from a terminal. Drives `scripts/flash-robot.ps1`. |
+| [scripts/](scripts/) | The rest of the flash helpers: `flash-robot.{sh,ps1}` and `flash-dongle.{sh,cmd,ps1}`. Each installs its own toolchain on first run (robot: esptool + mpremote; dongle: ESP-IDF v5.3.2). `flash-robot` also does firmware reset (`--firmware`) and live REPL (`--repl`). |
 | [firmware/common/minicore_protocol.h](firmware/common/minicore_protocol.h) | Shared C structs, USB VID/PID, HID report IDs (keep in sync with JS + `minibot.py`). |
 | [firmware/esp32s3-dongle/](firmware/esp32s3-dongle/) | ESP-IDF project for the Waveshare ESP32-S3-LCD-1.47 class USB HID dongle. |
 | [firmware/esp32-robot/](firmware/esp32-robot/) | MicroPython robot code (classic ESP32) — students edit `main.py`. |
