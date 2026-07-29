@@ -65,6 +65,32 @@ function Info($m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Warn($m) { Write-Host "[warn] $m" -ForegroundColor Yellow }
 function Have($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 
+# Run an external tool (git/python/idf.py) and let the CALLER decide what a
+# failure means, by checking $LASTEXITCODE afterwards.
+#
+# Needed because $ErrorActionPreference = 'Stop' above -- which we want for
+# cmdlets -- also hijacks native commands: Windows PowerShell 5.1 turns *any*
+# write to stderr into a terminating error (so a tool aborts the script merely
+# by printing a warning or progress line), and PowerShell 7.3+ does the same for
+# any non-zero exit code via $PSNativeCommandUseErrorActionPreference.
+#
+# The tool is launched here rather than via a caller-supplied scriptblock on
+# purpose -- a scriptblock runs in a child scope of where it was *defined*, so
+# it would never see these function-scoped preferences.
+function Invoke-Tool {
+  param(
+    [Parameter(Mandatory, Position = 0)][string]$Exe,
+    [Parameter(Position = 1)][string[]]$Arguments = @(),
+    [switch]$Quiet   # discard stdout+stderr (probes, expected-to-fail calls)
+  )
+  $ErrorActionPreference = 'Continue'
+  $PSNativeCommandUseErrorActionPreference = $false
+  # Seed a failure code so a tool that can't even launch reads as "failed"
+  # rather than inheriting the previous command's success.
+  $global:LASTEXITCODE = 1
+  if ($Quiet) { & $Exe @Arguments 2> $null } else { & $Exe @Arguments }
+}
+
 # --- ensure the repo-local ESP-IDF exists (first-run setup, then a no-op) ---
 function Ensure-Idf {
   if (-not (Have git)) { throw 'git not found. Install Git for Windows (https://git-scm.com) and re-run.' }
@@ -75,7 +101,9 @@ function Ensure-Idf {
 
   # ESP-IDF v5.3.2 (2024) is tested against Python 3.9-3.12; its pinned tooling can
   # fail to install on 3.13+. Require the supported range, recommend 3.11.
-  $pyVer = & $Python -c 'import sys; print("%d.%d" % sys.version_info[:2])'
+  $pyVer = Invoke-Tool $Python @('-c', 'import sys; print("%d.%d" % sys.version_info[:2])')
+  if ($LASTEXITCODE -ne 0 -or -not $pyVer) { throw "Could not determine the version of '$Python'. Ensure Python 3 runs from your shell and re-run." }
+  $pyVer = "$pyVer".Trim()
   $pyMajor = [int]($pyVer.Split('.')[0]); $pyMinor = [int]($pyVer.Split('.')[1])
   if ($env:MINICORE_SKIP_PYCHECK -eq '1') {
     Warn "Skipping Python version check (MINICORE_SKIP_PYCHECK=1); using $pyVer."
@@ -94,8 +122,10 @@ Python $pyVer is not supported by ESP-IDF v$($IdfVersion.TrimStart('v')).
   }
 
   if (Test-Path (Join-Path $IdfDir '.git')) {
-    $current = (& git -C $IdfDir describe --tags) 2>$null
-    if (-not $current) { $current = 'unknown' }
+    # -Quiet: a shallow clone often has no tags, so `describe` failing here is
+    # expected and must not surface as an error (or abort the script).
+    $current = Invoke-Tool git @('-C', $IdfDir, 'describe', '--tags') -Quiet
+    if ($LASTEXITCODE -ne 0 -or -not $current) { $current = 'unknown' } else { $current = "$current".Trim() }
     Info "ESP-IDF already present at .esp-idf ($current)"
     if ($current -ne $IdfVersion) {
       Warn "Installed ESP-IDF is $current, project expects $IdfVersion."
@@ -105,14 +135,16 @@ Python $pyVer is not supported by ESP-IDF v$($IdfVersion.TrimStart('v')).
     Info "Cloning ESP-IDF $IdfVersion into .esp-idf (shallow; ~a few hundred MB)"
     # --shallow-submodules: depth-1 for every submodule, not just the main repo,
     #   avoiding full submodule history. -j 8: parallel submodule fetch.
-    & git clone --branch $IdfVersion --depth 1 `
-      --recurse-submodules --shallow-submodules -j 8 `
-      https://github.com/espressif/esp-idf.git $IdfDir
+    Invoke-Tool git @(
+      'clone', '--branch', $IdfVersion, '--depth', '1',
+      '--recurse-submodules', '--shallow-submodules', '-j', '8',
+      'https://github.com/espressif/esp-idf.git', $IdfDir
+    )
     if ($LASTEXITCODE -ne 0) { throw 'ESP-IDF clone failed.' }
   }
 
   Info 'Installing ESP-IDF tools for esp32s3 (compiler, openocd, etc.)'
-  & (Join-Path $IdfDir 'install.bat') esp32s3
+  Invoke-Tool (Join-Path $IdfDir 'install.bat') @('esp32s3')
   if ($LASTEXITCODE -ne 0) { throw 'ESP-IDF install.bat failed.' }
 }
 
@@ -136,9 +168,9 @@ if (-not (Have idf.py)) {
 
 Push-Location $Proj
 try {
-  & idf.py set-target esp32s3   # no-op once configured; ensures fresh clones build
+  Invoke-Tool idf.py @('set-target', 'esp32s3')   # no-op once configured; ensures fresh clones build
   if ($LASTEXITCODE -ne 0) { throw "idf.py set-target failed (exit $LASTEXITCODE)." }
-  & idf.py build
+  Invoke-Tool idf.py @('build')
   if ($LASTEXITCODE -ne 0) { throw "idf.py build failed (exit $LASTEXITCODE)." }
 
   if ($BuildOnly) { return }
@@ -147,8 +179,11 @@ try {
   if ($Port) { $targets += @('-p', $Port) }
   $targets += 'flash'
   if ($Monitor) { $targets += 'monitor' }
-  & idf.py @targets
-  if ($LASTEXITCODE -ne 0) { throw "idf.py $($targets -join ' ') failed (exit $LASTEXITCODE)." }
+  Invoke-Tool idf.py $targets
+  if ($LASTEXITCODE -ne 0) {
+    throw "idf.py $($targets -join ' ') failed (exit $LASTEXITCODE). " +
+          "If flashing failed, put the board in USB download mode: hold BOOT, press+release RESET, release BOOT, then re-run."
+  }
 }
 finally {
   Pop-Location

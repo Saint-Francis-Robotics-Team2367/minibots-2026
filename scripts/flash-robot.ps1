@@ -73,6 +73,37 @@ $MpyBinSha256 = 'cd7820d02c35d34dd403b44263129c6a511b350aea8446c229890753fe24078
 
 function Have($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 
+# Run an external tool (python/pip/esptool/mpremote) and let the CALLER decide
+# what a failure means, by checking $LASTEXITCODE afterwards.
+#
+# This wrapper exists because $ErrorActionPreference = 'Stop' above -- which we
+# want for cmdlets -- also hijacks native commands:
+#   * Windows PowerShell 5.1 turns *any* write to stderr into an error record,
+#     so it aborts the script the moment a tool prints a traceback, a pip
+#     warning, or an mpremote diagnostic -- before we can inspect the exit code.
+#   * PowerShell 7.3+ does the same for any non-zero exit code, via
+#     $PSNativeCommandUseErrorActionPreference.
+# Both defeat the "probe, then recover" logic below: a failed import probe would
+# kill the run instead of triggering the install it exists to trigger.
+#
+# The tool is launched here rather than via a caller-supplied scriptblock on
+# purpose -- a scriptblock runs in a child scope of where it was *defined*, so
+# it would never see these function-scoped preferences. Scoping them to this
+# function keeps 'Stop' semantics everywhere else in the script.
+function Invoke-Tool {
+  param(
+    [Parameter(Mandatory, Position = 0)][string]$Exe,
+    [Parameter(Position = 1)][string[]]$Arguments = @(),
+    [switch]$Quiet   # discard stdout+stderr (probes and noisy no-ops)
+  )
+  $ErrorActionPreference = 'Continue'
+  $PSNativeCommandUseErrorActionPreference = $false
+  # Seed a failure code so a tool that can't even launch reads as "failed"
+  # rather than inheriting the previous command's success.
+  $global:LASTEXITCODE = 1
+  if ($Quiet) { & $Exe @Arguments *> $null } else { & $Exe @Arguments }
+}
+
 # The venv's python (Windows puts it under Scripts\). Everything runs through
 # this as `python -m ...`, so no console-script shim or PATH entry is needed.
 $PyBin = Join-Path $VenvDir 'Scripts\python.exe'
@@ -80,7 +111,7 @@ $PyBin = Join-Path $VenvDir 'Scripts\python.exe'
 # True if the venv python can already import both tools.
 function Tools-Ready {
   if (-not (Test-Path $PyBin)) { return $false }
-  & $PyBin -c 'import esptool, mpremote' *> $null
+  Invoke-Tool $PyBin @('-c', 'import esptool, mpremote') -Quiet
   return ($LASTEXITCODE -eq 0)
 }
 
@@ -94,15 +125,24 @@ function Ensure-Tools {
     throw 'Python not found. Install Python 3 (https://python.org, check "Add to PATH") and re-run (needed to install esptool + mpremote).'
   }
 
+  # A venv directory can exist without a working python inside it (an
+  # interrupted or failed first run). Clear it out so `venv` builds a clean one
+  # instead of erroring on the half-made tree.
+  if ((Test-Path $VenvDir) -and -not (Test-Path $PyBin)) {
+    Write-Host "[info] Removing incomplete tool virtualenv at $VenvDir"
+    Remove-Item -Recurse -Force $VenvDir -ErrorAction SilentlyContinue
+  }
+
   if (-not (Test-Path $PyBin)) {
     Write-Host "[info] Creating tool virtualenv at $VenvDir (one time)"
-    & $Python -m venv $VenvDir
+    Invoke-Tool $Python @('-m', 'venv', $VenvDir)
     if ($LASTEXITCODE -ne 0) { throw "Failed to create virtualenv at $VenvDir with '$Python -m venv'." }
+    if (-not (Test-Path $PyBin)) { throw "Virtualenv created at $VenvDir but $PyBin is missing. Delete $VenvDir and re-run." }
   }
 
   Write-Host '[info] Installing esptool + mpremote (one time)'
-  & $PyBin -m pip install --quiet --upgrade pip *> $null
-  & $PyBin -m pip install --upgrade esptool mpremote
+  Invoke-Tool $PyBin @('-m', 'pip', 'install', '--quiet', '--upgrade', 'pip') -Quiet
+  Invoke-Tool $PyBin @('-m', 'pip', 'install', '--upgrade', 'esptool', 'mpremote')
   if ($LASTEXITCODE -ne 0) {
     throw "Failed to install esptool + mpremote into $VenvDir. Retry, or run manually:  `"$PyBin`" -m pip install esptool mpremote"
   }
@@ -124,8 +164,8 @@ $MprDev = @()
 if ($Port) { $MprDev = @('connect', $Port) }
 
 if ($Repl) {
-  & $PyBin @MpremoteArgs @MprDev repl
-  return
+  Invoke-Tool $PyBin ($MpremoteArgs + $MprDev + 'repl')
+  exit $LASTEXITCODE
 }
 
 if ($Firmware) {
@@ -158,12 +198,12 @@ if ($Firmware) {
   $portArgs = @()
   if ($Port) { $portArgs = @('--port', $Port) }
   Write-Host "[info] Flashing MicroPython: $($Bin.Name)"
-  & $PyBin @EsptoolArgs --chip esp32 @portArgs erase_flash
-  if ($LASTEXITCODE -ne 0) { throw "esptool erase_flash failed (exit $LASTEXITCODE)." }
-  & $PyBin @EsptoolArgs --chip esp32 @portArgs write_flash -z 0x1000 $Bin.FullName
+  Invoke-Tool $PyBin ($EsptoolArgs + @('--chip', 'esp32') + $portArgs + 'erase_flash')
+  if ($LASTEXITCODE -ne 0) { throw "esptool erase_flash failed (exit $LASTEXITCODE). Put the board in download mode (hold BOOT, tap RESET, release BOOT) and re-run." }
+  Invoke-Tool $PyBin ($EsptoolArgs + @('--chip', 'esp32') + $portArgs + @('write_flash', '-z', '0x1000', $Bin.FullName))
   if ($LASTEXITCODE -ne 0) { throw "esptool write_flash failed (exit $LASTEXITCODE)." }
   Write-Host "[info] MicroPython installed. Now run .\scripts\flash-robot.ps1 to upload your code."
-  return
+  exit 0
 }
 
 # Default: upload student code and reboot into it.
@@ -177,7 +217,7 @@ Write-Host "[info] Uploading main.py + minibot.py"
 $UploadTries = 5
 $uploaded = $false
 for ($try = 1; $try -le $UploadTries; $try++) {
-  & $PyBin @MpremoteArgs @MprDev fs cp (Join-Path $Proj 'minibot.py') (Join-Path $Proj 'main.py') :
+  Invoke-Tool $PyBin ($MpremoteArgs + $MprDev + @('fs', 'cp', (Join-Path $Proj 'minibot.py'), (Join-Path $Proj 'main.py'), ':'))
   if ($LASTEXITCODE -eq 0) { $uploaded = $true; break }
   if ($try -lt $UploadTries) {
     Write-Host "[warn] Couldn't reach the board (attempt $try/$UploadTries); the running program may be blocking the REPL. Retrying..." -ForegroundColor Yellow
@@ -191,5 +231,7 @@ if (-not $uploaded) {
         "or reflash the MicroPython runtime with:  .\scripts\flash-robot.ps1 -Firmware"
 }
 
-& $PyBin @MpremoteArgs @MprDev reset
+Invoke-Tool $PyBin ($MpremoteArgs + $MprDev + 'reset')
+if ($LASTEXITCODE -ne 0) { Write-Host "[warn] Upload succeeded but the reset didn't (exit $LASTEXITCODE). Power-cycle the board to run your code." -ForegroundColor Yellow }
 Write-Host "[info] Uploaded and reset. Use -Repl to watch output."
+exit 0
