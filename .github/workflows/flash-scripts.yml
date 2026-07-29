@@ -1,0 +1,92 @@
+# Parse-check the Windows flash scripts on real Windows PowerShell 5.1.
+#
+# This exists because of a bug that shipped: an em-dash in a message string made
+# flash-dongle.ps1 fail to parse with "Unexpected token '}'" 164 lines away from
+# the actual character. Windows PowerShell 5.1 reads a file with no byte-order
+# mark as ANSI (CP1252), where the em-dash's third UTF-8 byte (0x94) decodes to
+# U+201D -- a closing curly quote, which the tokenizer honours as a real string
+# delimiter. The string ended mid-message and every brace after it mismatched.
+#
+# PowerShell 7 defaults to UTF-8 and parses such a file fine, so it cannot catch
+# this. The .cmd launchers students use invoke `powershell` (5.1), so 5.1 is the
+# only oracle that counts -- hence a Windows runner rather than a linter.
+name: flash-scripts
+
+on:
+  push:
+    paths:
+      - "scripts/*.ps1"
+      - "*.cmd"
+      - "scripts/*.cmd"
+      - ".github/workflows/flash-scripts.yml"
+  pull_request:
+    paths:
+      - "scripts/*.ps1"
+      - "*.cmd"
+      - "scripts/*.cmd"
+      - ".github/workflows/flash-scripts.yml"
+  workflow_dispatch:
+
+jobs:
+  parse:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Keep the scripts ASCII-only. A BOM would also fix the decoding, but ASCII
+      # needs no encoding agreement from any editor, git filter, or copy-paste
+      # that touches these files later.
+      - name: Reject non-ASCII bytes
+        shell: pwsh
+        run: |
+          $bad = @()
+          foreach ($f in Get-ChildItem scripts/*.ps1, *.cmd, scripts/*.cmd) {
+            $bytes = [IO.File]::ReadAllBytes($f.FullName)
+            for ($i = 0; $i -lt $bytes.Length; $i++) {
+              if ($bytes[$i] -gt 0x7F) {
+                # Report a line number, since a byte offset is useless to a human.
+                $line = 1 + (($bytes[0..$i] | Where-Object { $_ -eq 0x0A }).Count)
+                $bad += "$($f.Name):$line has byte 0x$('{0:X2}' -f $bytes[$i]) (non-ASCII)"
+                break
+              }
+            }
+          }
+          if ($bad) {
+            $bad | ForEach-Object { Write-Host "::error::$_" }
+            throw "Non-ASCII bytes found. Windows PowerShell 5.1 reads these files as CP1252, where some UTF-8 bytes become quote characters and break parsing. Use plain ASCII (e.g. '-' not an em-dash)."
+          }
+          Write-Host "All ASCII."
+
+      # The real check: hand the files to the same parser the students' launcher
+      # uses. `powershell` on a GitHub runner is Windows PowerShell 5.1.
+      - name: Parse with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $PSVersionTable.PSVersion.ToString() | ForEach-Object { Write-Host "Windows PowerShell $_" }
+          if ($PSVersionTable.PSVersion.Major -ne 5) { throw "Expected Windows PowerShell 5.x, got $($PSVersionTable.PSVersion)." }
+          $failed = $false
+          foreach ($f in Get-ChildItem scripts/*.ps1) {
+            $errs = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errs) | Out-Null
+            if ($errs) {
+              $failed = $true
+              foreach ($e in $errs) {
+                Write-Host "::error file=$($f.FullName),line=$($e.Extent.StartLineNumber)::$($e.Message)"
+              }
+            } else {
+              Write-Host "OK  $($f.Name)"
+            }
+          }
+          if ($failed) { throw "One or more scripts do not parse under Windows PowerShell 5.1." }
+
+      # A syntactically valid script can still be wrong on contact: -WhatIf isn't
+      # available here, but -? forces PowerShell to bind the param block and
+      # render help, which catches a malformed param()/comment-based-help pair.
+      - name: Check parameter blocks bind
+        shell: powershell
+        run: |
+          foreach ($f in Get-ChildItem scripts/*.ps1) {
+            Get-Help $f.FullName -ErrorAction Stop | Out-Null
+            Write-Host "OK  $($f.Name) param block"
+          }

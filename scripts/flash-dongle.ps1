@@ -22,12 +22,12 @@
 
 .NOTES
   On first run this installs its own toolchain: it clones the pinned ESP-IDF
-  v5.3.2 into .\.esp-idf (repo-local, git-ignored) and runs its installer — no
+  v5.3.2 into .\.esp-idf (repo-local, git-ignored) and runs its installer - no
   separate setup step. Later runs just source that SDK and are fast. To use a
   system ESP-IDF instead, set $env:IDF_PATH before running.
 
   If no ESP-IDF-supported Python (3.9-3.12) is found, this also downloads and
-  installs Python 3.11 for your user account — no administrator rights, checksum
+  installs Python 3.11 for your user account - no administrator rights, checksum
   verified, and it only touches your persistent PATH when you had no working
   Python at all. Set $env:MINICORE_NO_PYINSTALL='1' to be told what to install
   instead of having it done for you.
@@ -201,7 +201,7 @@ function Install-Python {
   } catch { }
 
   $exeFile = Join-Path ([IO.Path]::GetTempPath()) "python-$PyInstallVersion-amd64.exe"
-  Info "No supported Python found — downloading Python $PyInstallVersion (~25 MB) from python.org"
+  Info "No supported Python found - downloading Python $PyInstallVersion (~25 MB) from python.org"
   try {
     $ProgressPreference = 'SilentlyContinue'   # faster, quieter download
     Invoke-WebRequest -Uri $PyInstallUrl -OutFile $exeFile -UseBasicParsing
@@ -214,9 +214,11 @@ function Install-Python {
   $got = (Get-FileHash -Path $exeFile -Algorithm SHA256).Hash.ToLower()
   if ($got -ne $PyInstallSha256) {
     Remove-Item $exeFile -Force -ErrorAction SilentlyContinue
-    Warn "Python installer SHA256 mismatch (got $got, expected $PyInstallSha256) — refusing to run it."
+    Warn "Python installer SHA256 mismatch (got $got, expected $PyInstallSha256) - refusing to run it."
     return $null
   }
+
+  $prependFlag = if ($PrependUserPath) { '1' } else { '0' }
 
   # Include_launcher registers the `py` launcher, which is what lets Find-Python
   # reach this interpreter on every later run (as `py -3.11`) even when PATH
@@ -225,7 +227,7 @@ function Install-Python {
   $instArgs = @(
     '/quiet', 'InstallAllUsers=0', 'Include_launcher=1', 'Include_pip=1',
     'Include_test=0', 'Include_doc=0', 'AssociateFiles=0', 'Shortcuts=0',
-    "PrependPath=$(if ($PrependUserPath) { '1' } else { '0' })"
+    "PrependPath=$prependFlag"
   )
   Info 'Installing it for your user account (no administrator rights needed; takes a minute)'
   # Start-Process -Wait rather than Invoke-Tool: this is a bootstrapper, and we
@@ -271,7 +273,7 @@ function Install-Python {
     # the user's unrelated projects. The `py` launcher plus the process-PATH
     # prepend in Ensure-Idf cover this build without that side effect.
     Info "Installed Python $($info.Version) at $exe."
-    Warn "Left your PATH as it was, since another Python already owns 'python' — reach this one with 'py -3.$minor'."
+    Warn "Left your PATH as it was, since another Python already owns 'python' - reach this one with 'py -3.$minor'."
   }
   return $info
 }
@@ -299,7 +301,7 @@ function Ensure-Idf {
   if (-not $chosen) {
     $manual = @"
 Install Python 3.11 from https://python.org (check "Add to PATH"), then re-run.
-       ESP-IDF installs its own venv, so 3.11 only needs to be reachable here — it
+       ESP-IDF installs its own venv, so 3.11 only needs to be reachable here - it
        need not become your system default.
 "@
     if ($env:MINICORE_SKIP_PYCHECK -eq '1' -and $py.Working) {
@@ -337,7 +339,7 @@ No working Python, and installing one automatically didn't work (see above).
   }
 
   if (-not (Have cmake)) {
-    Warn 'cmake not found — required by ESP-IDF. Install with:  winget install Kitware.CMake'
+    Warn 'cmake not found - required by ESP-IDF. Install with:  winget install Kitware.CMake'
   }
 
   if (Test-Path (Join-Path $IdfDir '.git')) {

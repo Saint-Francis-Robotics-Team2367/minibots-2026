@@ -141,7 +141,7 @@ function Install-Python {
   } catch { }
 
   $exeFile = Join-Path ([IO.Path]::GetTempPath()) "python-$PyInstallVersion-amd64.exe"
-  Info "No Python found — downloading Python $PyInstallVersion (~25 MB) from python.org"
+  Info "No Python found - downloading Python $PyInstallVersion (~25 MB) from python.org"
   try {
     $ProgressPreference = 'SilentlyContinue'   # faster, quieter download
     Invoke-WebRequest -Uri $PyInstallUrl -OutFile $exeFile -UseBasicParsing
@@ -154,7 +154,7 @@ function Install-Python {
   $got = (Get-FileHash -Path $exeFile -Algorithm SHA256).Hash.ToLower()
   if ($got -ne $PyInstallSha256) {
     Remove-Item $exeFile -Force -ErrorAction SilentlyContinue
-    Warn "Python installer SHA256 mismatch (got $got, expected $PyInstallSha256) — refusing to run it."
+    Warn "Python installer SHA256 mismatch (got $got, expected $PyInstallSha256) - refusing to run it."
     return $null
   }
 
