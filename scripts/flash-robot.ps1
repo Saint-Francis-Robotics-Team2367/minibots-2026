@@ -119,9 +119,32 @@ function Tools-Ready {
 function Ensure-Tools {
   if (Tools-Ready) { return }
 
+  # Pick a Python that actually RUNS, not merely one whose name resolves.
+  # Get-Command finds Windows' App Execution Alias stubs for 'python' and
+  # 'python3' (under %LOCALAPPDATA%\Microsoft\WindowsApps) on every machine even
+  # with no Python installed; they just open the Microsoft Store. Committing to
+  # the first name found would fail later with a confusing error, so probe each.
   $Python = $null
-  foreach ($c in 'py','python','python3') { if (Have $c) { $Python = $c; break } }
+  $tried = 0
+  foreach ($c in 'py', 'python', 'python3') {
+    if (-not (Have $c)) { continue }
+    $tried++
+    # -Quiet: a Store stub writes to stderr, which is an expected probe outcome.
+    Invoke-Tool $c @('-c', 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)') -Quiet
+    if ($LASTEXITCODE -eq 0) { $Python = $c; break }
+  }
   if (-not $Python) {
+    if ($tried -gt 0) {
+      throw @"
+Python appears to be on PATH, but none of the interpreters found actually ran.
+       This is almost always the Microsoft Store stub: 'python' and 'python3'
+       exist under %LOCALAPPDATA%\Microsoft\WindowsApps even with no real Python
+       installed, and only open the Store.
+       Install Python 3 from https://python.org (check "Add to PATH"), or turn the
+       stubs off under Settings > Apps > Advanced app settings >
+       App execution aliases, then re-run.
+"@
+    }
     throw 'Python not found. Install Python 3 (https://python.org, check "Add to PATH") and re-run (needed to install esptool + mpremote).'
   }
 

@@ -91,30 +91,107 @@ function Invoke-Tool {
   if ($Quiet) { & $Exe @Arguments 2> $null } else { & $Exe @Arguments }
 }
 
+# ESP-IDF v5.3.2 (2024) is tested against Python 3.9-3.12; its pinned tooling can
+# fail to install on 3.13+. Require the supported range, recommend 3.11.
+$PyMinorMin = 9
+$PyMinorMax = 12
+
+# Find a Python that actually RUNS -- not merely one whose name resolves.
+#
+# Get-Command finds Windows' App Execution Aliases for 'python' and 'python3':
+# stubs under %LOCALAPPDATA%\Microsoft\WindowsApps that exist on every machine
+# and only open the Microsoft Store. They look exactly like a working Python and
+# produce no output, so testing for mere existence and committing to the first
+# name found aborted this script with an opaque "could not determine the version".
+#
+# Probe each candidate by running it, and prefer one whose version ESP-IDF
+# supports. The 'py' launcher is tried first and with explicit versions, since it
+# can reach a supported interpreter even when a too-new one owns bare 'python'.
+function Find-Python {
+  $probe = 'import sys; print("%d.%d" % sys.version_info[:2]); print(sys.executable)'
+
+  $candidates = @()
+  if (Have py) {
+    foreach ($v in '3.12', '3.11', '3.10', '3.9') {
+      $candidates += [pscustomobject]@{ Exe = 'py'; Pre = @("-$v") }
+    }
+    $candidates += [pscustomobject]@{ Exe = 'py'; Pre = @() }
+  }
+  foreach ($c in 'python', 'python3') {
+    if (Have $c) { $candidates += [pscustomobject]@{ Exe = $c; Pre = @() } }
+  }
+
+  $result = [pscustomobject]@{ Supported = $null; Working = $null; Tried = $candidates.Count }
+
+  foreach ($c in $candidates) {
+    # -Quiet: a Store stub or a missing `py -3.x` writes to stderr, which is an
+    # expected outcome of probing and must not surface as an error.
+    $out = Invoke-Tool $c.Exe ($c.Pre + @('-c', $probe)) -Quiet
+    if ($LASTEXITCODE -ne 0 -or -not $out) { continue }
+    # Output may arrive as an array of lines or one embedded-newline string;
+    # normalise both, and Trim() takes care of any trailing CR.
+    $lines = @(@($out) | ForEach-Object { "$_" -split "`n" } |
+               ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($lines.Count -lt 2 -or $lines[0] -notmatch '^\d+\.\d+$') { continue }
+
+    $info = [pscustomobject]@{
+      Exe     = $c.Exe
+      Pre     = $c.Pre
+      Version = $lines[0]
+      Home    = Split-Path -Parent $lines[1]
+      Label   = (@($c.Exe) + $c.Pre) -join ' '
+    }
+    if (-not $result.Working) { $result.Working = $info }
+
+    $parts = $lines[0].Split('.')
+    if ([int]$parts[0] -eq 3 -and [int]$parts[1] -ge $PyMinorMin -and [int]$parts[1] -le $PyMinorMax) {
+      $result.Supported = $info
+      break
+    }
+  }
+  return $result
+}
+
 # --- ensure the repo-local ESP-IDF exists (first-run setup, then a no-op) ---
 function Ensure-Idf {
   if (-not (Have git)) { throw 'git not found. Install Git for Windows (https://git-scm.com) and re-run.' }
 
-  $Python = $null
-  foreach ($c in 'python','python3','py') { if (Have $c) { $Python = $c; break } }
-  if (-not $Python) { throw 'Python not found. Install Python 3.11 (https://python.org, check "Add to PATH") and re-run.' }
-
-  # ESP-IDF v5.3.2 (2024) is tested against Python 3.9-3.12; its pinned tooling can
-  # fail to install on 3.13+. Require the supported range, recommend 3.11.
-  $pyVer = Invoke-Tool $Python @('-c', 'import sys; print("%d.%d" % sys.version_info[:2])')
-  if ($LASTEXITCODE -ne 0 -or -not $pyVer) { throw "Could not determine the version of '$Python'. Ensure Python 3 runs from your shell and re-run." }
-  $pyVer = "$pyVer".Trim()
-  $pyMajor = [int]($pyVer.Split('.')[0]); $pyMinor = [int]($pyVer.Split('.')[1])
-  if ($env:MINICORE_SKIP_PYCHECK -eq '1') {
-    Warn "Skipping Python version check (MINICORE_SKIP_PYCHECK=1); using $pyVer."
-  } elseif ($pyMajor -ne 3 -or $pyMinor -lt 9 -or $pyMinor -gt 12) {
-    throw @"
-Python $pyVer is not supported by ESP-IDF v$($IdfVersion.TrimStart('v')).
-       Use Python 3.9-3.12 (3.11 recommended). Install 3.11 from https://python.org
-       (check "Add to PATH"), then re-run. ESP-IDF installs its own venv, so 3.11
-       only needs to be on PATH here — it need not be your system default.
+  $py = Find-Python
+  $chosen = $py.Supported
+  if (-not $chosen) {
+    if ($env:MINICORE_SKIP_PYCHECK -eq '1' -and $py.Working) {
+      $chosen = $py.Working
+      Warn "Skipping Python version check (MINICORE_SKIP_PYCHECK=1); using $($chosen.Version) ($($chosen.Label))."
+    } elseif ($py.Working) {
+      throw @"
+Python $($py.Working.Version) ($($py.Working.Label)) is not supported by ESP-IDF v$($IdfVersion.TrimStart('v')).
+       Use Python 3.$PyMinorMin-3.$PyMinorMax (3.11 recommended). Install 3.11 from
+       https://python.org (check "Add to PATH"), then re-run. ESP-IDF installs its own
+       venv, so 3.11 only needs to be on PATH here — it need not be your system default.
        Override at your own risk: `$env:MINICORE_SKIP_PYCHECK='1'
 "@
+    } elseif ($py.Tried -gt 0) {
+      throw @"
+Python appears to be on PATH, but none of the interpreters found actually ran.
+       This is almost always the Microsoft Store stub: 'python' and 'python3'
+       exist under %LOCALAPPDATA%\Microsoft\WindowsApps even with no real Python
+       installed, and only open the Store.
+       Install Python 3.11 from https://python.org (check "Add to PATH"), or turn
+       the stubs off under Settings > Apps > Advanced app settings >
+       App execution aliases, then re-run.
+"@
+    } else {
+      throw 'Python not found. Install Python 3.11 (https://python.org, check "Add to PATH") and re-run.'
+    }
+  }
+  Info "Using Python $($chosen.Version) ($($chosen.Label))"
+
+  # ESP-IDF's install.bat runs bare `python.exe` from PATH rather than the
+  # interpreter chosen above, so put the chosen one's directory first. Without
+  # this, selecting `py -3.11` here would still hand ESP-IDF whichever too-new
+  # (or stubbed) Python happens to own the `python` name.
+  if ($chosen.Home -and (Test-Path $chosen.Home)) {
+    $env:PATH = "$($chosen.Home);$env:PATH"
   }
 
   if (-not (Have cmake)) {
