@@ -5,6 +5,27 @@
       "firebase.json",
       "**/.*",
       "**/node_modules/**"
+    ],
+    "headers": [
+      {
+        "comment": "Filenames here are not content-hashed, so Firebase's default max-age=3600 serves a stale driver station for an hour after a deploy. Revalidate every time instead: these files are a few KB and the panel must never be a version behind the firmware.",
+        "source": "/**/*.@(html|css|js)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
+        "source": "/",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      }
     ]
   }
 }

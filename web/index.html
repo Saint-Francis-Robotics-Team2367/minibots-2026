@@ -3,49 +3,125 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MiniCore Driver Station</title>
+    <meta name="color-scheme" content="dark" />
+    <title>MiniCore — Driver Station</title>
+    <link rel="canonical" href="https://minibots.team2367.org/" />
+
+    <!-- One address for the driver station. Firebase always keeps its default
+         *.web.app / *.firebaseapp.com domains alive and offers no way to turn
+         them off, so bounce them to the real one before anything renders.
+         Host-based redirects need a Cloud Function on Firebase Hosting; this
+         does the same job with no backend and no extra plan. Runs before the
+         stylesheet so a stray link never flashes the panel. -->
+    <script>
+      (function () {
+        var h = location.hostname;
+        if (/\.(web\.app|firebaseapp\.com)$/.test(h)) {
+          location.replace(
+            "https://minibots.team2367.org" + location.pathname + location.search + location.hash,
+          );
+        }
+      })();
+    </script>
+
     <link rel="stylesheet" href="css/style.css" />
   </head>
-  <body>
-    <header>
-      <h1>MiniCore</h1>
-      <p class="sub">WebHID + Gamepad — Chrome or Edge, HTTPS or localhost</p>
-    </header>
+  <body data-armed="false" data-link="down">
+    <div class="bezel">
+      <!-- ── Top rail: identity + link telemetry + dongle control ───────── -->
+      <header class="rail">
+        <div class="rail__id">
+          <span class="rail__mark">MiniCore</span>
+          <span class="rail__sub">Driver station · Team 2367</span>
+        </div>
 
-    <section class="panel">
-      <h2>Dongle</h2>
-      <button type="button" id="btnConnect">Connect USB dongle</button>
-      <button type="button" id="btnDisconnect" disabled>Disconnect</button>
-      <span id="dongleState" class="badge">disconnected</span>
-      <label style="margin-left: 10px;">Channel: <span id="chanDisp">—</span></label>
-    </section>
+        <dl class="rail__tele">
+          <div class="tele">
+            <dt>Dongle</dt>
+            <dd>
+              <span class="dot" id="dongleDot" aria-hidden="true"></span>
+              <span id="dongleState">Not connected</span>
+            </dd>
+          </div>
+          <div class="tele">
+            <dt>Channel</dt>
+            <dd><span id="chanDisp" class="num">--</span></dd>
+          </div>
+          <div class="tele">
+            <dt>Packets out</dt>
+            <dd><span id="txRate" class="num">0</span><span class="unit">/s</span></dd>
+          </div>
+          <div class="tele">
+            <dt>Robots seen</dt>
+            <dd><span id="seenCount" class="num">0</span></dd>
+          </div>
+        </dl>
 
-    <section class="panel">
-      <h2>Enable</h2>
-      <label><input type="checkbox" id="chkGlobalEn" disabled /> Global enable</label>
-    </section>
+        <div class="rail__act">
+          <p class="fault" id="faultChip" hidden>
+            <span aria-hidden="true">!</span> Radio send failing
+          </p>
+          <button type="button" id="btnConnect" class="btn btn--primary">Connect dongle</button>
+          <button type="button" id="btnDisconnect" class="btn" disabled>Disconnect</button>
+        </div>
+      </header>
 
-    <section class="panel">
-      <h2>Gamepads</h2>
-      <p class="hint">Press a button on a controller to connect it. Move sticks to see it light up.</p>
-      <ul id="gamepadList"></ul>
-    </section>
+      <!-- ── Unsupported-browser notice (shown only when WebHID is absent) ── -->
+      <p class="notice" id="noHid" hidden>
+        This browser can't reach USB devices. Open the driver station in Chrome or Edge,
+        over HTTPS or on localhost.
+      </p>
 
-    <section class="panel">
-      <h2>Controller slots (0–3)</h2>
-      <p class="hint">Pair each slot to a discovered robot MAC and select which gamepad should control it.</p>
-      <div id="slots"></div>
-    </section>
+      <!-- ── The arm band: single source of truth for field state ───────── -->
+      <section class="arm" aria-labelledby="armState">
+        <p class="arm__state" id="armState" role="status">Disabled</p>
+        <p class="arm__read" id="armRead">Connect the dongle to enable robots.</p>
+        <button type="button" id="btnArm" class="arm__switch" disabled>
+          Enable all robots
+        </button>
+        <p class="arm__panic">
+          <kbd>Space</kbd> or <kbd>Esc</kbd> — emergency stop
+        </p>
+      </section>
 
-    <section class="panel">
-      <h2>Discovered robots</h2>
-      <ul id="robotList"></ul>
-    </section>
+      <!-- ── Main deck: slots + utilities ───────────────────────────────── -->
+      <main class="deck">
+        <section class="slots" aria-label="Controller slots">
+          <div class="slots__grid" id="slots"></div>
+        </section>
 
-    <section class="panel log">
-      <h2>Log</h2>
-      <pre id="log"></pre>
-    </section>
+        <aside class="util">
+          <section class="card card--util">
+            <header class="card__head">
+              <h2>Robots</h2>
+              <button type="button" id="btnScan" class="btn btn--sm" disabled>Scan</button>
+            </header>
+            <ul id="robotList" class="rlist"></ul>
+            <p class="empty" id="robotEmpty">
+              No robots yet. Power one on, or press Scan.
+            </p>
+          </section>
+
+          <section class="card card--util">
+            <header class="card__head">
+              <h2>Gamepads</h2>
+            </header>
+            <ul id="gamepadList" class="glist"></ul>
+            <p class="empty" id="gamepadEmpty">
+              No gamepads yet. Press a button on a controller.
+            </p>
+          </section>
+
+          <section class="card card--util card--log">
+            <header class="card__head">
+              <h2>Activity</h2>
+              <button type="button" id="btnClearLog" class="btn btn--sm">Clear</button>
+            </header>
+            <ol id="log" class="log" aria-live="polite" aria-relevant="additions"></ol>
+          </section>
+        </aside>
+      </main>
+    </div>
 
     <script type="module" src="js/app.js"></script>
   </body>

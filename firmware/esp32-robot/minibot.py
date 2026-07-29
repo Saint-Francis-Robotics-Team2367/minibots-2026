@@ -33,6 +33,14 @@ MC_ROBOT_ID_MAX = 16
 MC_HEARTBEAT_INTERVAL_MS = 1000
 MC_MOTOR_TIMEOUT_MS = 250
 
+# The enable flag expires unless the driver station keeps re-asserting it. Without
+# this, "enabled" is a latch the robot holds forever: a robot that is out of range
+# or powered down at the moment the station disables never hears it, and comes
+# back still enabled. The station re-broadcasts enable ~every 500 ms while armed,
+# so this tolerates several consecutive lost broadcasts (ESP-NOW broadcasts are
+# unacknowledged) before standing the robot down.
+MC_ENABLE_TIMEOUT_MS = 3000
+
 _BROADCAST = b"\xff\xff\xff\xff\xff\xff"
 
 # struct formats (little-endian, packed). Sizes are asserted below.
@@ -128,6 +136,7 @@ class Minibot:
         self._buttons = 0
 
         self._enabled = False
+        self._last_enable_ms = 0
         self._last_joystick_ms = 0
         self._last_hb_ms = 0
 
@@ -169,6 +178,7 @@ class Minibot:
 
         now = time.ticks_ms()
         self._last_joystick_ms = now
+        self._last_enable_ms = now
         self._last_hb_ms = now
 
     # --- main loop step ------------------------------------------------------
@@ -185,6 +195,12 @@ class Minibot:
                 self._handle(mac, bytes(msg))
 
         now = time.ticks_ms()
+
+        # Let the enable flag lapse if the station has gone quiet. This is what
+        # keeps "enabled" from being a latch the robot holds across a driver
+        # station reload, a closed tab, or its own trip out of radio range.
+        if self._enabled and time.ticks_diff(now, self._last_enable_ms) > MC_ENABLE_TIMEOUT_MS:
+            self._enabled = False
 
         # Failsafe: neutral motors when disabled or link is stale. Also zero the
         # cached axes, so a main.py that drives from the sticks can't be handed
@@ -327,6 +343,10 @@ class Minibot:
         _, enabled, target_mac = struct.unpack(_FMT_ENABLE, data[:struct.calcsize(_FMT_ENABLE)])
         if target_mac == _BROADCAST or target_mac == self._mac:
             self._enabled = enabled != 0
+            # Refresh the expiry only while being told "enabled" — a disable does
+            # not need keeping alive, and must not extend the window.
+            if self._enabled:
+                self._last_enable_ms = time.ticks_ms()
 
     def _handle_joystick(self, data):
         n = struct.calcsize(_FMT_JOYSTICK)

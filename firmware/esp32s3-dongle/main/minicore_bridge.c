@@ -23,7 +23,32 @@ static const char *TAG = "mc_bridge";
 
 static uint8_t s_channel = 6;
 static bool s_global_enabled;
-static volatile uint8_t s_error_flags;
+
+/* ESP-NOW send failures are reported asynchronously in espnow_send_cb, long
+ * after esp_now_send() has already returned ESP_OK. A single "did it fail" bit
+ * therefore races anything that resets it: the flag would be set microseconds
+ * after each send and cleared on the next one, so a status sampler would catch
+ * it only by luck and the fault would flicker rather than hold.
+ *
+ * Report the fault from recent history instead. All timestamps below are
+ * esp_timer microseconds, 0 meaning "never", and a fault reads as set while the
+ * most recent outcome was a failure within MC_SEND_ERR_HOLD_US. The hold is well
+ * over the 200 ms status-task period, so an unreachable robot reads as steadily
+ * failing rather than blinking, and a recovered link clears on its next success.
+ *
+ * The history is per paired slot, not global. Joystick traffic is unicast per
+ * robot at ~60 Hz, so with one robot dead and another alive a single shared pair
+ * of timestamps would interleave successes and failures and flicker exactly as
+ * the old single bit did. */
+#define MC_SEND_ERR_HOLD_US 1000000 /* 1 s */
+static volatile int64_t s_slot_err_us[MC_MAX_ROBOTS];
+static volatile int64_t s_slot_ok_us[MC_MAX_ROBOTS];
+/* Failures on the broadcast paths (enable, discovery), which esp_now_send()
+ * reports synchronously. Broadcasts have no meaningful completion status, so
+ * nothing ever arrives to clear this; it ages out on the same hold instead. A
+ * persistent fault keeps being refreshed, because the station re-asserts enable
+ * about every 500 ms while armed. */
+static volatile int64_t s_bcast_err_us;
 static uint8_t s_paired_mac[MC_MAX_ROBOTS][6];
 static bool s_paired_valid[MC_MAX_ROBOTS];
 static bool s_discovery_active;
@@ -36,15 +61,22 @@ static void discovery_timer_cb(void *arg)
     ESP_LOGI(TAG, "discovery window end");
 }
 
+static const uint8_t k_broadcast_mac[6] = {MC_BROADCAST_MAC_BYTE, MC_BROADCAST_MAC_BYTE,
+                                           MC_BROADCAST_MAC_BYTE, MC_BROADCAST_MAC_BYTE,
+                                           MC_BROADCAST_MAC_BYTE, MC_BROADCAST_MAC_BYTE};
+
+static bool is_broadcast_mac(const uint8_t *mac)
+{
+    return memcmp(mac, k_broadcast_mac, 6) == 0;
+}
+
 static esp_err_t ensure_broadcast_peer(void)
 {
-    uint8_t bcast[6] = {MC_BROADCAST_MAC_BYTE, MC_BROADCAST_MAC_BYTE, MC_BROADCAST_MAC_BYTE,
-                        MC_BROADCAST_MAC_BYTE, MC_BROADCAST_MAC_BYTE, MC_BROADCAST_MAC_BYTE};
-    if (esp_now_is_peer_exist(bcast)) {
+    if (esp_now_is_peer_exist(k_broadcast_mac)) {
         return ESP_OK;
     }
     esp_now_peer_info_t p = {0};
-    memcpy(p.peer_addr, bcast, 6);
+    memcpy(p.peer_addr, k_broadcast_mac, 6);
     p.channel = s_channel;
     p.ifidx = WIFI_IF_STA;
     p.encrypt = false;
@@ -64,11 +96,36 @@ static esp_err_t ensure_unicast_peer(const uint8_t *mac)
     return esp_now_add_peer(&peer);
 }
 
+/* Which paired slot a completion callback belongs to, or -1 if the peer is not
+ * (or is no longer) paired — an unpair can land between a send and its callback. */
+static int slot_for_mac(const uint8_t *mac)
+{
+    for (int i = 0; i < (int)MC_MAX_ROBOTS; i++) {
+        if (s_paired_valid[i] && memcmp(s_paired_mac[i], mac, 6) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
-    (void)mac_addr;
-    if (status != ESP_NOW_SEND_SUCCESS) {
-        s_error_flags |= 1u;
+    /* Broadcast frames are unacknowledged, so ESP-NOW always reports them as
+     * successful — including when every robot on the field is powered off. Only
+     * unicast outcomes say anything about reachability, so ignore broadcasts
+     * entirely; counting their fake successes would mask real joystick failures. */
+    if (!mac_addr || is_broadcast_mac(mac_addr)) {
+        return;
+    }
+    int slot = slot_for_mac(mac_addr);
+    if (slot < 0) {
+        return;
+    }
+    int64_t now = esp_timer_get_time();
+    if (status == ESP_NOW_SEND_SUCCESS) {
+        s_slot_ok_us[slot] = now;
+    } else {
+        s_slot_err_us[slot] = now;
     }
 }
 
@@ -142,15 +199,42 @@ bool minicore_global_enabled(void)
     return s_global_enabled;
 }
 
+/* True while `err_us` is a failure that is both recent and not yet superseded by
+ * a success. `ok_us` may be 0 for paths that never report success (broadcasts). */
+static bool fault_recent(int64_t now, int64_t err_us, int64_t ok_us)
+{
+    if (err_us == 0) {
+        return false; /* nothing has failed yet */
+    }
+    if (ok_us > err_us) {
+        /* The link recovered. Clear straight away rather than making the driver
+         * wait out the hold window staring at a fault that is already over. */
+        return false;
+    }
+    return (now - err_us) < MC_SEND_ERR_HOLD_US;
+}
+
 uint8_t minicore_error_flags(void)
 {
-    return s_error_flags;
+    int64_t now = esp_timer_get_time();
+    if (fault_recent(now, s_bcast_err_us, 0)) {
+        return 1u;
+    }
+    for (int i = 0; i < (int)MC_MAX_ROBOTS; i++) {
+        if (s_paired_valid[i] && fault_recent(now, s_slot_err_us[i], s_slot_ok_us[i])) {
+            return 1u;
+        }
+    }
+    return 0u;
 }
 
 void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t len)
 {
-    s_error_flags = 0;
-
+    /* Deliberately no fault reset here. This used to clear the error flag on
+     * every inbound report — at joystick rate, ~60x/sec — which erased the async
+     * send-failure callback's result before the status task could sample it, and
+     * let an unrelated report ID (pair, unpair, discovery) clear a real fault.
+     * Faults now age out in minicore_error_flags() instead. */
     switch (report_id) {
     case MC_HID_RID_JOYSTICK: {
         if (len < 1 + sizeof(joystick_packet_t)) {
@@ -160,13 +244,22 @@ void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t le
         if (ctrl >= MC_MAX_ROBOTS || !s_paired_valid[ctrl]) {
             return;
         }
+        /* Independent gate on the enable state: a stale or buggy driver station
+         * must not be able to drive a robot through this dongle without first
+         * having enabled it. */
+        if (!s_global_enabled) {
+            return;
+        }
+        /* These two paths fail synchronously (peer table full, radio not ready),
+         * so no completion callback will ever arrive for them. Stamp the slot's
+         * failure time directly; it ages out on the same hold as a real NAK. */
         if (ensure_unicast_peer(s_paired_mac[ctrl]) != ESP_OK) {
-            s_error_flags |= 1u;
+            s_slot_err_us[ctrl] = esp_timer_get_time();
             return;
         }
         esp_err_t e = esp_now_send(s_paired_mac[ctrl], buf + 1, sizeof(joystick_packet_t));
         if (e != ESP_OK) {
-            s_error_flags |= 1u;
+            s_slot_err_us[ctrl] = esp_timer_get_time();
         }
         break;
     }
@@ -179,18 +272,15 @@ void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t le
         if (ep.type != MC_MSG_ENABLE) {
             ep.type = MC_MSG_ENABLE;
         }
-        uint8_t all[6] = {MC_BROADCAST_MAC_BYTE, MC_BROADCAST_MAC_BYTE, MC_BROADCAST_MAC_BYTE,
-                          MC_BROADCAST_MAC_BYTE, MC_BROADCAST_MAC_BYTE, MC_BROADCAST_MAC_BYTE};
-        bool global = (memcmp(ep.target_mac, all, 6) == 0);
-        if (global) {
+        if (is_broadcast_mac(ep.target_mac)) {
             s_global_enabled = (ep.enabled != 0);
         }
         if (ensure_broadcast_peer() != ESP_OK) {
-            s_error_flags |= 1u;
+            s_bcast_err_us = esp_timer_get_time();
         }
-        esp_err_t e = esp_now_send(all, (uint8_t *)&ep, sizeof(ep));
+        esp_err_t e = esp_now_send(k_broadcast_mac, (uint8_t *)&ep, sizeof(ep));
         if (e != ESP_OK) {
-            s_error_flags |= 1u;
+            s_bcast_err_us = esp_timer_get_time();
         }
         break;
     }
@@ -209,13 +299,11 @@ void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t le
         esp_timer_stop(s_disc_timer);
         ESP_ERROR_CHECK(esp_timer_start_once(s_disc_timer, (uint64_t)MC_DISCOVERY_COLLECT_MS * 1000ULL));
         if (ensure_broadcast_peer() != ESP_OK) {
-            s_error_flags |= 1u;
+            s_bcast_err_us = esp_timer_get_time();
         }
-        uint8_t all[6] = {MC_BROADCAST_MAC_BYTE, MC_BROADCAST_MAC_BYTE, MC_BROADCAST_MAC_BYTE,
-                          MC_BROADCAST_MAC_BYTE, MC_BROADCAST_MAC_BYTE, MC_BROADCAST_MAC_BYTE};
-        esp_err_t e = esp_now_send(all, (uint8_t *)&dr, sizeof(dr));
+        esp_err_t e = esp_now_send(k_broadcast_mac, (uint8_t *)&dr, sizeof(dr));
         if (e != ESP_OK) {
-            s_error_flags |= 1u;
+            s_bcast_err_us = esp_timer_get_time();
         }
         break;
     }
@@ -228,6 +316,10 @@ void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t le
             return;
         }
         memcpy(s_paired_mac[idx], buf + 1, 6);
+        /* Start the slot's send history clean, before it counts as paired, so a
+         * newly assigned robot never inherits the previous occupant's fault. */
+        s_slot_err_us[idx] = 0;
+        s_slot_ok_us[idx] = 0;
         s_paired_valid[idx] = true;
         if (ensure_unicast_peer(s_paired_mac[idx]) != ESP_OK) {
             ESP_LOGW(TAG, "pair: add peer failed slot %u", (unsigned)idx);

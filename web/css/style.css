@@ -1,115 +1,738 @@
+/* ============================================================================
+   MiniCore driver station — mission-control instrument panel.
+
+   Palette validated for dark surface #17202A (OKLCH lightness band 0.48–0.67,
+   chroma floor, normal-vision floor, 3:1 contrast). Green and red separate by
+   only ΔE 2.6 under tritanopia, so NO state in this UI is signalled by colour
+   alone — every one carries a word, and the arm band carries a full wordmark.
+   ========================================================================= */
+
+:root {
+  /* Surfaces — cool graphite, near-black but not black */
+  --s-void: #0c1116;
+  --s-deck: #11181f;
+  --s-card: #17202a;
+  --s-rise: #1e2935;
+  --line: #26333f;
+  --line-bright: #33475a;
+
+  /* Ink */
+  --ink: #e6edf3;
+  --ink-dim: #96a5b4;
+  --ink-mute: #6b7c8c;
+
+  /* Validated status set */
+  --go: #2fae6c;
+  --warn: #ad8a14;
+  --stop: #d0453e;
+  --info: #2e9bc4;
+
+  --go-lift: #43c47e;
+  --stop-lift: #e35c54;
+
+  /* Type: one monospace system, sized as an instrument face. No webfont —
+     a competition venue is where a font CDN fetch fails. */
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", "Segoe UI Mono",
+    "Roboto Mono", Menlo, Consolas, monospace;
+
+  --r: 3px;
+  --gut: 0.875rem;
+}
+
 * {
   box-sizing: border-box;
 }
+
+html {
+  background: var(--s-void);
+}
+
 body {
-  font-family: system-ui, sans-serif;
+  margin: 0;
+  padding: var(--gut);
+  min-height: 100vh;
+  font-family: var(--mono);
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--ink);
+  background: var(--s-void);
+  font-variant-ligatures: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── The bezel: signature element. Its ring is the field state, visible from
+   across the room in peripheral vision. ─────────────────────────────────── */
+.bezel {
+  max-width: 74rem;
   margin: 0 auto;
-  max-width: 52rem;
-  padding: 1rem 1.25rem 2rem;
-  background: #0f1419;
-  color: #e8eef4;
+  padding: 3px;
+  border-radius: calc(var(--r) + 3px);
+  background: var(--line);
+  box-shadow: 0 0 0 1px #000 inset;
+  transition: background 140ms linear, box-shadow 140ms linear;
 }
-header h1 {
-  margin: 0 0 0.25rem;
-  font-weight: 650;
+
+body[data-armed="true"] .bezel {
+  background: var(--go);
+  box-shadow: 0 0 0 1px #000 inset, 0 0 34px -6px color-mix(in srgb, var(--go) 62%, transparent);
 }
-.sub {
-  margin: 0 0 1rem;
-  color: #9aa7b2;
-  font-size: 0.9rem;
+
+/* ── Top rail ───────────────────────────────────────────────────────────── */
+.rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gut);
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.7rem 0.9rem;
+  background: var(--s-card);
+  border-radius: var(--r) var(--r) 0 0;
+  border-bottom: 1px solid var(--line);
 }
-.panel {
-  border: 1px solid #243040;
-  border-radius: 8px;
-  padding: 0.85rem 1rem;
-  margin-bottom: 0.75rem;
-  background: #151c24;
+
+.rail__mark {
+  display: block;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
-.panel h2 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
+
+.rail__sub {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--ink-mute);
+  letter-spacing: 0.06em;
+}
+
+/* Telemetry readouts — label above value, the way a panel is labelled */
+.rail__tele {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.35rem;
+  margin: 0;
+}
+
+.tele dt {
+  font-size: 0.62rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.tele dd {
+  margin: 0.1rem 0 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.num {
+  color: var(--ink);
   font-weight: 600;
-  color: #b8c5d0;
+  font-variant-numeric: tabular-nums;
 }
-button {
-  margin-right: 0.5rem;
-  margin-bottom: 0.35rem;
-  padding: 0.35rem 0.65rem;
-  border-radius: 6px;
-  border: 1px solid #3d4f63;
-  background: #1e2a38;
-  color: #e8eef4;
+
+.unit {
+  color: var(--ink-mute);
+  font-size: 0.7rem;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-mute);
+  flex: none;
+}
+
+/* Scoped to the rail's own indicator — a bare `.dot` rule would also repaint
+   every slot status dot, showing empty slots as live. */
+body[data-link="up"] #dongleDot {
+  background: var(--go);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--go) 75%, transparent);
+}
+
+.rail__act {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+.btn {
+  font: inherit;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  padding: 0.42rem 0.8rem;
+  color: var(--ink);
+  background: var(--s-rise);
+  border: 1px solid var(--line-bright);
+  border-radius: var(--r);
+  cursor: pointer;
+  transition: background 100ms linear, border-color 100ms linear;
+}
+
+.btn:hover:not(:disabled) {
+  background: #26333f;
+  border-color: #43596e;
+}
+
+.btn--primary {
+  border-color: var(--info);
+  color: #d6f0fa;
+  background: color-mix(in srgb, var(--info) 20%, var(--s-rise));
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--info) 32%, var(--s-rise));
+}
+
+.btn--sm {
+  font-size: 0.68rem;
+  padding: 0.25rem 0.55rem;
+}
+
+.btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+/* Focus: always visible, never removed */
+:where(button, select, input, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+
+/* ── Notices ────────────────────────────────────────────────────────────── */
+.notice {
+  margin: 0;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.8rem;
+  color: #f4dcc8;
+  background: color-mix(in srgb, var(--warn) 22%, var(--s-card));
+  border-bottom: 1px solid var(--line);
+}
+
+.fault {
+  margin: 0;
+  padding: 0.28rem 0.55rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  color: #ffd9d6;
+  background: color-mix(in srgb, var(--stop) 26%, var(--s-rise));
+  border: 1px solid var(--stop);
+  border-radius: var(--r);
+}
+
+/* ── Arm band: the one bold move ─────────────────────────────────────────── */
+.arm {
+  position: relative;
+  padding: 1.5rem 1rem 1.1rem;
+  text-align: center;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      transparent 0 11px,
+      color-mix(in srgb, var(--stop) 7%, transparent) 11px 22px
+    ),
+    var(--s-deck);
+  border-bottom: 1px solid var(--line);
+  transition: background 140ms linear;
+}
+
+body[data-armed="true"] .arm {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      transparent 0 11px,
+      color-mix(in srgb, var(--go) 10%, transparent) 11px 22px
+    ),
+    color-mix(in srgb, var(--go) 9%, var(--s-deck));
+}
+
+.arm__state {
+  margin: 0;
+  font-size: clamp(1.7rem, 6.5vw, 3.1rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.2em;
+  text-indent: 0.2em; /* balance the trailing letter-space */
+  text-transform: uppercase;
+  color: var(--stop-lift);
+}
+
+body[data-armed="true"] .arm__state {
+  color: var(--go-lift);
+}
+
+.arm__read {
+  margin: 0.5rem 0 1rem;
+  font-size: 0.78rem;
+  color: var(--ink-dim);
+}
+
+.arm__switch {
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  min-width: min(23rem, 100%);
+  padding: 0.85rem 1.6rem;
+  cursor: pointer;
+  color: #eafff2;
+  background: color-mix(in srgb, var(--go) 26%, var(--s-rise));
+  border: 2px solid var(--go);
+  border-radius: var(--r);
+  transition: background 100ms linear, transform 60ms ease-out;
+}
+
+.arm__switch:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--go) 40%, var(--s-rise));
+}
+
+.arm__switch:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+body[data-armed="true"] .arm__switch {
+  color: #ffeceb;
+  background: color-mix(in srgb, var(--stop) 28%, var(--s-rise));
+  border-color: var(--stop);
+}
+
+body[data-armed="true"] .arm__switch:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--stop) 42%, var(--s-rise));
+}
+
+.arm__switch:disabled {
+  color: var(--ink-mute);
+  background: var(--s-rise);
+  border-color: var(--line-bright);
+  cursor: not-allowed;
+}
+
+.arm__panic {
+  margin: 0.7rem 0 0;
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+kbd {
+  font: inherit;
+  font-size: 0.66rem;
+  padding: 0.1rem 0.32rem;
+  color: var(--ink-dim);
+  background: var(--s-rise);
+  border: 1px solid var(--line-bright);
+  border-radius: 2px;
+}
+
+/* ── Deck ───────────────────────────────────────────────────────────────── */
+.deck {
+  display: grid;
+  grid-template-columns: 1fr 19rem;
+  gap: 1px;
+  background: var(--line);
+  border-radius: 0 0 var(--r) var(--r);
+  overflow: hidden;
+}
+
+.slots {
+  background: var(--s-deck);
+  padding: var(--gut);
+}
+
+.slots__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gut);
+}
+
+/* ── Slot cards: the primary work surface ───────────────────────────────── */
+.slot {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.8rem;
+  background: var(--s-card);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-bright);
+  border-radius: var(--r);
+  transition: border-color 120ms linear;
+}
+
+.slot[data-live="true"] {
+  border-left-color: var(--go);
+}
+
+.slot[data-paired="false"] {
+  border-left-color: var(--line-bright);
+}
+
+.slot__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.slot__idx {
+  font-size: 0.62rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.slot__name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slot[data-paired="false"] .slot__name {
+  color: var(--ink-mute);
+  font-weight: 400;
+}
+
+/* Status line — always a word, never colour alone */
+.slot__status {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.slot__status .dot {
+  background: var(--ink-mute);
+}
+
+.slot[data-state="live"] .slot__status {
+  color: var(--go-lift);
+}
+
+.slot[data-state="live"] .slot__status .dot {
+  background: var(--go);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--go) 70%, transparent);
+}
+
+.slot[data-state="stale"] .slot__status {
+  color: color-mix(in srgb, var(--warn) 62%, var(--ink));
+}
+
+.slot[data-state="stale"] .slot__status .dot {
+  background: var(--warn);
+}
+
+.slot[data-state="standby"] .slot__status {
+  color: var(--ink-dim);
+}
+
+.slot__field {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.slot__field > span {
+  font-size: 0.6rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+select {
+  font: inherit;
+  font-size: 0.78rem;
+  width: 100%;
+  padding: 0.4rem 0.45rem;
+  color: var(--ink);
+  background: var(--s-rise);
+  border: 1px solid var(--line-bright);
+  border-radius: var(--r);
   cursor: pointer;
 }
-button:disabled {
+
+select:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
-.badge {
-  display: inline-block;
-  padding: 0.15rem 0.45rem;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  background: #2a3544;
+
+.slot__mac {
+  margin: 0;
+  font-size: 0.66rem;
+  color: var(--ink-mute);
+  letter-spacing: 0.03em;
 }
-.badge.ok {
-  background: #1e4d2e;
-}
-.hint {
-  font-size: 0.85rem;
-  color: #9aa7b2;
-  margin-top: 0;
-}
-.slot-row {
+
+/* Stick telemetry: two mirrored bars, centre-anchored. Real axis values. */
+.sticks {
   display: grid;
-  grid-template-columns: 4rem 1fr 1fr auto;
+  grid-template-columns: 1fr 1fr;
   gap: 0.5rem;
+  padding-top: 0.15rem;
+}
+
+.stick {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.stick > span {
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.stick__track {
+  position: relative;
+  height: 5px;
+  background: var(--s-rise);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+/* centre tick */
+.stick__track::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line-bright);
+}
+
+.stick__fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 0;
+  background: var(--info);
+  border-radius: 2px;
+  transition: none;
+}
+
+/* ── Utility column ─────────────────────────────────────────────────────── */
+.util {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--line);
+}
+
+.card--util {
+  padding: 0.75rem 0.8rem;
+  background: var(--s-card);
+}
+
+.card--log {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.card__head {
+  display: flex;
   align-items: center;
-  margin-bottom: 0.4rem;
-  font-size: 0.9rem;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
 }
-.slot-row select {
-  max-width: 100%;
-  padding: 0.25rem;
-  background: #1e2a38;
-  color: #e8eef4;
-  border: 1px solid #3d4f63;
-  border-radius: 4px;
+
+.card__head h2 {
+  margin: 0;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
 }
-#gamepadList {
+
+.empty {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--ink-mute);
+}
+
+/* Robot + gamepad lists */
+.rlist,
+.glist {
   list-style: none;
-  padding: 0;
   margin: 0;
-  font-size: 0.85rem;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
 }
-#gamepadList li {
-  padding: 0.4rem 0.5rem;
-  margin-bottom: 0.25rem;
-  border-radius: 4px;
-  background: #1e2a38;
-  border: 1px solid #3d4f63;
-  transition: all 0.1s ease;
+
+.rlist li,
+.glist li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.72rem;
+  background: var(--s-rise);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  min-width: 0; /* let the flex child actually shrink so ellipsis applies */
 }
-#gamepadList li.active {
-  background: #1e4d2e;
-  border-color: #2e8b57;
-  color: #fff;
+
+.rlist .r-name,
+.glist .g-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-#robotList {
+
+.rlist .r-mac {
+  margin-left: auto;
+  font-size: 0.64rem;
+  color: var(--ink-mute);
+  flex: none;
+}
+
+.glist li[data-active="true"] {
+  border-color: var(--go);
+  background: color-mix(in srgb, var(--go) 17%, var(--s-rise));
+}
+
+.g-idx {
+  flex: none;
+  padding: 0.02rem 0.28rem;
+  font-size: 0.62rem;
+  color: var(--ink-dim);
+  background: var(--s-card);
+  border: 1px solid var(--line-bright);
+  border-radius: 2px;
+}
+
+/* Activity log */
+.log {
   list-style: none;
+  margin: 0;
   padding: 0;
-  margin: 0;
-  font-size: 0.85rem;
+  overflow-y: auto;
+  max-height: 15rem;
+  font-size: 0.68rem;
+  line-height: 1.6;
+  color: var(--ink-dim);
 }
-#robotList li {
-  padding: 0.25rem 0;
-  border-bottom: 1px solid #243040;
+
+.log li {
+  display: flex;
+  gap: 0.45rem;
+  padding: 0.1rem 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
 }
-.log pre {
-  margin: 0;
-  max-height: 12rem;
-  overflow: auto;
-  font-size: 0.75rem;
-  color: #a8b6c4;
-  white-space: pre-wrap;
+
+.log time {
+  flex: none;
+  color: var(--ink-mute);
+  font-variant-numeric: tabular-nums;
+}
+
+.log li[data-kind="warn"] {
+  color: color-mix(in srgb, var(--warn) 60%, var(--ink));
+}
+
+.log li[data-kind="err"] {
+  color: var(--stop-lift);
+}
+
+.log li[data-kind="go"] {
+  color: var(--go-lift);
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 62rem) {
+  .deck {
+    grid-template-columns: 1fr;
+  }
+
+  .util {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .card--util {
+    flex: 1 1 15rem;
+  }
+}
+
+@media (max-width: 40rem) {
+  body {
+    padding: 0.5rem;
+  }
+
+  .rail {
+    justify-content: flex-start;
+  }
+
+  .rail__tele {
+    gap: 0.9rem;
+    order: 3;
+    width: 100%;
+  }
+
+  .slots__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .arm {
+    padding: 1.1rem 0.7rem 0.9rem;
+  }
+
+  /* Pointer-only hint: keyboard stop is unreachable without a keyboard */
+  .arm__panic {
+    display: none;
+  }
+}
+
+@media (hover: none) {
+  .arm__panic {
+    display: none;
+  }
+}
+
+/* ── Reduced motion ─────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* ── Forced colours: state must survive with no palette at all ──────────── */
+@media (forced-colors: active) {
+  .bezel,
+  .slot,
+  .rlist li,
+  .glist li {
+    border: 1px solid CanvasText;
+  }
+
+  .dot {
+    border: 1px solid CanvasText;
+  }
 }

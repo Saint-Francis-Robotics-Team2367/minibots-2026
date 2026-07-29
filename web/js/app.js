@@ -27,23 +27,46 @@ import {
 let device = null;
 let seq = 0;
 let raf = 0;
+let armed = false;
+let wifiChannel = 6;
 
+/** Robots we've heard from: macKey -> { mac, id, lastSeen, battery, flags } */
 const discovered = new Map();
+/** Slot index -> Uint8Array(6) | null */
 const pairMac = [];
 
-function log(...args) {
-  const el = document.getElementById("log");
-  const line = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
-  el.textContent = `${line}\n` + el.textContent.slice(0, 8000);
+/** Joystick reports sent in the current second, for the rail readout. */
+let txCount = 0;
+
+const BROADCAST_MAC = new Uint8Array(6).fill(0xff);
+const STALE_MS = 2500;
+const DROP_MS = 5000;
+const LOG_MAX = 200;
+
+const $ = (id) => document.getElementById(id);
+
+/* ── Activity log ─────────────────────────────────────────────────────────── */
+
+/** @param {string} msg @param {"info"|"go"|"warn"|"err"} kind */
+function log(msg, kind = "info") {
+  const list = $("log");
+  const li = document.createElement("li");
+  li.dataset.kind = kind;
+  const t = document.createElement("time");
+  const d = new Date();
+  t.textContent = [d.getHours(), d.getMinutes(), d.getSeconds()]
+    .map((n) => String(n).padStart(2, "0"))
+    .join(":");
+  const span = document.createElement("span");
+  span.textContent = msg;
+  li.append(t, span);
+  list.prepend(li);
+  while (list.children.length > LOG_MAX) {
+    list.lastElementChild.remove();
+  }
 }
 
-function setDongleUi(connected) {
-  document.getElementById("dongleState").textContent = connected ? "connected" : "disconnected";
-  document.getElementById("dongleState").className = "badge" + (connected ? " ok" : "");
-  document.getElementById("chkGlobalEn").disabled = !connected;
-  document.getElementById("btnDisconnect").disabled = !connected;
-  document.getElementById("btnConnect").disabled = connected;
-}
+/* ── Formatting ───────────────────────────────────────────────────────────── */
 
 function macKey(mac) {
   return Array.from(mac)
@@ -51,71 +74,76 @@ function macKey(mac) {
     .join(":");
 }
 
-function onInputReport(e) {
-  const { reportId, data } = e;
-  const buf = new Uint8Array(data.buffer);
-  if (reportId === MC_HID_RID_HEARTBEAT_IN) {
-    const h = decodeHeartbeatIn(buf);
-    if (h) {
-      log("heartbeat", h.robot_id, h.battery_pct);
-      const k = macKey(h.mac);
-      if (!discovered.has(k)) {
-        discovered.set(k, { mac: h.mac, id: h.robot_id, lastSeen: Date.now() });
-        renderRobots();
-      } else {
-        discovered.get(k).lastSeen = Date.now();
-      }
-    }
-  } else if (reportId === MC_HID_RID_DISCOVERY_IN) {
-    const d = decodeDiscoveryIn(buf);
-    if (d) {
-      const k = macKey(d.mac);
-      if (!discovered.has(k)) {
-        discovered.set(k, { mac: d.mac, id: d.robot_id, lastSeen: Date.now() });
-        renderRobots();
-      } else {
-        discovered.get(k).lastSeen = Date.now();
-      }
-      log("discovered", d.robot_id, k);
-    }
-  } else if (reportId === MC_HID_RID_DONGLE_STATUS) {
-    const s = decodeDongleStatus(buf);
-    if (s) {
-      document.getElementById("chanDisp").textContent = String(s.wifi_channel);
-    }
+/** Robots report battery as 0xFF when they have no sensor — say so, don't fake it. */
+function batteryText(pct) {
+  return pct === undefined || pct === 0xff ? "battery n/a" : `battery ${pct}%`;
+}
+
+/* ── Dongle connection ────────────────────────────────────────────────────── */
+
+function setDongleUi(connected) {
+  document.body.dataset.link = connected ? "up" : "down";
+  $("dongleState").textContent = connected ? "Connected" : "Not connected";
+  $("btnDisconnect").disabled = !connected;
+  $("btnConnect").disabled = connected;
+  $("btnScan").disabled = !connected;
+  $("btnArm").disabled = !connected;
+  if (!connected) {
+    $("chanDisp").textContent = "--";
+    $("txRate").textContent = "0";
+    $("faultChip").hidden = true;
   }
+  renderArm();
+  refreshSlotControls();
 }
 
 async function connectDongle() {
   if (!("hid" in navigator)) {
-    alert("WebHID not available. Use Chrome or Edge over HTTPS or localhost.");
+    $("noHid").hidden = false;
+    log("WebHID unavailable in this browser", "err");
     return;
   }
   const devs = await navigator.hid.requestDevice({
     filters: [{ vendorId: MINICORE_USB_VID, productId: MINICORE_USB_PID }],
   });
   if (!devs.length) {
+    log("No dongle selected", "warn");
     return;
   }
   device = devs[0];
   await device.open();
   device.addEventListener("inputreport", onInputReport);
   setDongleUi(true);
-  log("opened", device.productName);
+  log(`Dongle connected — ${device.productName || "MiniCore"}`, "go");
+  // This page starts disarmed, but a robot that stayed powered through a reload
+  // is still latched enabled from the previous session. Push our state onto the
+  // field before the control loop starts, so the UI and the robots agree.
+  await broadcastDisable("link opened");
   startGamepadLoop();
 }
 
-function disconnectDongle() {
+async function disconnectDongle() {
+  // Stop the control loop before anything else, so it can't race a send against
+  // the closing device.
   if (raf) {
     cancelAnimationFrame(raf);
     raf = 0;
   }
+  // Never leave robots enabled behind a closing link. Sent unconditionally: a
+  // robot may be latched enabled from an earlier session even when armed is
+  // false here. Awaited, because device.close() would abort it in flight.
+  await broadcastDisable("link closing");
   if (device && device.opened) {
     device.removeEventListener("inputreport", onInputReport);
-    device.close();
+    await device.close();
   }
   device = null;
+  for (let i = 0; i < MC_MAX_ROBOTS; i++) {
+    pairMac[i] = null;
+  }
   setDongleUi(false);
+  renderSlots();
+  log("Dongle disconnected");
 }
 
 async function sendReport(reportId, data) {
@@ -125,141 +153,403 @@ async function sendReport(reportId, data) {
   await device.sendReport(reportId, data);
 }
 
+/* ── Inbound reports ──────────────────────────────────────────────────────── */
+
+function touchRobot(mac, id, extra) {
+  const k = macKey(mac);
+  const prev = discovered.get(k);
+  const rec = prev || { mac, id, battery: 0xff, flags: 0 };
+  rec.id = id || rec.id;
+  rec.lastSeen = Date.now();
+  Object.assign(rec, extra);
+  discovered.set(k, rec);
+  if (!prev) {
+    log(`Robot ${rec.id || "(unnamed)"} found — ${k}`, "go");
+    renderRobots();
+  }
+  return rec;
+}
+
+function onInputReport(e) {
+  const { reportId, data } = e;
+  const buf = new Uint8Array(data.buffer);
+
+  if (reportId === MC_HID_RID_HEARTBEAT_IN) {
+    const h = decodeHeartbeatIn(buf);
+    if (h) {
+      touchRobot(h.mac, h.robot_id, {
+        battery: h.battery_pct,
+        flags: h.status_flags,
+      });
+    }
+  } else if (reportId === MC_HID_RID_DISCOVERY_IN) {
+    const d = decodeDiscoveryIn(buf);
+    if (d) {
+      touchRobot(d.mac, d.robot_id, {});
+    }
+  } else if (reportId === MC_HID_RID_DONGLE_STATUS) {
+    const s = decodeDongleStatus(buf);
+    if (s) {
+      wifiChannel = s.wifi_channel;
+      $("chanDisp").textContent = String(s.wifi_channel);
+      // error_flags bit0 = ESP-NOW send failure on the dongle.
+      const fault = (s.error_flags & 1) !== 0;
+      const chip = $("faultChip");
+      if (fault !== !chip.hidden) {
+        chip.hidden = !fault;
+        if (fault) log("Dongle reports ESP-NOW send failure", "err");
+      }
+    }
+  }
+}
+
+/* ── Arm / disarm ─────────────────────────────────────────────────────────── */
+
+function renderArm() {
+  const connected = !!(device && device.opened);
+  const pairedCount = pairMac.filter(Boolean).length;
+  document.body.dataset.armed = String(armed);
+  $("armState").textContent = armed ? "Enabled" : "Disabled";
+  $("btnArm").textContent = armed ? "Disable all robots" : "Enable all robots";
+
+  let read;
+  if (!connected) {
+    read = "Connect the dongle to enable robots.";
+  } else if (armed) {
+    read =
+      pairedCount === 1
+        ? "1 robot is live and following its gamepad."
+        : `${pairedCount} robots are live and following their gamepads.`;
+  } else if (pairedCount === 0) {
+    read = "Assign a robot to a slot, then enable.";
+  } else {
+    read = `${pairedCount} ${pairedCount === 1 ? "slot" : "slots"} ready. Motors are stopped.`;
+  }
+  $("armRead").textContent = read;
+}
+
+/**
+ * Push enable=off to every robot in range, whatever the UI currently believes.
+ * A robot latches its enabled flag until told otherwise, so "we think we're
+ * disarmed" is not a reason to skip sending — that assumption is exactly how a
+ * robot ends up driving from a freshly loaded page.
+ */
+async function broadcastDisable(reason) {
+  armed = false;
+  renderArm();
+  renderSlots();
+  if (!device || !device.opened) {
+    // No link to send down. Say so rather than logging a stop that never went out.
+    log(`Disarmed locally — no link to disable robots${reason ? ` (${reason})` : ""}`, "warn");
+    return;
+  }
+  try {
+    await sendReport(MC_HID_RID_ENABLE, encodeEnable(false, BROADCAST_MAC));
+    log(`Disabled — motors stopped${reason ? ` (${reason})` : ""}`, "warn");
+  } catch (err) {
+    log(`Disable command failed: ${err}`, "err");
+  }
+}
+
+async function setArmed(on, reason) {
+  if (on === armed) {
+    return;
+  }
+  if (!on) {
+    await broadcastDisable(reason);
+    return;
+  }
+  armed = true;
+  renderArm();
+  renderSlots();
+  try {
+    await sendReport(MC_HID_RID_ENABLE, encodeEnable(true, BROADCAST_MAC));
+    log("Enabled — all robots live", "go");
+  } catch (err) {
+    log(`Enable command failed: ${err}`, "err");
+  }
+}
+
+/* ── Slots ────────────────────────────────────────────────────────────────── */
+
+function buildSlots() {
+  const root = $("slots");
+  root.innerHTML = "";
+  for (let i = 0; i < MC_MAX_ROBOTS; i++) {
+    pairMac[i] = null;
+    const slot = document.createElement("section");
+    slot.className = "slot";
+    slot.id = `slot-${i}`;
+    slot.dataset.paired = "false";
+    slot.dataset.state = "empty";
+    slot.innerHTML = `
+      <header class="slot__head">
+        <span class="slot__idx">Slot ${i}</span>
+        <button type="button" class="btn btn--sm btn-release" data-idx="${i}" disabled>Release</button>
+      </header>
+      <p class="slot__name" id="slot-name-${i}">No robot</p>
+      <p class="slot__status" id="slot-status-${i}">
+        <span class="dot" aria-hidden="true"></span><span>Empty</span>
+      </p>
+      <label class="slot__field">
+        <span>Robot</span>
+        <select class="slot-pair" data-idx="${i}" aria-label="Robot for slot ${i}">
+          <option value="">— none —</option>
+        </select>
+      </label>
+      <label class="slot__field">
+        <span>Gamepad</span>
+        <select class="slot-gamepad" data-idx="${i}" aria-label="Gamepad for slot ${i}">
+          <option value="">— none —</option>
+        </select>
+      </label>
+      <p class="slot__mac" id="slot-mac-${i}"></p>
+      <div class="sticks" aria-hidden="true">
+        <div class="stick">
+          <span>Left</span>
+          <div class="stick__track"><div class="stick__fill" id="stick-l-${i}"></div></div>
+        </div>
+        <div class="stick">
+          <span>Right</span>
+          <div class="stick__track"><div class="stick__fill" id="stick-r-${i}"></div></div>
+        </div>
+      </div>`;
+    root.appendChild(slot);
+  }
+
+  // Choosing a robot pairs it immediately — one action instead of select-then-Pair.
+  root.querySelectorAll("select.slot-pair").forEach((sel) => {
+    sel.addEventListener("change", () => pairSlot(Number(sel.dataset.idx), sel.value));
+  });
+  root.querySelectorAll(".btn-release").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.dataset.idx);
+      const sel = root.querySelector(`select.slot-pair[data-idx="${idx}"]`);
+      if (sel) sel.value = "";
+      pairSlot(idx, "");
+    });
+  });
+  root.querySelectorAll("select.slot-gamepad").forEach((sel) => {
+    sel.addEventListener("change", () => renderSlots());
+  });
+}
+
+async function pairSlot(idx, key) {
+  if (!key) {
+    pairMac[idx] = null;
+    try {
+      await sendReport(MC_HID_RID_UNPAIR, encodeUnpairOut(idx));
+      log(`Slot ${idx} released`);
+    } catch (err) {
+      log(`Release failed on slot ${idx}: ${err}`, "err");
+    }
+    renderSlots();
+    renderArm();
+    return;
+  }
+  const mac6 = new Uint8Array(key.split(":").map((h) => parseInt(h, 16)));
+  pairMac[idx] = mac6;
+  try {
+    await sendReport(MC_HID_RID_PAIR, encodePairOut(idx, mac6));
+    const rec = discovered.get(key);
+    log(`Slot ${idx} → ${rec?.id || key}`, "go");
+  } catch (err) {
+    log(`Pair failed on slot ${idx}: ${err}`, "err");
+  }
+  renderSlots();
+  renderArm();
+}
+
+function refreshSlotControls() {
+  const connected = !!(device && device.opened);
+  document.querySelectorAll("select.slot-pair").forEach((sel) => {
+    sel.disabled = !connected;
+  });
+}
+
+/** Paint per-slot identity and status from real robot reports. */
+function renderSlots() {
+  const now = Date.now();
+  for (let i = 0; i < MC_MAX_ROBOTS; i++) {
+    const slot = $(`slot-${i}`);
+    if (!slot) continue;
+    const mac = pairMac[i];
+    const rec = mac ? discovered.get(macKey(mac)) : null;
+    const gpSel = slot.querySelector("select.slot-gamepad");
+    const hasGamepad = !!(gpSel && gpSel.value !== "");
+
+    slot.dataset.paired = mac ? "true" : "false";
+    slot.querySelector(".btn-release").disabled = !mac;
+    $(`slot-name-${i}`).textContent = mac ? rec?.id || "(unnamed)" : "No robot";
+    $(`slot-mac-${i}`).textContent = mac ? macKey(mac) : "";
+
+    let state = "empty";
+    let label = "Empty";
+    if (mac) {
+      const age = rec ? now - rec.lastSeen : Infinity;
+      // status_flags bit0 is the robot's own view of being enabled.
+      const robotEnabled = !!rec && (rec.flags & 1) !== 0;
+      if (!rec || age > STALE_MS) {
+        state = "stale";
+        label = "No heartbeat";
+      } else if (armed) {
+        state = "live";
+        label = robotEnabled
+          ? `Live · ${batteryText(rec.battery)}`
+          : `Enabling · ${batteryText(rec.battery)}`;
+      } else if (robotEnabled) {
+        // Believe the robot over our own state: it reports itself enabled while
+        // we think we're disarmed, so say so rather than painting "Standby".
+        state = "live";
+        label = `Still enabled · ${batteryText(rec.battery)}`;
+      } else if (!hasGamepad) {
+        state = "standby";
+        label = `Needs gamepad · ${batteryText(rec.battery)}`;
+      } else {
+        state = "standby";
+        label = `Standby · ${batteryText(rec.battery)}`;
+      }
+    }
+    slot.dataset.state = state;
+    slot.dataset.live = String(state === "live");
+    const status = $(`slot-status-${i}`);
+    status.lastElementChild.textContent = label;
+  }
+}
+
+/* ── Robot + gamepad lists ────────────────────────────────────────────────── */
+
 function renderRobots() {
-  const ul = document.getElementById("robotList");
+  const ul = $("robotList");
   ul.innerHTML = "";
-  for (const [, v] of discovered) {
+  for (const [k, v] of discovered) {
     const li = document.createElement("li");
-    li.textContent = `${v.id} — ${macKey(v.mac)}`;
+    const name = document.createElement("span");
+    name.className = "r-name";
+    name.textContent = v.id || "(unnamed)";
+    const mac = document.createElement("span");
+    mac.className = "r-mac";
+    mac.textContent = k.slice(-8);
+    li.append(name, mac);
     ul.appendChild(li);
   }
-  const selects = document.querySelectorAll("select.slot-pair");
-  selects.forEach((sel) => {
+  $("robotEmpty").hidden = discovered.size > 0;
+  $("seenCount").textContent = String(discovered.size);
+
+  // Keep every slot's robot menu in sync without losing the current choice.
+  document.querySelectorAll("select.slot-pair").forEach((sel) => {
     const cur = sel.value;
     sel.innerHTML = '<option value="">— none —</option>';
-    for (const [, v] of discovered) {
+    for (const [k, v] of discovered) {
       const opt = document.createElement("option");
-      opt.value = macKey(v.mac);
-      opt.textContent = `${v.id}`;
+      opt.value = k;
+      opt.textContent = v.id || k;
       sel.appendChild(opt);
     }
     sel.value = cur;
   });
-}
-
-function buildSlots() {
-  const root = document.getElementById("slots");
-  root.innerHTML = "";
-  for (let i = 0; i < MC_MAX_ROBOTS; i++) {
-    pairMac[i] = null;
-    const row = document.createElement("div");
-    row.className = "slot-row";
-    row.innerHTML = `<span>Slot ${i}</span>
-      <select class="slot-pair" data-idx="${i}"><option value="">— robot —</option></select>
-      <select class="slot-gamepad" data-idx="${i}"><option value="">— gamepad —</option></select>
-      <button type="button" class="btn-pair" data-idx="${i}">Pair</button>`;
-    root.appendChild(row);
-  }
-  root.querySelectorAll(".btn-pair").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const idx = Number(btn.getAttribute("data-idx"));
-      const sel = root.querySelector(`select.slot-pair[data-idx="${idx}"]`);
-      const v = sel.value;
-      if (!v || !device) {
-        await sendReport(MC_HID_RID_UNPAIR, encodeUnpairOut(idx));
-        pairMac[idx] = null;
-        log("unpair slot", idx);
-        return;
-      }
-      const mac = v.split(":").map((h) => parseInt(h, 16));
-      const mac6 = new Uint8Array(mac);
-      await sendReport(MC_HID_RID_PAIR, encodePairOut(idx, mac6));
-      pairMac[idx] = mac6;
-      log("pair slot", idx, v);
-    });
-  });
+  refreshSlotControls();
 }
 
 function renderGamepads() {
   const gps = navigator.getGamepads ? navigator.getGamepads() : [];
-  const list = document.getElementById("gamepadList");
-  if (!list) return;
+  const list = $("gamepadList");
   list.innerHTML = "";
-  
-  const selects = document.querySelectorAll("select.slot-gamepad");
-  selects.forEach((sel) => {
-    const cur = sel.value;
-    sel.innerHTML = '<option value="">— gamepad —</option>';
-    for (let i = 0; i < gps.length; i++) {
-      const gp = gps[i];
-      if (gp) {
-        const opt = document.createElement("option");
-        opt.value = i;
-        opt.textContent = `${i}: ${gp.id}`;
-        sel.appendChild(opt);
-      }
-    }
-    sel.value = cur;
-  });
+  let count = 0;
 
   for (let i = 0; i < gps.length; i++) {
     const gp = gps[i];
-    if (gp) {
-      const li = document.createElement("li");
-      li.id = `gp-item-${i}`;
-      li.textContent = `Index ${i}: ${gp.id}`;
-      list.appendChild(li);
-    }
+    if (!gp) continue;
+    count++;
+    const li = document.createElement("li");
+    li.id = `gp-item-${i}`;
+    li.dataset.active = "false";
+    const idx = document.createElement("span");
+    idx.className = "g-idx";
+    idx.textContent = String(i);
+    const name = document.createElement("span");
+    name.className = "g-name";
+    name.textContent = gp.id;
+    li.append(idx, name);
+    list.appendChild(li);
   }
+  $("gamepadEmpty").hidden = count > 0;
+
+  document.querySelectorAll("select.slot-gamepad").forEach((sel) => {
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— none —</option>';
+    for (let i = 0; i < gps.length; i++) {
+      if (!gps[i]) continue;
+      const opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = `${i}: ${gps[i].id}`;
+      sel.appendChild(opt);
+    }
+    sel.value = cur;
+  });
+  renderSlots();
 }
 
-window.addEventListener("gamepadconnected", renderGamepads);
-window.addEventListener("gamepaddisconnected", renderGamepads);
+window.addEventListener("gamepadconnected", (e) => {
+  log(`Gamepad ${e.gamepad.index} connected — ${e.gamepad.id}`);
+  renderGamepads();
+});
+window.addEventListener("gamepaddisconnected", (e) => {
+  log(`Gamepad ${e.gamepad.index} disconnected`, "warn");
+  renderGamepads();
+});
+
+/* ── Control loop ─────────────────────────────────────────────────────────── */
+
+function setStick(id, value) {
+  const el = $(id);
+  if (!el) return;
+  // Centre-anchored bar: grow left or right from the midline.
+  const pct = Math.max(-1, Math.min(1, value)) * 50;
+  el.style.left = pct < 0 ? `${50 + pct}%` : "50%";
+  el.style.width = `${Math.abs(pct)}%`;
+}
 
 function startGamepadLoop() {
   const tick = async () => {
     const gps = navigator.getGamepads ? navigator.getGamepads() : [];
-    
-    // Update active visual state for gamepads
+
+    // Light up any gamepad the driver is actually touching.
     for (let i = 0; i < gps.length; i++) {
       const gp = gps[i];
-      if (gp) {
-        let active = false;
-        for (let j = 0; j < gp.axes.length; j++) {
-          if (Math.abs(gp.axes[j]) > 0.1) active = true;
-        }
-        for (let j = 0; j < gp.buttons.length; j++) {
-          if (gp.buttons[j].pressed) active = true;
-        }
-        const el = document.getElementById(`gp-item-${i}`);
-        if (el) {
-          if (active) el.classList.add("active");
-          else el.classList.remove("active");
-        }
-      }
+      if (!gp) continue;
+      const active =
+        gp.axes.some((a) => Math.abs(a) > 0.12) || gp.buttons.some((b) => b.pressed);
+      const el = $(`gp-item-${i}`);
+      if (el) el.dataset.active = String(active);
     }
 
     if (!device || !device.opened) {
       raf = requestAnimationFrame(tick);
       return;
     }
+
     for (let slot = 0; slot < MC_MAX_ROBOTS; slot++) {
-      if (!pairMac[slot]) {
-        continue;
-      }
       const sel = document.querySelector(`select.slot-gamepad[data-idx="${slot}"]`);
-      if (!sel || sel.value === "") continue;
-      
-      const gpIdx = Number(sel.value);
-      const gp = gps[gpIdx];
-      if (!gp) {
+      const gp = sel && sel.value !== "" ? gps[Number(sel.value)] : null;
+
+      // Mirror the sticks whether or not we're armed, so wiring can be checked safely.
+      setStick(`stick-l-${slot}`, gp ? -(gp.axes[1] ?? 0) : 0);
+      setStick(`stick-r-${slot}`, gp ? -(gp.axes[3] ?? 0) : 0);
+
+      if (!pairMac[slot] || !gp) {
         continue;
       }
-      const joy = gamepadToJoystick(++seq, gp, null);
+      // Stick values only leave the station when armed. Disarmed slots stream a
+      // neutral packet rather than silence: silence would leave the robot's
+      // 250 ms failsafe as the only thing stopping the motors, and a neutral
+      // command stops them outright even if the enable latch is somehow stuck.
+      const joy = gamepadToJoystick(++seq, armed ? gp : null, null);
       try {
         await sendReport(MC_HID_RID_JOYSTICK, encodeJoystickOut(slot, joy));
+        txCount++;
       } catch (err) {
-        log("send joystick err", String(err));
+        log(`Joystick send failed: ${err}`, "err");
       }
     }
     raf = requestAnimationFrame(tick);
@@ -267,30 +557,119 @@ function startGamepadLoop() {
   raf = requestAnimationFrame(tick);
 }
 
-document.getElementById("btnConnect").addEventListener("click", () => connectDongle().catch((e) => log(String(e))));
-document.getElementById("btnDisconnect").addEventListener("click", disconnectDongle);
-document.getElementById("chkGlobalEn").addEventListener("change", async (e) => {
-  const on = e.target.checked;
-  const b = new Uint8Array(6);
-  b.fill(0xff);
-  await sendReport(MC_HID_RID_ENABLE, encodeEnable(on, b));
-  log("enable global", on);
+/* ── Wiring ───────────────────────────────────────────────────────────────── */
+
+$("btnConnect").addEventListener("click", () => {
+  connectDongle().catch((err) => log(`Connect failed: ${err}`, "err"));
+});
+$("btnDisconnect").addEventListener("click", () => {
+  disconnectDongle().catch((err) => log(`Disconnect failed: ${err}`, "err"));
+});
+$("btnArm").addEventListener("click", () => setArmed(!armed));
+$("btnClearLog").addEventListener("click", () => {
+  $("log").innerHTML = "";
 });
 
-buildSlots();
-setDongleUi(false);
-log("Ready. Connect dongle, pair a slot, enable, then use gamepads at indices 0–3.");
+// Scan was specified and handled by the dongle, but never reachable from the UI.
+$("btnScan").addEventListener("click", async () => {
+  try {
+    await sendReport(MC_HID_RID_DISCOVERY, encodeDiscoveryOut(wifiChannel));
+    log(`Scanning channel ${wifiChannel}…`);
+  } catch (err) {
+    log(`Scan failed: ${err}`, "err");
+  }
+});
 
+// Emergency stop: Space or Esc always disables, from anywhere on the page.
+window.addEventListener("keydown", (e) => {
+  const isPanic = e.code === "Space" || e.key === "Escape";
+  if (!isPanic || e.repeat) {
+    return;
+  }
+  const el = e.target;
+  const typing =
+    el instanceof HTMLElement &&
+    (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName));
+  if (typing) {
+    return;
+  }
+  // Space would otherwise scroll or re-trigger a focused button.
+  e.preventDefault();
+  // Not gated on `armed`: the panic key must reach a robot that is latched
+  // enabled from a previous session, which is precisely when the UI reads
+  // disarmed and the driver is reaching for this key.
+  broadcastDisable("keyboard stop").catch(() => {});
+});
+
+// A reload or closed tab must not leave robots latched enabled. This is
+// best-effort — the page may die before the send lands, which is why the
+// control loop gates on `armed` and connect re-syncs the field.
+window.addEventListener("pagehide", () => {
+  // Drop our own armed state too, not just the robots': on a back/forward-cache
+  // restore this page keeps running, and it must not come back claiming to be
+  // enabled — or streaming live stick values — after disabling the field.
+  const wasLive = device && device.opened;
+  armed = false;
+  renderArm();
+  if (wasLive) {
+    sendReport(MC_HID_RID_ENABLE, encodeEnable(false, BROADCAST_MAC)).catch(() => {});
+  }
+});
+
+// A dongle unplugged mid-match must not leave the UI claiming robots are live.
+if ("hid" in navigator) {
+  navigator.hid.addEventListener("disconnect", (e) => {
+    if (device && e.device === device) {
+      log("Dongle unplugged", "err");
+      // The device is already gone — the disable send inside will no-op.
+      disconnectDongle().catch(() => {});
+    }
+  });
+} else {
+  $("noHid").hidden = false;
+  $("btnConnect").disabled = true;
+}
+
+// Age out robots we've stopped hearing from; repaint staleness every second.
 setInterval(() => {
   const now = Date.now();
-  let changed = false;
+  let dropped = false;
   for (const [k, v] of discovered.entries()) {
-    if (now - v.lastSeen > 5000) {
+    if (now - v.lastSeen > DROP_MS) {
+      // Keep a slot's pairing through a dropout — a robot that browns out
+      // mid-match should come back to its slot, not need re-pairing. The slot
+      // reports "No heartbeat" until it returns.
+      const held = pairMac.some((m) => m && macKey(m) === k);
+      if (held) {
+        continue;
+      }
       discovered.delete(k);
-      changed = true;
+      dropped = true;
+      log(`Lost ${v.id || k}`, "warn");
     }
   }
-  if (changed) {
+  if (dropped) {
     renderRobots();
+    renderArm();
   }
+  $("txRate").textContent = String(txCount);
+  txCount = 0;
+  renderSlots();
 }, 1000);
+
+// The robot's enable flag expires after MC_ENABLE_TIMEOUT_MS (3 s) so it can't
+// stay latched behind a dead station. Keep re-asserting it while armed — twice
+// per expiry window, since ESP-NOW broadcasts are unacknowledged and a single
+// lost frame must not stand the field down mid-match.
+const ENABLE_REASSERT_MS = 500;
+setInterval(() => {
+  if (armed && device && device.opened) {
+    sendReport(MC_HID_RID_ENABLE, encodeEnable(true, BROADCAST_MAC)).catch(() => {});
+  }
+}, ENABLE_REASSERT_MS);
+
+buildSlots();
+renderRobots();
+renderGamepads();
+setDongleUi(false);
+log("Driver station ready");

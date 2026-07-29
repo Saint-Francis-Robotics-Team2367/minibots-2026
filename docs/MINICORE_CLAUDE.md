@@ -153,6 +153,24 @@ typedef struct {
 } __attribute__((packed)) enable_packet_t;
 ```
 
+**Enable is a keepalive, not a latch.** The driver station re-broadcasts
+`enabled = 1` about every 500 ms for as long as it is armed, and the robot lets
+its enable flag lapse after `MC_ENABLE_TIMEOUT_MS` (3000 ms) without one. A
+latching enable meant a robot that missed the disable — powered up through a
+station reload, out of range, or behind a closed browser tab — came back still
+enabled and drove the moment it was assigned a controller.
+
+Three independent gates now stand between a stick and a motor, so no single
+failure re-opens that hole:
+
+1. The driver station only puts real stick values on the wire while armed;
+   disarmed slots stream a neutral packet.
+2. The dongle refuses to forward joystick reports unless it has seen a global
+   enable (`s_global_enabled` in `minicore_bridge.c`).
+3. The robot gates the motors on its own enable flag, which expires as above.
+
+A disable takes effect immediately and does not refresh the expiry window.
+
 ### Heartbeat/Status Packet (0x03)
 
 ```c
@@ -231,6 +249,25 @@ The browser communicates with the ESP32-S3 dongle over USB HID. This requires de
 | `0x05` | Discovery response | discovery_response_t data |
 | `0xFE` | Dongle status | Channel, paired count, error flags |
 
+**`error_flags` bit 0 — ESP-NOW send failure.** The browser mirrors this bit
+straight onto the "Radio send failing" chip, so the dongle is responsible for
+making it steady. It is derived from recent send history, not set as a raw flag:
+a failure reads as set for up to `MC_SEND_ERR_HOLD_US` (1 s) and is cleared early
+by the next success on the same peer. Two details matter if you touch it:
+
+- The history is **per paired slot**. Unicast joystick traffic runs at ~60 Hz per
+  robot, so one shared flag would interleave a dead robot's failures with a live
+  robot's successes and blink.
+- **Broadcast completions are ignored.** ESP-NOW does not acknowledge broadcasts
+  and always reports them `SUCCESS`, even with every robot on the field powered
+  off — and the station broadcasts an enable re-assert about every 500 ms while
+  armed. Counting those would permanently mask real failures.
+
+Don't reintroduce a "clear the flag on each inbound report" reset. Send outcomes
+arrive asynchronously in the ESP-NOW send callback, well after `esp_now_send()`
+returns, so a reset at report rate erases the result before the 200 ms status
+task can sample it — which is what made the chip flicker instead of holding.
+
 ### Implementation Notes
 
 - The ESP32-S3 firmware should use the TinyUSB stack (included in ESP-IDF and Arduino ESP32 core) to present as a custom HID device
@@ -262,13 +299,19 @@ loop()  [minibot.py: Minibot.update(), then student main.py]:
 
     if received 0x02 enable/disable:
         Update robot_enabled flag
+        if enabling: last_enable_time = now   # keepalive, see Enable packet above
 
     if received 0x01 joystick state AND robot_enabled:
         Update last_packet_time
         Decode joystick axes/buttons (student reads via get_left_y(), etc.)
 
+    if robot_enabled and (now - last_enable_time > 3000ms):
+        robot_enabled = false      # station went quiet; don't stay latched on
+
     if (now - last_packet_time > 250ms) or not enabled:
         Stop all motors (safety timeout)
+        Zero the cached axes, so student code driving from the sticks cannot
+        immediately undo the stop with pre-dropout values
 
     Periodically send 0x03 heartbeat to control station MAC (every ~1 second)
 
