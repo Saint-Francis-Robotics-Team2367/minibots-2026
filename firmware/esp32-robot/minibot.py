@@ -83,8 +83,8 @@ assert struct.calcsize(_FMT_NEUTRAL_ACK) == 12
 _PWM_FREQ_HZ = 50
 _PWM_CENTER_US = 1500   # neutral pulse width (motors stopped)
 _PWM_RANGE_US = 500     # +/- swing at full stick
-_PWM_MIN_US = 1000
-_PWM_MAX_US = 2000
+_PWM_MIN_US = 500       # safety minimum (per controller specs)
+_PWM_MAX_US = 2500      # safety maximum (per controller specs)
 
 # --- Remote neutral trim (driver station "Apply") ---
 # Clamp for a neutral pulse arriving over the air, deliberately much tighter than
@@ -173,16 +173,15 @@ class Minibot:
     TELEOP = 1
 
     def __init__(self, robot_id, left_motor_pin=16, right_motor_pin=17, channel=6,
-                 range_us=_PWM_RANGE_US,
                  neutral_left_us=None, neutral_right_us=None):
         """Calibrate ESC pulse widths per motor.
 
         neutral_left_us / neutral_right_us set the neutral (stopped) pulse for each
         motor independently. Defaults are 1500 us (RC standard). If your motors
-        creep when the sticks are centered, adjust these until they sit still
-        (see the calibration note in main.py).
+        creep when the sticks are centered, adjust these until they sit still.
 
-        range_us is the ±swing at full stick (default 500 us, total 1000-2000 us).
+        Motors always have ±500 us swing at full stick, centered on their neutral.
+        So a motor with neutral_left_us=1500 ranges 1000–2000 us.
 
         The motor slew limit is not settable here on purpose -- it is fixed at
         _SLEW_PER_S so robot code cannot opt out of it. See the note there.
@@ -191,10 +190,8 @@ class Minibot:
         self._left_pin = left_motor_pin
         self._right_pin = right_motor_pin
         self._channel = channel
-        # Keep the calibration inside the ESC's 1-2 ms pulse window: a typo here
-        # would otherwise be driven straight to the motors as a real command.
-        self._range_us = _clamp(range_us, 0, _PWM_RANGE_US)
-        # Per-motor calibration
+        # Per-motor calibration: neutral pulse width
+        # Motors always use ±500 us swing (hardcoded in _motor_write)
         self._neutral_left_us = _clamp(neutral_left_us, _PWM_MIN_US, _PWM_MAX_US) if neutral_left_us is not None else _PWM_CENTER_US
         self._neutral_right_us = _clamp(neutral_right_us, _PWM_MIN_US, _PWM_MAX_US) if neutral_right_us is not None else _PWM_CENTER_US
 
@@ -437,7 +434,7 @@ class Minibot:
 
     def _motor_write(self, pwm, value, neutral_us):
         value = _clamp(value, -1.0, 1.0)
-        self._pulse_us(pwm, neutral_us + int(value * self._range_us))
+        self._pulse_us(pwm, neutral_us + int(value * _PWM_RANGE_US))
 
     def _pulse_us(self, pwm, us):
         if pwm is None:
