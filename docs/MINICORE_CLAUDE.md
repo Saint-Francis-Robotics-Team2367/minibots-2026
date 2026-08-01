@@ -121,6 +121,8 @@ All communication between the control station dongle and robots uses ESP-NOW. Al
 | Heartbeat/Status | `0x03` | Robot --> Dongle | Unicast | Robot reports it is alive, optionally with status data |
 | Discovery Request | `0x04` | Dongle --> All Robots | Broadcast | Control station asks "who's out there?" |
 | Discovery Response | `0x05` | Robot --> Dongle | Unicast | Robot responds with its name/ID and MAC address |
+| Set Neutral | `0x06` | Dongle --> Robot | **Unicast only** | Per-motor ESC neutral pulse widths for one specific robot |
+| Neutral Ack | `0x07` | Robot --> Dongle | Unicast (broadcast fallback) | The neutrals actually in force, post-clamp |
 
 ### Joystick State Packet (0x01)
 
@@ -170,6 +172,59 @@ failure re-opens that hole:
 3. The robot gates the motors on its own enable flag, which expires as above.
 
 A disable takes effect immediately and does not refresh the expiry window.
+
+### Set Neutral (0x06) / Neutral Ack (0x07)
+
+```c
+typedef struct {
+    uint8_t  type;            // 0x06
+    uint8_t  target_mac[6];   // this robot only — never broadcast
+    uint16_t neutral_left_us;
+    uint16_t neutral_right_us;
+} __attribute__((packed)) set_neutral_packet_t;   // 11 bytes
+
+typedef struct {
+    uint8_t  type;            // 0x07
+    uint8_t  mac[6];
+    uint16_t neutral_left_us; // post-clamp: what the robot really applied
+    uint16_t neutral_right_us;
+    uint8_t  stored;          // 1 = saved to the robot's filesystem
+} __attribute__((packed)) neutral_ack_packet_t;   // 12 bytes
+```
+
+Per-motor ESC trim, set from the driver station and **sent only on an explicit
+button press** — never streamed from the control loop. Three properties are
+deliberate:
+
+- **Unicast only, with `target_mac` carried and verified by the robot.** Neutral
+  trim is per-robot ESC calibration; a broadcast set would redefine "stopped" for
+  every robot on the field at once, so the robot refuses anything not addressed
+  to it rather than filtering it.
+- **Clamped to `MC_NEUTRAL_TRIM_MIN_US`..`MAX` (1400–1600 µs)** by the dongle,
+  the robot, and the web inputs. Much tighter than the robot's own 1000–2000 µs
+  PWM limits: a neutral set in `main.py` is a number a student reads in context,
+  but `neutral_us = 2000` arriving from a text box would make "motors stopped"
+  mean full forward. Real trim is ±30–50 µs, so ±100 µs bounds a typo to roughly
+  20 % throttle instead of 100 %.
+- **Not gated on the global enable**, unlike joystick reports. Calibrating means
+  watching the wheels for creep at centered sticks, which requires the robot
+  armed; and it changes what "stopped" means rather than driving anything.
+
+The robot saves the values to `calib.json` and **loads them over `main.py`'s
+constructor arguments in `begin()`** — before the PWM channels are created, since
+the duty passed to the `PWM()` constructor is the first thing the ESC sees. That
+precedence is the surprising part: editing `neutral_left_us=` in `main.py` has no
+effect while a saved calibration exists. `Minibot.clear_calibration()` (or
+deleting the file) hands control back.
+
+`0x07` is also sent **unprompted**, so the station can populate its fields
+whichever side came up first: on the robot's first `_CALIB_ANNOUNCE_COUNT`
+heartbeats, again whenever it newly learns the dongle's MAC (which is what covers
+a robot rebooting into a running station), and alongside every discovery
+response. It reuses the heartbeat's target selection, so it falls back to
+broadcast until the dongle is known — repeating because ESP-NOW broadcasts are
+unacknowledged. `stored` answers "will this survive a reset?", letting a failed
+flash write show up as a warning rather than being silently lost.
 
 ### Heartbeat/Status Packet (0x03)
 
@@ -240,6 +295,7 @@ The browser communicates with the ESP32-S3 dongle over USB HID. This requires de
 | `0x04` | Discovery scan request | (empty or channel byte) |
 | `0x10` | Pair controller to robot | Controller index (1 byte) + robot MAC (6 bytes) |
 | `0x11` | Unpair controller | Controller index (1 byte) |
+| `0x12` | Set ESC neutral | Slot index (1 byte) + `neutral_left_us` + `neutral_right_us` (u16 LE each) |
 
 **Input Reports (Dongle --> Browser)**
 
@@ -247,6 +303,7 @@ The browser communicates with the ESP32-S3 dongle over USB HID. This requires de
 |-----------|---------|---------|
 | `0x03` | Heartbeat from robot | heartbeat_packet_t data |
 | `0x05` | Discovery response | discovery_response_t data |
+| `0x06` | Neutral calibration echo | neutral_ack_packet_t data |
 | `0xFE` | Dongle status | Channel, paired count, error flags |
 
 **`error_flags` bit 0 — ESP-NOW send failure.** The browser mirrors this bit

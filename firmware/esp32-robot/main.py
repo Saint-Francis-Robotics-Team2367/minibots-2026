@@ -50,6 +50,12 @@ from minibot import Minibot
 #
 # For mismatched motors, set each independently:
 #     bot = Minibot("MiniBot1", ..., neutral_left_us=1500, neutral_right_us=1520)
+#
+# NOTE: you can also set these from the driver station's "Neutral µs" boxes. A
+# calibration applied that way is SAVED ON THE ROBOT and overrides the values
+# below, so that it survives a reset. If changing the numbers here seems to do
+# nothing, that's why — run bot.clear_calibration() once from the REPL (or delete
+# calib.json) to hand control back to this file.
 bot = Minibot("MiniBot1", left_motor_pin=16, right_motor_pin=17, channel=6, neutral_left_us=1500, neutral_right_us=1480)
 
 bot.begin()

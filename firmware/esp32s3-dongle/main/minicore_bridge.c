@@ -70,6 +70,17 @@ static bool is_broadcast_mac(const uint8_t *mac)
     return memcmp(mac, k_broadcast_mac, 6) == 0;
 }
 
+static uint16_t clamp_neutral_us(uint16_t us)
+{
+    if (us < MC_NEUTRAL_TRIM_MIN_US) {
+        return MC_NEUTRAL_TRIM_MIN_US;
+    }
+    if (us > MC_NEUTRAL_TRIM_MAX_US) {
+        return MC_NEUTRAL_TRIM_MAX_US;
+    }
+    return us;
+}
+
 static esp_err_t ensure_broadcast_peer(void)
 {
     if (esp_now_is_peer_exist(k_broadcast_mac)) {
@@ -144,6 +155,14 @@ static void espnow_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data,
     case MC_MSG_DISCOVERY_RESP:
         if (s_discovery_active && len >= (int)sizeof(discovery_response_t)) {
             tud_hid_report(MC_HID_RID_DISCOVERY_IN, data, sizeof(discovery_response_t));
+        }
+        break;
+    case MC_MSG_NEUTRAL_ACK:
+        /* Not gated on s_discovery_active: robots announce their calibration
+         * unprompted at power-up as well as in answer to a scan, and the station
+         * needs those to fill its fields whichever came up first. */
+        if (len >= (int)sizeof(neutral_ack_packet_t)) {
+            tud_hid_report(MC_HID_RID_NEUTRAL_IN, data, sizeof(neutral_ack_packet_t));
         }
         break;
     default:
@@ -346,6 +365,45 @@ void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t le
         }
         s_paired_valid[idx] = false;
         memset(s_paired_mac[idx], 0, 6);
+        break;
+    }
+    case MC_HID_RID_SET_NEUTRAL: {
+        if (len < 1 + 2 * sizeof(uint16_t)) {
+            return;
+        }
+        uint8_t idx = buf[0];
+        if (idx >= MC_MAX_ROBOTS || !s_paired_valid[idx]) {
+            return;
+        }
+        uint16_t left, right;
+        memcpy(&left, buf + 1, sizeof(left));
+        memcpy(&right, buf + 3, sizeof(right));
+
+        /* Clamped here as well as on the robot. The robot is the authority and
+         * echoes back what it actually applied, but there is no reason to put a
+         * pulse width we already know is out of range onto the air. */
+        set_neutral_packet_t sn = {
+            .type = MC_MSG_SET_NEUTRAL,
+            .neutral_left_us = clamp_neutral_us(left),
+            .neutral_right_us = clamp_neutral_us(right),
+        };
+        memcpy(sn.target_mac, s_paired_mac[idx], 6);
+
+        /* Unicast, never broadcast: neutral trim is per-robot ESC calibration.
+         * Deliberately not gated on s_global_enabled, unlike joystick reports --
+         * calibrating means watching the wheels at centered sticks, which needs
+         * the robot armed, and you also want to set values before arming. This
+         * changes what "stopped" means; it does not drive anything. */
+        if (ensure_unicast_peer(s_paired_mac[idx]) != ESP_OK) {
+            s_slot_err_us[idx] = esp_timer_get_time();
+            return;
+        }
+        esp_err_t e = esp_now_send(s_paired_mac[idx], (uint8_t *)&sn, sizeof(sn));
+        if (e != ESP_OK) {
+            s_slot_err_us[idx] = esp_timer_get_time();
+        }
+        ESP_LOGI(TAG, "set neutral slot %u: %u/%u us", (unsigned)idx, (unsigned)sn.neutral_left_us,
+                 (unsigned)sn.neutral_right_us);
         break;
     }
     default:

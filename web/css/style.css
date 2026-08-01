@@ -478,6 +478,66 @@ select:disabled {
   letter-spacing: 0.03em;
 }
 
+/* ESC neutral trim. Two boxes plus Apply on one row, with the robot's own
+   reported values on the line below — the boxes are what you intend to send,
+   the readout is what the robot says it is running. */
+.slot__calib {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: end;
+  gap: 0.35rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--line);
+}
+
+.calib__title {
+  grid-column: 1 / -1;
+  font-size: 0.6rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.calib__field {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.calib__field > span {
+  font-size: 0.6rem;
+  color: var(--ink-mute);
+}
+
+.calib__field input {
+  font: inherit;
+  font-size: 0.78rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.35rem 0.4rem;
+  color: var(--ink);
+  background: var(--s-rise);
+  border: 1px solid var(--line-bright);
+  border-radius: var(--r);
+}
+
+.calib__field input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.calib__read {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.66rem;
+  color: var(--ink-mute);
+}
+
+/* Applied but not written to the robot's flash — a reset reverts it, so this
+   is a warning, not a status. */
+.calib__read[data-unsaved="true"] {
+  color: var(--warn, #d9a441);
+}
+
 /* Stick telemetry: two mirrored bars, centre-anchored. Real axis values. */
 .sticks {
   display: grid;
