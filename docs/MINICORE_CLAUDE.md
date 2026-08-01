@@ -378,6 +378,20 @@ Fallback options if 2.4GHz is completely unusable:
 
   Overridable per robot via `Minibot(..., neutral_us=, range_us=)`; both are clamped into the 1–2 ms window so a typo can't emit an out-of-spec pulse.
 - **Do not reuse the old firmware's 1758 µs / ±391 µs.** Those came from the original Arduino library writing LEDC duty `90` on a 10-bit 50 Hz timer (`90/1024*20000 = 1757.8 µs`) — a trim value for that specific hardware, not a true neutral. The servo helper in that same old file used `0.01*angle + 1.5` (1500 µs at rest). Carrying 1758 µs into the MicroPython port made every robot hold ~50% throttle at "neutral", spinning the wheels on power-up.
+- **Motor commands are slew-rate limited** (`_SLEW_PER_S` in `minibot.py` — a library constant,
+  deliberately *not* a `Minibot(...)` parameter, so student code in `main.py` cannot opt out of a
+  limit that exists to protect the hardware). `drive_left_motor()` / `drive_right_motor()`
+  ramp toward the requested value at a bounded units-per-second rate — 500 ms for a full
+  forward-to-reverse reversal by default. Slamming the sticks through neutral otherwise puts the
+  supply and the motor's back-EMF in series (`I = (V_applied − V_bemf) / R`), drawing about twice
+  stall current; the rail sags, the ESP32's brownout detector resets the board, and the ~3 s
+  outage that follows (MicroPython boot + `boot.py`'s upload pause) crosses the driver station's
+  2.5 s heartbeat-staleness threshold, so it presents as a dropped connection rather than a reset.
+  Two properties are load-bearing: the step is derived from `ticks_diff`, not per-call, because
+  `main.py`'s loop rate is unbounded and student-editable; and `stop_all_motors()` bypasses the
+  limiter entirely *and* clears its state, so the 250 ms failsafe still cuts instantly and the next
+  drive call cannot ramp from a throttle the motors have already left. This bounds the current; it
+  does not substitute for bulk capacitance at the ESC.
 - **Neutral must be passed to the `PWM()` constructor** (`duty_u16=...`). A bare `PWM(pin, freq=50)` defaults to duty_u16 = 32768 on the ESP32 port — a 10 ms pulse, which ESCs read as far past full throttle, so the motors run the instant `begin()` executes. `duty_ns` can't be used in the constructor (it raises "PWM is inactive" before a timer is assigned), hence `duty_u16`.
 
 ### Browser UI

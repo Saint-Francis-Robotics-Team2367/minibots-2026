@@ -31,6 +31,11 @@
 #      bot.drive_left_motor(value)
 #      bot.drive_right_motor(value)
 #      bot.stop_all_motors()
+#
+#    The two drive_* calls RAMP toward the value you ask for instead of jumping
+#    straight to it (a full forward-to-reverse reversal takes about half a
+#    second), so slamming the sticks can't spike the motor current and brown out
+#    the board. stop_all_motors() is always immediate.
 # ============================================================================
 
 from minibot import Minibot
