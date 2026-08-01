@@ -378,8 +378,9 @@ Fallback options if 2.4GHz is completely unusable:
 
   Overridable per robot via `Minibot(..., neutral_us=, range_us=)`; both are clamped into the 1–2 ms window so a typo can't emit an out-of-spec pulse.
 - **Do not reuse the old firmware's 1758 µs / ±391 µs.** Those came from the original Arduino library writing LEDC duty `90` on a 10-bit 50 Hz timer (`90/1024*20000 = 1757.8 µs`) — a trim value for that specific hardware, not a true neutral. The servo helper in that same old file used `0.01*angle + 1.5` (1500 µs at rest). Carrying 1758 µs into the MicroPython port made every robot hold ~50% throttle at "neutral", spinning the wheels on power-up.
-- **Motor commands are slew-rate limited** (`_SLEW_PER_S` in `minibot.py`, overridable per robot
-  via `Minibot(..., slew_per_s=)`; `None` disables). `drive_left_motor()` / `drive_right_motor()`
+- **Motor commands are slew-rate limited** (`_SLEW_PER_S` in `minibot.py` — a library constant,
+  deliberately *not* a `Minibot(...)` parameter, so student code in `main.py` cannot opt out of a
+  limit that exists to protect the hardware). `drive_left_motor()` / `drive_right_motor()`
   ramp toward the requested value at a bounded units-per-second rate — 500 ms for a full
   forward-to-reverse reversal by default. Slamming the sticks through neutral otherwise puts the
   supply and the motor's back-EMF in series (`I = (V_applied − V_bemf) / R`), drawing about twice

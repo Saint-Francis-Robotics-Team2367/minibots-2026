@@ -103,7 +103,12 @@ _DEADBAND = 2000.0 / 32767.0  # ~6.1% of stick travel = +/-30.5us of pulse
 # The ramp must be slow relative to how fast the drivetrain can actually
 # decelerate. Below roughly 300 ms per reversal the back-EMF has not decayed and
 # most of the spike survives, so lowering this past that point buys nothing.
-# Pass slew_per_s=None to Minibot(...) to drive the ESCs unramped.
+#
+# Deliberately NOT a Minibot(...) parameter. This protects the hardware rather
+# than shaping behavior, and main.py is the file students edit: an override there
+# is a way to brown a board out by accident, or to "fix" a robot that feels
+# sluggish by deleting the thing keeping it alive. Retune it here, in the
+# library, and it applies to every robot on the field.
 _SLEW_PER_S = 4.0
 
 # Longest interval a single slew step may claim. Without a cap, code that stops
@@ -137,19 +142,15 @@ class Minibot:
     TELEOP = 1
 
     def __init__(self, robot_id, left_motor_pin=16, right_motor_pin=17, channel=6,
-                 neutral_us=_PWM_CENTER_US, range_us=_PWM_RANGE_US,
-                 slew_per_s=_SLEW_PER_S):
+                 neutral_us=_PWM_CENTER_US, range_us=_PWM_RANGE_US):
         """neutral_us / range_us calibrate the ESC pulse widths.
 
         Defaults match the ESC datasheet: 1500 us center, +/- 500 us at full
         stick (1-2 ms). If your robot creeps when the sticks are centered, nudge
         neutral_us until it sits still (see the calibration note in main.py).
 
-        slew_per_s caps how fast the motor commands may change, which bounds the
-        current spike when the driver slams the sticks through neutral (see the
-        note above _SLEW_PER_S). Raise it for a snappier robot, lower it if yours
-        still browns out, or pass None to drive the ESCs unramped. It never
-        applies to stop_all_motors(), so the failsafe stays immediate.
+        The motor slew limit is not settable here on purpose -- it is fixed at
+        _SLEW_PER_S so robot code cannot opt out of it. See the note there.
         """
         self._robot_id = robot_id[:MC_ROBOT_ID_MAX]
         self._left_pin = left_motor_pin
@@ -184,10 +185,7 @@ class Minibot:
 
         # Rate-limited motor state. _out_* is what we last actually commanded,
         # which the limiter has to remember to know how far it may step next.
-        # A zero or negative rate would pin the motors at neutral forever --
-        # safe, but indistinguishable from a dead robot -- so keep a floor and
-        # let None be the explicit way to opt out.
-        self._slew_per_s = None if slew_per_s is None else max(slew_per_s, 0.1)
+        # The rate itself is the fixed _SLEW_PER_S, not per-robot state.
         self._out_left = 0.0
         self._out_right = 0.0
         self._slew_ms_left = time.ticks_ms()
@@ -361,7 +359,7 @@ class Minibot:
         )
 
     def _slew(self, cur, target, last_ms):
-        """Step `cur` toward `target` at no more than _slew_per_s per second.
+        """Step `cur` toward `target` at no more than _SLEW_PER_S per second.
 
         Returns (new_output, now_ms). The caller owns the timestamp because each
         motor needs its own: with one shared timestamp, whichever motor is
@@ -375,10 +373,8 @@ class Minibot:
         """
         now = time.ticks_ms()
         target = _clamp(target, -1.0, 1.0)
-        if self._slew_per_s is None:
-            return target, now
         dt_ms = _clamp(time.ticks_diff(now, last_ms), 0, _SLEW_MAX_DT_MS)
-        step = self._slew_per_s * dt_ms / 1000.0
+        step = _SLEW_PER_S * dt_ms / 1000.0
         return cur + _clamp(target - cur, -step, step), now
 
     def _motor_write(self, pwm, value):

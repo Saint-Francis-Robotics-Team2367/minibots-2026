@@ -33,8 +33,9 @@
 #      bot.stop_all_motors()
 #
 #    The two drive_* calls RAMP toward the value you ask for instead of jumping
-#    to it, so slamming the sticks can't spike the motor current (see slew_per_s
-#    below). stop_all_motors() is always immediate.
+#    straight to it (a full forward-to-reverse reversal takes about half a
+#    second), so slamming the sticks can't spike the motor current and brown out
+#    the board. stop_all_motors() is always immediate.
 # ============================================================================
 
 from minibot import Minibot
@@ -47,12 +48,6 @@ from minibot import Minibot
 # different neutral pulse. Add neutral_us= and adjust it until the robot sits
 # still (1500 is the RC standard; try 20-30 us at a time):
 #     bot = Minibot("MiniBot1", ..., neutral_us=1500)
-#
-# Motor commands ramp rather than step, so slamming full forward to full reverse
-# can't spike the current and brown out the board. The default takes 500 ms for a
-# full reversal. Raise it for a snappier robot, lower it if yours still drops its
-# connection when you slam the sticks, or pass None to turn the ramp off:
-#     bot = Minibot("MiniBot1", ..., slew_per_s=4.0)
 bot = Minibot("MiniBot1", left_motor_pin=16, right_motor_pin=17, channel=6)
 
 bot.begin()

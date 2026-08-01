@@ -73,9 +73,11 @@ and the motor's back-EMF in series, drawing roughly twice stall current; the rai
 sags and the ESP32's brownout detector resets the board, which looks from the
 driver station like the robot dropping its connection.
 
-Tune it with `slew_per_s=` in the `Minibot(...)` line (units of stick travel per
-second; `None` disables the ramp). Going below ~300 ms per reversal stops helping
-— the motor hasn't shed enough speed by then for the ramp to bound the current.
+The rate is fixed in the library (`_SLEW_PER_S` in `minibot.py`) and is **not** a
+`Minibot(...)` option — it guards the hardware, so robot code can't turn it off.
+If a drivetrain genuinely needs a different rate, change it there and it applies
+to every robot. Going below ~300 ms per reversal stops helping anyway: the motor
+hasn't shed enough speed by then for the ramp to bound the current.
 
 `stop_all_motors()` is **never** ramped, so the 250 ms link failsafe and the
 disable path still cut the motors instantly.
