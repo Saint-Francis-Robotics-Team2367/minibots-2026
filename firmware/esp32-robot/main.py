@@ -45,12 +45,11 @@ from minibot import Minibot
 # make sure `channel` matches the dongle (default 6).
 #
 # If your wheels creep or spin while the sticks are centered, adjust the motor
-# neutral pulse widths (1500 is the RC standard; try 20-30 us at a time):
+# neutral pulse widths (1500 is the RC standard; try 20-30 us at a time).
+# Motors always have ±500 us swing centered on their neutral.
 #     bot = Minibot("MiniBot1", ..., neutral_left_us=1500, neutral_right_us=1500)
-#
-# For mismatched motors, set each independently:
-#     bot = Minibot("MiniBot1", ..., neutral_left_us=1500, neutral_right_us=1520)
-bot = Minibot("MiniBot1", left_motor_pin=16, right_motor_pin=17, channel=6, neutral_left_us=1500, neutral_right_us=1480)
+bot = Minibot("MiniBot1", left_motor_pin=16, right_motor_pin=17, channel=6,
+              neutral_left_us=1500, neutral_right_us=1700)
 
 bot.begin()
 
