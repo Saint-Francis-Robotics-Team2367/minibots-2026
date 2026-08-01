@@ -142,12 +142,16 @@ class Minibot:
     TELEOP = 1
 
     def __init__(self, robot_id, left_motor_pin=16, right_motor_pin=17, channel=6,
-                 neutral_us=_PWM_CENTER_US, range_us=_PWM_RANGE_US):
-        """neutral_us / range_us calibrate the ESC pulse widths.
+                 range_us=_PWM_RANGE_US,
+                 neutral_left_us=None, neutral_right_us=None):
+        """Calibrate ESC pulse widths per motor.
 
-        Defaults match the ESC datasheet: 1500 us center, +/- 500 us at full
-        stick (1-2 ms). If your robot creeps when the sticks are centered, nudge
-        neutral_us until it sits still (see the calibration note in main.py).
+        neutral_left_us / neutral_right_us set the neutral (stopped) pulse for each
+        motor independently. Defaults are 1500 us (RC standard). If your motors
+        creep when the sticks are centered, adjust these until they sit still
+        (see the calibration note in main.py).
+
+        range_us is the ±swing at full stick (default 500 us, total 1000-2000 us).
 
         The motor slew limit is not settable here on purpose -- it is fixed at
         _SLEW_PER_S so robot code cannot opt out of it. See the note there.
@@ -158,8 +162,10 @@ class Minibot:
         self._channel = channel
         # Keep the calibration inside the ESC's 1-2 ms pulse window: a typo here
         # would otherwise be driven straight to the motors as a real command.
-        self._neutral_us = _clamp(neutral_us, _PWM_MIN_US, _PWM_MAX_US)
         self._range_us = _clamp(range_us, 0, _PWM_RANGE_US)
+        # Per-motor calibration
+        self._neutral_left_us = _clamp(neutral_left_us, _PWM_MIN_US, _PWM_MAX_US) if neutral_left_us is not None else _PWM_CENTER_US
+        self._neutral_right_us = _clamp(neutral_right_us, _PWM_MIN_US, _PWM_MAX_US) if neutral_right_us is not None else _PWM_CENTER_US
 
         # Controller state (raw int16 axes, -32767..32767; neutral 0)
         self._axis_lx = 0
@@ -198,8 +204,8 @@ class Minibot:
         # Motors FIRST, at neutral: bringing up Wi-Fi takes a moment, and until
         # a PWM channel drives these pins they float, which some ESCs latch onto
         # as a throttle command. Get a valid neutral pulse train out immediately.
-        self._left_pwm = self._init_motor_pwm(self._left_pin)
-        self._right_pwm = self._init_motor_pwm(self._right_pin)
+        self._left_pwm = self._init_motor_pwm(self._left_pin, self._neutral_left_us)
+        self._right_pwm = self._init_motor_pwm(self._right_pin, self._neutral_right_us)
         self.stop_all_motors()
 
         # Wi-Fi STA on the shared channel (no AP association; ESP-NOW only).
@@ -308,12 +314,12 @@ class Minibot:
     def drive_left_motor(self, value):
         self._out_left, self._slew_ms_left = self._slew(
             self._out_left, value, self._slew_ms_left)
-        self._motor_write(self._left_pwm, self._out_left)
+        self._motor_write(self._left_pwm, self._out_left, self._neutral_left_us)
 
     def drive_right_motor(self, value):
         self._out_right, self._slew_ms_right = self._slew(
             self._out_right, value, self._slew_ms_right)
-        self._motor_write(self._right_pwm, self._out_right)
+        self._motor_write(self._right_pwm, self._out_right, self._neutral_right_us)
 
     def stop_all_motors(self):
         """Cut both motors to neutral immediately -- never ramped.
@@ -329,8 +335,8 @@ class Minibot:
         self._out_right = 0.0
         self._slew_ms_left = time.ticks_ms()
         self._slew_ms_right = self._slew_ms_left
-        self._pulse_us(self._left_pwm, self._neutral_us)
-        self._pulse_us(self._right_pwm, self._neutral_us)
+        self._pulse_us(self._left_pwm, self._neutral_left_us)
+        self._pulse_us(self._right_pwm, self._neutral_right_us)
 
     # --- internals -----------------------------------------------------------
 
@@ -343,7 +349,7 @@ class Minibot:
         self._axis_rt = 0
         self._buttons = 0
 
-    def _init_motor_pwm(self, pin):
+    def _init_motor_pwm(self, pin, neutral_us):
         """Create a motor PWM that is already at neutral on its first output edge.
 
         The duty MUST be passed to the PWM() constructor. If it isn't, the ESP32
@@ -355,7 +361,7 @@ class Minibot:
         return PWM(
             Pin(pin),
             freq=_PWM_FREQ_HZ,
-            duty_u16=_us_to_duty_u16(self._neutral_us),
+            duty_u16=_us_to_duty_u16(neutral_us),
         )
 
     def _slew(self, cur, target, last_ms):
@@ -377,9 +383,9 @@ class Minibot:
         step = _SLEW_PER_S * dt_ms / 1000.0
         return cur + _clamp(target - cur, -step, step), now
 
-    def _motor_write(self, pwm, value):
+    def _motor_write(self, pwm, value, neutral_us):
         value = _clamp(value, -1.0, 1.0)
-        self._pulse_us(pwm, self._neutral_us + int(value * self._range_us))
+        self._pulse_us(pwm, neutral_us + int(value * self._range_us))
 
     def _pulse_us(self, pwm, us):
         if pwm is None:
