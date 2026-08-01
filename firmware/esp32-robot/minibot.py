@@ -82,7 +82,7 @@ assert struct.calcsize(_FMT_NEUTRAL_ACK) == 12
 # If your ESCs need a different center, pass neutral_us= (see Minibot.__init__).
 _PWM_FREQ_HZ = 50
 _PWM_CENTER_US = 1500   # neutral pulse width (motors stopped)
-_PWM_RANGE_US = 500     # +/- swing at full stick
+_PWM_RANGE_US = 300     # +/- swing at full stick
 _PWM_MIN_US = 500       # safety minimum (per controller specs)
 _PWM_MAX_US = 2500      # safety maximum (per controller specs)
 
