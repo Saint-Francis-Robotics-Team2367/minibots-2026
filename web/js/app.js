@@ -199,30 +199,45 @@ function onInputReport(e) {
   } else if (reportId === MC_HID_RID_NEUTRAL_IN) {
     const nk = decodeNeutralAckIn(buf);
     if (nk) {
+      const k = macKey(nk.mac);
+      const prev = discovered.get(k);
+      // Robots re-announce for reliability (the first few heartbeats, and every
+      // scan), so only say something when the values actually moved. Otherwise
+      // one power-up would put three identical lines in the log per robot.
+      const changed =
+        !prev ||
+        prev.neutralLeft !== nk.neutral_left_us ||
+        prev.neutralRight !== nk.neutral_right_us ||
+        prev.neutralStored !== nk.stored;
+
       // Post-clamp values straight from the robot, so the readout shows what
       // actually landed rather than what we asked for.
-      touchRobot(nk.mac, null, {
+      const rec = touchRobot(nk.mac, null, {
         neutralLeft: nk.neutral_left_us,
         neutralRight: nk.neutral_right_us,
         neutralStored: nk.stored,
       });
-      const k = macKey(nk.mac);
-      for (let i = 0; i < MC_MAX_ROBOTS; i++) {
-        if (!pairMac[i] || macKey(pairMac[i]) !== k) {
-          continue;
-        }
-        const slot = $(`slot-${i}`);
-        const shown =
-          Number(slot.querySelector("input.calib-left").value) === nk.neutral_left_us &&
-          Number(slot.querySelector("input.calib-right").value) === nk.neutral_right_us;
-        // Only an echo that matches the boxes means this driver's edit landed.
-        // Anything else is someone else's change or a clamp, and must not wipe
+
+      // Report on an unpaired robot too. Announces arrive at power-up and in
+      // answer to a scan — both before anyone has paired a slot — so keying this
+      // on a pairing would make the whole announce invisible.
+      const slotIdx = pairMac.findIndex((m) => m && macKey(m) === k);
+      if (slotIdx >= 0) {
+        const slot = $(`slot-${slotIdx}`);
+        // Only an echo matching the boxes means this driver's edit landed.
+        // Anything else is a clamp or someone else's change, and must not wipe
         // an edit still in progress.
-        if (shown) {
-          calibDirty[i] = false;
+        if (
+          Number(slot.querySelector("input.calib-left").value) === nk.neutral_left_us &&
+          Number(slot.querySelector("input.calib-right").value) === nk.neutral_right_us
+        ) {
+          calibDirty[slotIdx] = false;
         }
+      }
+      if (changed) {
+        const who = slotIdx >= 0 ? `Slot ${slotIdx}` : rec.id || k;
         log(
-          `Slot ${i}: robot neutral ${nk.neutral_left_us}/${nk.neutral_right_us} µs` +
+          `${who}: neutral ${nk.neutral_left_us}/${nk.neutral_right_us} µs` +
             (nk.stored ? "" : " (not saved — a reset will revert it)"),
           nk.stored ? "go" : "warn",
         );
