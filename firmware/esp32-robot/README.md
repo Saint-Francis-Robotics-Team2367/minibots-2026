@@ -64,6 +64,26 @@ Set your robot's **name**, **motor pins**, and **Wi-Fi channel** in the
 `Minibot(...)` line at the top of `main.py`. The channel must match the dongle
 (default `6`).
 
+### Motor commands ramp
+
+`drive_left_motor()` / `drive_right_motor()` move *toward* the value you pass
+rather than jumping to it — by default a full forward-to-reverse reversal takes
+500 ms. Slamming the sticks through neutral otherwise puts the battery voltage
+and the motor's back-EMF in series, drawing roughly twice stall current; the rail
+sags and the ESP32's brownout detector resets the board, which looks from the
+driver station like the robot dropping its connection.
+
+Tune it with `slew_per_s=` in the `Minibot(...)` line (units of stick travel per
+second; `None` disables the ramp). Going below ~300 ms per reversal stops helping
+— the motor hasn't shed enough speed by then for the ramp to bound the current.
+
+`stop_all_motors()` is **never** ramped, so the 250 ms link failsafe and the
+disable path still cut the motors instantly.
+
+> Slew limiting bounds the current; it doesn't fix the wiring that couldn't
+> supply it. If a robot browns out, still add bulk capacitance across the ESC's
+> power input and check the battery connectors.
+
 ## How it connects
 
 The robot speaks **ESP-NOW** to the USB dongle, which the browser driver station

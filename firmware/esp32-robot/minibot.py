@@ -85,6 +85,33 @@ _PWM_MAX_US = 2000
 # 500us travel), so the ESC's deadband is fully covered either way.
 _DEADBAND = 2000.0 / 32767.0  # ~6.1% of stick travel = +/-30.5us of pulse
 
+# --- Motor slew rate ---
+# Cap on how fast a motor command may change, in units of stick travel per
+# second. Full travel is 2.0 units (-1..1), so 4.0/s = 500 ms for a full
+# forward->reverse reversal.
+#
+# This is a current limit, not a feel preference. A brushed motor draws
+# (V_applied - V_bemf) / R. Slamming from full forward to full reverse flips
+# V_applied while V_bemf is still positive, so the two add: roughly twice stall
+# current, pulled through the pack's internal resistance. The rail sags and the
+# ESP32's brownout detector resets the board mid-match, which reads at the driver
+# station as the robot dropping its connection (a reset costs ~3 s: MicroPython's
+# own boot plus boot.py's upload pause, well past the station's 2.5 s heartbeat
+# staleness threshold). Ramping the command keeps V_applied close to V_bemf as
+# the motor sheds speed, so the difference -- and the current -- stays bounded.
+#
+# The ramp must be slow relative to how fast the drivetrain can actually
+# decelerate. Below roughly 300 ms per reversal the back-EMF has not decayed and
+# most of the spike survives, so lowering this past that point buys nothing.
+# Pass slew_per_s=None to Minibot(...) to drive the ESCs unramped.
+_SLEW_PER_S = 4.0
+
+# Longest interval a single slew step may claim. Without a cap, code that stops
+# driving a motor for a while (a standby period, a slow loop) banks a step budget
+# big enough to jump straight to the target on the next call -- precisely the
+# step this exists to prevent. Erring short only makes the ramp gentler.
+_SLEW_MAX_DT_MS = 50
+
 
 def _clamp(v, lo, hi):
     return lo if v < lo else hi if v > hi else v
@@ -110,12 +137,19 @@ class Minibot:
     TELEOP = 1
 
     def __init__(self, robot_id, left_motor_pin=16, right_motor_pin=17, channel=6,
-                 neutral_us=_PWM_CENTER_US, range_us=_PWM_RANGE_US):
+                 neutral_us=_PWM_CENTER_US, range_us=_PWM_RANGE_US,
+                 slew_per_s=_SLEW_PER_S):
         """neutral_us / range_us calibrate the ESC pulse widths.
 
         Defaults match the ESC datasheet: 1500 us center, +/- 500 us at full
         stick (1-2 ms). If your robot creeps when the sticks are centered, nudge
         neutral_us until it sits still (see the calibration note in main.py).
+
+        slew_per_s caps how fast the motor commands may change, which bounds the
+        current spike when the driver slams the sticks through neutral (see the
+        note above _SLEW_PER_S). Raise it for a snappier robot, lower it if yours
+        still browns out, or pass None to drive the ESCs unramped. It never
+        applies to stop_all_motors(), so the failsafe stays immediate.
         """
         self._robot_id = robot_id[:MC_ROBOT_ID_MAX]
         self._left_pin = left_motor_pin
@@ -147,6 +181,17 @@ class Minibot:
 
         self._left_pwm = None
         self._right_pwm = None
+
+        # Rate-limited motor state. _out_* is what we last actually commanded,
+        # which the limiter has to remember to know how far it may step next.
+        # A zero or negative rate would pin the motors at neutral forever --
+        # safe, but indistinguishable from a dead robot -- so keep a floor and
+        # let None be the explicit way to opt out.
+        self._slew_per_s = None if slew_per_s is None else max(slew_per_s, 0.1)
+        self._out_left = 0.0
+        self._out_right = 0.0
+        self._slew_ms_left = time.ticks_ms()
+        self._slew_ms_right = self._slew_ms_left
 
     # --- lifecycle -----------------------------------------------------------
 
@@ -263,12 +308,29 @@ class Minibot:
     # --- motors (value -1.0..1.0) -------------------------------------------
 
     def drive_left_motor(self, value):
-        self._motor_write(self._left_pwm, value)
+        self._out_left, self._slew_ms_left = self._slew(
+            self._out_left, value, self._slew_ms_left)
+        self._motor_write(self._left_pwm, self._out_left)
 
     def drive_right_motor(self, value):
-        self._motor_write(self._right_pwm, value)
+        self._out_right, self._slew_ms_right = self._slew(
+            self._out_right, value, self._slew_ms_right)
+        self._motor_write(self._right_pwm, self._out_right)
 
     def stop_all_motors(self):
+        """Cut both motors to neutral immediately -- never ramped.
+
+        The slew limiter deliberately does not apply here. update() calls this
+        when the robot is disabled or the link goes stale, and a stop that eases
+        off is not a stop. Clearing the limiter's state matters as much as the
+        pulse does: leave _out_* at the pre-stop value and the next
+        drive_*_motor() ramps from a throttle the motors are no longer at,
+        stepping straight back to most of it.
+        """
+        self._out_left = 0.0
+        self._out_right = 0.0
+        self._slew_ms_left = time.ticks_ms()
+        self._slew_ms_right = self._slew_ms_left
         self._pulse_us(self._left_pwm, self._neutral_us)
         self._pulse_us(self._right_pwm, self._neutral_us)
 
@@ -297,6 +359,27 @@ class Minibot:
             freq=_PWM_FREQ_HZ,
             duty_u16=_us_to_duty_u16(self._neutral_us),
         )
+
+    def _slew(self, cur, target, last_ms):
+        """Step `cur` toward `target` at no more than _slew_per_s per second.
+
+        Returns (new_output, now_ms). The caller owns the timestamp because each
+        motor needs its own: with one shared timestamp, whichever motor is
+        written first in a loop consumes the whole elapsed interval and the
+        second one is handed dt ~ 0, so it would never move.
+
+        The step is time-based, not per-call. main.py runs an unbounded `while
+        True` whose rate depends on the interpreter and on whatever the student
+        put in the loop, so a fixed step per call would ramp at a speed nobody
+        chose and would change whenever the loop body did.
+        """
+        now = time.ticks_ms()
+        target = _clamp(target, -1.0, 1.0)
+        if self._slew_per_s is None:
+            return target, now
+        dt_ms = _clamp(time.ticks_diff(now, last_ms), 0, _SLEW_MAX_DT_MS)
+        step = self._slew_per_s * dt_ms / 1000.0
+        return cur + _clamp(target - cur, -step, step), now
 
     def _motor_write(self, pwm, value):
         value = _clamp(value, -1.0, 1.0)
