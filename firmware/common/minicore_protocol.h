@@ -18,6 +18,8 @@ extern "C" {
 #define MC_MSG_HEARTBEAT 0x03u
 #define MC_MSG_DISCOVERY_REQ 0x04u
 #define MC_MSG_DISCOVERY_RESP 0x05u
+#define MC_MSG_SET_NEUTRAL 0x06u /* dongle -> robot, unicast only */
+#define MC_MSG_NEUTRAL_ACK 0x07u /* robot -> dongle */
 
 /* --- USB HID identity (Espressif VID, project-specific PID) --- */
 #define MINICORE_USB_VID 0x303Au
@@ -29,9 +31,11 @@ extern "C" {
 #define MC_HID_RID_DISCOVERY 0x04u
 #define MC_HID_RID_PAIR 0x10u
 #define MC_HID_RID_UNPAIR 0x11u
+#define MC_HID_RID_SET_NEUTRAL 0x12u
 
 /* --- HID report IDs: dongle -> host (input) --- */
 #define MC_HID_RID_HEARTBEAT_IN 0x03u
+#define MC_HID_RID_NEUTRAL_IN 0x06u
 #define MC_HID_RID_DISCOVERY_IN 0x05u
 #define MC_HID_RID_DONGLE_STATUS 0xFEu
 
@@ -41,9 +45,11 @@ extern "C" {
 #define MC_HID_OUT_DISCOVERY_LEN 8u
 #define MC_HID_OUT_PAIR_LEN 8u
 #define MC_HID_OUT_UNPAIR_LEN 8u
+#define MC_HID_OUT_SET_NEUTRAL_LEN 8u /* 1 byte slot idx + two uint16 us, padded */
 
 #define MC_HID_IN_HEARTBEAT_LEN 26u
 #define MC_HID_IN_DISCOVERY_LEN 24u
+#define MC_HID_IN_NEUTRAL_LEN 12u
 #define MC_HID_IN_STATUS_LEN 16u
 
 #define MC_ROBOT_ID_MAX 16u
@@ -55,6 +61,21 @@ extern "C" {
 #define MC_MOTOR_TIMEOUT_MS 250u
 
 #define MC_BROADCAST_MAC_BYTE 0xFFu
+
+/* Clamp for a neutral pulse arriving over the air (MC_MSG_SET_NEUTRAL).
+ *
+ * The full 1-2 ms RC pulse window, so the station can express any neutral the
+ * ESC spec allows. This replaced a +/-100 us window around 1500: real trim is
+ * usually +/-30-50 us, but robots in this fleet run ESCs offset far enough
+ * (1700 us and similar) that the narrow window refused their actual neutral.
+ *
+ * Be aware of what the wider range admits. Neutral is the pulse the robot drives
+ * on every stop -- including the 250 ms link-loss failsafe -- so a neutral at
+ * either rail makes "motors stopped" mean full throttle in that direction. The
+ * protections that remain are the robot's own 1-2 ms clamp, the fact that this
+ * only moves on an explicit Apply, and the echo showing what actually landed. */
+#define MC_NEUTRAL_TRIM_MIN_US 1000u
+#define MC_NEUTRAL_TRIM_MAX_US 2000u
 
 #pragma pack(push, 1)
 
@@ -98,6 +119,37 @@ typedef struct {
     char robot_id[MC_ROBOT_ID_MAX];
 } discovery_response_t;
 
+/** Browser -> dongle -> robot: set the per-motor neutral pulse widths.
+ *
+ * Unicast only. target_mac is carried so the robot can verify the frame was
+ * meant for it and refuse anything broadcast: neutral trim is per-robot ESC
+ * calibration, and applying one robot's values field-wide would set every other
+ * robot's idea of "stopped" to the wrong pulse. */
+typedef struct {
+    uint8_t type; /* MC_MSG_SET_NEUTRAL */
+    uint8_t target_mac[6];
+    uint16_t neutral_left_us;
+    uint16_t neutral_right_us;
+} set_neutral_packet_t;
+
+/** Robot -> dongle -> browser: the neutrals actually in force.
+ *
+ * Sent after applying a MC_MSG_SET_NEUTRAL, in answer to a discovery request,
+ * and unprompted on the robot's first few heartbeats, so the driver station can
+ * fill its calibration fields with what the robot is really running however the
+ * two came up in relation to each other.
+ *
+ * The values are post-clamp, so the station sees what landed rather than what it
+ * asked for. `stored` distinguishes "applied right now" from "will survive a
+ * reset" -- the flash write is allowed to fail without the change being lost. */
+typedef struct {
+    uint8_t type; /* MC_MSG_NEUTRAL_ACK */
+    uint8_t mac[6];
+    uint16_t neutral_left_us;
+    uint16_t neutral_right_us;
+    uint8_t stored; /* 1 = saved to the robot's filesystem */
+} neutral_ack_packet_t;
+
 /** Dongle -> browser status (report 0xFE) */
 typedef struct {
     uint8_t wifi_channel;
@@ -115,7 +167,12 @@ _Static_assert(sizeof(enable_packet_t) == 8, "enable_packet_t size");
 _Static_assert(sizeof(heartbeat_packet_t) == 26, "heartbeat_packet_t size");
 _Static_assert(sizeof(discovery_request_t) == 2, "discovery_request_t size");
 _Static_assert(sizeof(discovery_response_t) == 24, "discovery_response_t size");
+_Static_assert(sizeof(set_neutral_packet_t) == 11, "set_neutral_packet_t size");
 _Static_assert(sizeof(dongle_status_t) == 16, "dongle_status_t size");
+/* The HID report descriptor's byte counts must track these, or reports are
+ * silently truncated rather than rejected. Tie them together here. */
+_Static_assert(sizeof(neutral_ack_packet_t) == MC_HID_IN_NEUTRAL_LEN, "neutral_ack_packet_t size");
+_Static_assert(1 + 2 * sizeof(uint16_t) <= MC_HID_OUT_SET_NEUTRAL_LEN, "set-neutral report too small");
 #endif
 
 #ifdef __cplusplus

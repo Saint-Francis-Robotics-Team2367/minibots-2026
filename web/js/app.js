@@ -6,10 +6,14 @@ import {
   MC_HID_RID_DISCOVERY,
   MC_HID_RID_PAIR,
   MC_HID_RID_UNPAIR,
+  MC_HID_RID_SET_NEUTRAL,
   MC_HID_RID_HEARTBEAT_IN,
+  MC_HID_RID_NEUTRAL_IN,
   MC_HID_RID_DISCOVERY_IN,
   MC_HID_RID_DONGLE_STATUS,
   MC_MAX_ROBOTS,
+  MC_NEUTRAL_TRIM_MIN_US,
+  MC_NEUTRAL_TRIM_MAX_US,
 } from "./constants.js";
 import {
   encodeJoystickOut,
@@ -17,7 +21,9 @@ import {
   encodeDiscoveryOut,
   encodePairOut,
   encodeUnpairOut,
+  encodeSetNeutralOut,
   decodeHeartbeatIn,
+  decodeNeutralAckIn,
   decodeDiscoveryIn,
   decodeDongleStatus,
   gamepadToJoystick,
@@ -34,6 +40,14 @@ let wifiChannel = 6;
 const discovered = new Map();
 /** Slot index -> Uint8Array(6) | null */
 const pairMac = [];
+/**
+ * Slot index -> true when the driver has typed a neutral that hasn't been
+ * applied yet. The robot echoes its calibration unprompted, and renderSlots()
+ * runs every second, so without this an incoming echo would overwrite a
+ * half-typed value under the cursor. Cleared when an echo confirms what's in the
+ * boxes, and when the slot's pairing changes.
+ */
+const calibDirty = [];
 
 /** Joystick reports sent in the current second, for the rail readout. */
 let txCount = 0;
@@ -182,6 +196,54 @@ function onInputReport(e) {
         flags: h.status_flags,
       });
     }
+  } else if (reportId === MC_HID_RID_NEUTRAL_IN) {
+    const nk = decodeNeutralAckIn(buf);
+    if (nk) {
+      const k = macKey(nk.mac);
+      const prev = discovered.get(k);
+      // Robots re-announce for reliability (the first few heartbeats, and every
+      // scan), so only say something when the values actually moved. Otherwise
+      // one power-up would put three identical lines in the log per robot.
+      const changed =
+        !prev ||
+        prev.neutralLeft !== nk.neutral_left_us ||
+        prev.neutralRight !== nk.neutral_right_us ||
+        prev.neutralStored !== nk.stored;
+
+      // Post-clamp values straight from the robot, so the readout shows what
+      // actually landed rather than what we asked for.
+      const rec = touchRobot(nk.mac, null, {
+        neutralLeft: nk.neutral_left_us,
+        neutralRight: nk.neutral_right_us,
+        neutralStored: nk.stored,
+      });
+
+      // Report on an unpaired robot too. Announces arrive at power-up and in
+      // answer to a scan — both before anyone has paired a slot — so keying this
+      // on a pairing would make the whole announce invisible.
+      const slotIdx = pairMac.findIndex((m) => m && macKey(m) === k);
+      if (slotIdx >= 0) {
+        const slot = $(`slot-${slotIdx}`);
+        // Only an echo matching the boxes means this driver's edit landed.
+        // Anything else is a clamp or someone else's change, and must not wipe
+        // an edit still in progress.
+        if (
+          Number(slot.querySelector("input.calib-left").value) === nk.neutral_left_us &&
+          Number(slot.querySelector("input.calib-right").value) === nk.neutral_right_us
+        ) {
+          calibDirty[slotIdx] = false;
+        }
+      }
+      if (changed) {
+        const who = slotIdx >= 0 ? `Slot ${slotIdx}` : rec.id || k;
+        log(
+          `${who}: neutral ${nk.neutral_left_us}/${nk.neutral_right_us} µs` +
+            (nk.stored ? "" : " (not saved — a reset will revert it)"),
+          nk.stored ? "go" : "warn",
+        );
+      }
+      renderSlots();
+    }
   } else if (reportId === MC_HID_RID_DISCOVERY_IN) {
     const d = decodeDiscoveryIn(buf);
     if (d) {
@@ -277,6 +339,7 @@ function buildSlots() {
   root.innerHTML = "";
   for (let i = 0; i < MC_MAX_ROBOTS; i++) {
     pairMac[i] = null;
+    calibDirty[i] = false;
     const slot = document.createElement("section");
     slot.className = "slot";
     slot.id = `slot-${i}`;
@@ -303,6 +366,23 @@ function buildSlots() {
           <option value="">— none —</option>
         </select>
       </label>
+      <div class="slot__calib">
+        <span class="calib__title">Neutral µs</span>
+        <label class="calib__field">
+          <span>L</span>
+          <input type="number" class="calib-left" data-idx="${i}"
+                 min="${MC_NEUTRAL_TRIM_MIN_US}" max="${MC_NEUTRAL_TRIM_MAX_US}" step="5"
+                 aria-label="Left motor neutral for slot ${i}" disabled>
+        </label>
+        <label class="calib__field">
+          <span>R</span>
+          <input type="number" class="calib-right" data-idx="${i}"
+                 min="${MC_NEUTRAL_TRIM_MIN_US}" max="${MC_NEUTRAL_TRIM_MAX_US}" step="5"
+                 aria-label="Right motor neutral for slot ${i}" disabled>
+        </label>
+        <button type="button" class="btn btn--sm btn-calib" data-idx="${i}" disabled>Apply</button>
+        <p class="calib__read" id="calib-read-${i}"></p>
+      </div>
       <p class="slot__mac" id="slot-mac-${i}"></p>
       <div class="sticks" aria-hidden="true">
         <div class="stick">
@@ -332,11 +412,72 @@ function buildSlots() {
   root.querySelectorAll("select.slot-gamepad").forEach((sel) => {
     sel.addEventListener("change", () => renderSlots());
   });
+
+  // Typing marks the slot dirty so the robot's echo stops overwriting the boxes
+  // until the value has actually been applied.
+  root.querySelectorAll("input.calib-left, input.calib-right").forEach((inp) => {
+    inp.addEventListener("input", () => {
+      calibDirty[Number(inp.dataset.idx)] = true;
+    });
+  });
+  // The ONLY path that puts neutral values on the wire. The control loop in
+  // startGamepadLoop() never touches them, so calibration is strictly a
+  // click-driven action rather than something streamed at frame rate.
+  root.querySelectorAll(".btn-calib").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      applyNeutral(Number(btn.dataset.idx)).catch((err) =>
+        log(`Neutral apply failed: ${err}`, "err"),
+      );
+    });
+  });
+}
+
+/** Read one calibration box, or null if it isn't a usable pulse width. */
+function readCalibInput(sel) {
+  const raw = sel && sel.value !== "" ? Number(sel.value) : NaN;
+  if (!Number.isFinite(raw) || !Number.isInteger(raw)) {
+    return null;
+  }
+  // Refuse rather than silently clamp. The dongle and robot both clamp as a
+  // backstop, but a driver who typed 1800 should be told the value was rejected,
+  // not left believing 1800 is what the robot is running.
+  if (raw < MC_NEUTRAL_TRIM_MIN_US || raw > MC_NEUTRAL_TRIM_MAX_US) {
+    return null;
+  }
+  return raw;
+}
+
+async function applyNeutral(idx) {
+  if (!pairMac[idx]) {
+    return;
+  }
+  const slot = $(`slot-${idx}`);
+  const left = readCalibInput(slot.querySelector("input.calib-left"));
+  const right = readCalibInput(slot.querySelector("input.calib-right"));
+  if (left === null || right === null) {
+    log(
+      `Slot ${idx}: neutral must be a whole number of µs, ${MC_NEUTRAL_TRIM_MIN_US}–${MC_NEUTRAL_TRIM_MAX_US}`,
+      "warn",
+    );
+    return;
+  }
+  try {
+    await sendReport(MC_HID_RID_SET_NEUTRAL, encodeSetNeutralOut(idx, left, right));
+    log(`Slot ${idx}: neutral ${left}/${right} µs sent`);
+  } catch (err) {
+    log(`Neutral send failed on slot ${idx}: ${err}`, "err");
+  }
 }
 
 async function pairSlot(idx, key) {
+  // Whatever the slot's calibration boxes hold belongs to the robot leaving it,
+  // so drop the edit state either way and let the new occupant's echo refill.
+  calibDirty[idx] = false;
   if (!key) {
     pairMac[idx] = null;
+    const slot = $(`slot-${idx}`);
+    slot.querySelector("input.calib-left").value = "";
+    slot.querySelector("input.calib-right").value = "";
     try {
       await sendReport(MC_HID_RID_UNPAIR, encodeUnpairOut(idx));
       log(`Slot ${idx} released`);
@@ -365,6 +506,18 @@ function refreshSlotControls() {
   document.querySelectorAll("select.slot-pair").forEach((sel) => {
     sel.disabled = !connected;
   });
+  // Calibration needs both a link and a robot in the slot: the dongle resolves
+  // the target from its own pairing table, so an unpaired slot has nowhere to
+  // send. Not gated on `armed` — you calibrate by watching the wheels creep at
+  // centered sticks, which means doing it while the robot is enabled.
+  for (let i = 0; i < MC_MAX_ROBOTS; i++) {
+    const usable = connected && !!pairMac[i];
+    const slot = $(`slot-${i}`);
+    if (!slot) continue;
+    slot.querySelectorAll("input.calib-left, input.calib-right, .btn-calib").forEach((el) => {
+      el.disabled = !usable;
+    });
+  }
 }
 
 /** Paint per-slot identity and status from real robot reports. */
@@ -414,7 +567,28 @@ function renderSlots() {
     slot.dataset.live = String(state === "live");
     const status = $(`slot-status-${i}`);
     status.lastElementChild.textContent = label;
+
+    // Calibration: the boxes are what you intend to send, the readout is what
+    // the robot says it is running. Keeping them separate is what lets the echo
+    // stay live without ever fighting the cursor.
+    const readEl = $(`calib-read-${i}`);
+    const hasEcho = !!rec && rec.neutralLeft !== undefined;
+    if (!mac) {
+      readEl.textContent = "";
+    } else if (hasEcho) {
+      readEl.textContent =
+        `robot: ${rec.neutralLeft} / ${rec.neutralRight} µs` +
+        (rec.neutralStored ? "" : " · not saved");
+    } else {
+      readEl.textContent = "robot: not reported yet";
+    }
+    readEl.dataset.unsaved = String(hasEcho && !rec.neutralStored);
+    if (hasEcho && !calibDirty[i]) {
+      slot.querySelector("input.calib-left").value = String(rec.neutralLeft);
+      slot.querySelector("input.calib-right").value = String(rec.neutralRight);
+    }
   }
+  refreshSlotControls();
 }
 
 /* ── Robot + gamepad lists ────────────────────────────────────────────────── */

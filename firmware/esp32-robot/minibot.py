@@ -16,8 +16,10 @@ Wire protocol: byte-for-byte identical to firmware/common/minicore_protocol.h,
 so the ESP32-S3 dongle and the web driver station work unchanged.
 """
 
+import json
 import network
 import espnow
+import os
 import struct
 import time
 from machine import Pin, PWM
@@ -28,6 +30,8 @@ MC_MSG_ENABLE = 0x02
 MC_MSG_HEARTBEAT = 0x03
 MC_MSG_DISCOVERY_REQ = 0x04
 MC_MSG_DISCOVERY_RESP = 0x05
+MC_MSG_SET_NEUTRAL = 0x06
+MC_MSG_NEUTRAL_ACK = 0x07
 
 MC_ROBOT_ID_MAX = 16
 MC_HEARTBEAT_INTERVAL_MS = 1000
@@ -49,12 +53,16 @@ _FMT_ENABLE = "<BB6s"            # 8 bytes
 _FMT_HEARTBEAT = "<B6sB16sBB"    # 26 bytes
 _FMT_DISCOVERY_REQ = "<BB"       # 2 bytes
 _FMT_DISCOVERY_RESP = "<B6sB16s" # 24 bytes
+_FMT_SET_NEUTRAL = "<B6sHH"      # 11 bytes
+_FMT_NEUTRAL_ACK = "<B6sHHB"     # 12 bytes
 
 assert struct.calcsize(_FMT_JOYSTICK) == 24
 assert struct.calcsize(_FMT_ENABLE) == 8
 assert struct.calcsize(_FMT_HEARTBEAT) == 26
 assert struct.calcsize(_FMT_DISCOVERY_REQ) == 2
 assert struct.calcsize(_FMT_DISCOVERY_RESP) == 24
+assert struct.calcsize(_FMT_SET_NEUTRAL) == 11
+assert struct.calcsize(_FMT_NEUTRAL_ACK) == 12
 
 # --- PWM calibration ---
 # Matched to the ESC datasheet:
@@ -74,9 +82,38 @@ assert struct.calcsize(_FMT_DISCOVERY_RESP) == 24
 # If your ESCs need a different center, pass neutral_us= (see Minibot.__init__).
 _PWM_FREQ_HZ = 50
 _PWM_CENTER_US = 1500   # neutral pulse width (motors stopped)
-_PWM_RANGE_US = 500     # +/- swing at full stick
-_PWM_MIN_US = 1000
-_PWM_MAX_US = 2000
+_PWM_RANGE_US = 300     # +/- swing at full stick
+_PWM_MIN_US = 500       # safety minimum (per controller specs)
+_PWM_MAX_US = 2500      # safety maximum (per controller specs)
+
+# --- Remote neutral trim (driver station "Apply") ---
+# Clamp for a neutral pulse arriving over the air: the full 1-2 ms RC window, so
+# the station can express any neutral the ESC spec allows. This replaced a
+# +/-100 us window around 1500 -- typical trim is +/-30-50 us, but robots here
+# run ESCs offset far enough (1700 us and similar) that the narrow window
+# refused their real neutral.
+#
+# Note what the wider range admits: neutral is the pulse driven on every stop,
+# including the 250 ms link-loss failsafe, so a neutral at either rail makes
+# "motors stopped" mean full throttle that way. What still stands between a typo
+# and that: _pulse_us' own clamp, this only moving on an explicit Apply, and the
+# ack echoing back what actually landed.
+#
+# Keep in sync with MC_NEUTRAL_TRIM_* in firmware/common/minicore_protocol.h.
+_NEUTRAL_TRIM_MIN_US = 1000
+_NEUTRAL_TRIM_MAX_US = 2000
+
+# Where a station-applied calibration is saved so it survives a reset -- notably
+# a brownout mid-match, which is exactly when losing the trim would be worst.
+# JSON rather than packed bytes so it can be read, edited or deleted from the
+# REPL; the file is a few dozen bytes either way.
+_CALIB_PATH = "calib.json"
+
+# How many heartbeats after boot also carry an unsolicited calibration announce.
+# The station needs the robot's real neutrals to fill its fields, and either side
+# may come up first. Repeating covers the broadcast fallback below, which is
+# unacknowledged and may be lost; three is ~3 s at the heartbeat interval.
+_CALIB_ANNOUNCE_COUNT = 3
 
 # Stick deadband, as a fraction of full travel (carried over from the old
 # firmware's `if (abs(axis) < 2000) axis = 0`). This is a *stick* deadband, so a
@@ -142,12 +179,15 @@ class Minibot:
     TELEOP = 1
 
     def __init__(self, robot_id, left_motor_pin=16, right_motor_pin=17, channel=6,
-                 neutral_us=_PWM_CENTER_US, range_us=_PWM_RANGE_US):
-        """neutral_us / range_us calibrate the ESC pulse widths.
+                 neutral_left_us=None, neutral_right_us=None):
+        """Calibrate ESC pulse widths per motor.
 
-        Defaults match the ESC datasheet: 1500 us center, +/- 500 us at full
-        stick (1-2 ms). If your robot creeps when the sticks are centered, nudge
-        neutral_us until it sits still (see the calibration note in main.py).
+        neutral_left_us / neutral_right_us set the neutral (stopped) pulse for each
+        motor independently. Defaults are 1500 us (RC standard). If your motors
+        creep when the sticks are centered, adjust these until they sit still.
+
+        Motors always have ±500 us swing at full stick, centered on their neutral.
+        So a motor with neutral_left_us=1500 ranges 1000–2000 us.
 
         The motor slew limit is not settable here on purpose -- it is fixed at
         _SLEW_PER_S so robot code cannot opt out of it. See the note there.
@@ -156,10 +196,10 @@ class Minibot:
         self._left_pin = left_motor_pin
         self._right_pin = right_motor_pin
         self._channel = channel
-        # Keep the calibration inside the ESC's 1-2 ms pulse window: a typo here
-        # would otherwise be driven straight to the motors as a real command.
-        self._neutral_us = _clamp(neutral_us, _PWM_MIN_US, _PWM_MAX_US)
-        self._range_us = _clamp(range_us, 0, _PWM_RANGE_US)
+        # Per-motor calibration: neutral pulse width
+        # Motors always use ±500 us swing (hardcoded in _motor_write)
+        self._neutral_left_us = _clamp(neutral_left_us, _PWM_MIN_US, _PWM_MAX_US) if neutral_left_us is not None else _PWM_CENTER_US
+        self._neutral_right_us = _clamp(neutral_right_us, _PWM_MIN_US, _PWM_MAX_US) if neutral_right_us is not None else _PWM_CENTER_US
 
         # Controller state (raw int16 axes, -32767..32767; neutral 0)
         self._axis_lx = 0
@@ -174,6 +214,12 @@ class Minibot:
         self._last_enable_ms = 0
         self._last_joystick_ms = 0
         self._last_hb_ms = 0
+
+        # "Will these exact neutrals still be in force after a reset?" True for
+        # the constructor values, since main.py reproduces them every boot; set
+        # from the file on load, and cleared only when a save actually fails.
+        self._calib_stored = True
+        self._calib_announce_left = _CALIB_ANNOUNCE_COUNT
 
         self._sta = None
         self._espnow = None
@@ -195,11 +241,17 @@ class Minibot:
 
     def begin(self):
         """Bring up the motor outputs, Wi-Fi and ESP-NOW. Call once."""
+        # Saved calibration BEFORE the PWM channels exist. _init_motor_pwm has to
+        # be handed the final neutral: the duty passed to the PWM() constructor
+        # is the first thing the ESC sees, and correcting it afterwards is too
+        # late (see the note there).
+        self._load_calibration()
+
         # Motors FIRST, at neutral: bringing up Wi-Fi takes a moment, and until
         # a PWM channel drives these pins they float, which some ESCs latch onto
         # as a throttle command. Get a valid neutral pulse train out immediately.
-        self._left_pwm = self._init_motor_pwm(self._left_pin)
-        self._right_pwm = self._init_motor_pwm(self._right_pin)
+        self._left_pwm = self._init_motor_pwm(self._left_pin, self._neutral_left_us)
+        self._right_pwm = self._init_motor_pwm(self._right_pin, self._neutral_right_us)
         self.stop_all_motors()
 
         # Wi-Fi STA on the shared channel (no AP association; ESP-NOW only).
@@ -257,6 +309,15 @@ class Minibot:
         if time.ticks_diff(now, self._last_hb_ms) >= MC_HEARTBEAT_INTERVAL_MS:
             self._last_hb_ms = now
             self._send_heartbeat()
+            # Ride the first few heartbeats with our calibration, so the driver
+            # station can fill its fields with what we are actually running
+            # without anyone clicking Scan. Same target as the heartbeat, which
+            # falls back to broadcast until we have heard the dongle -- the case
+            # where no unicast traffic has reached us yet (a slot paired to us
+            # but with no gamepad selected sends nothing).
+            if self._calib_announce_left > 0:
+                self._calib_announce_left -= 1
+                self._send_neutral_ack(self._link_target())
 
     # --- inputs (normalized -1.0..1.0) --------------------------------------
 
@@ -308,12 +369,12 @@ class Minibot:
     def drive_left_motor(self, value):
         self._out_left, self._slew_ms_left = self._slew(
             self._out_left, value, self._slew_ms_left)
-        self._motor_write(self._left_pwm, self._out_left)
+        self._motor_write(self._left_pwm, self._out_left, self._neutral_left_us)
 
     def drive_right_motor(self, value):
         self._out_right, self._slew_ms_right = self._slew(
             self._out_right, value, self._slew_ms_right)
-        self._motor_write(self._right_pwm, self._out_right)
+        self._motor_write(self._right_pwm, self._out_right, self._neutral_right_us)
 
     def stop_all_motors(self):
         """Cut both motors to neutral immediately -- never ramped.
@@ -329,8 +390,8 @@ class Minibot:
         self._out_right = 0.0
         self._slew_ms_left = time.ticks_ms()
         self._slew_ms_right = self._slew_ms_left
-        self._pulse_us(self._left_pwm, self._neutral_us)
-        self._pulse_us(self._right_pwm, self._neutral_us)
+        self._pulse_us(self._left_pwm, self._neutral_left_us)
+        self._pulse_us(self._right_pwm, self._neutral_right_us)
 
     # --- internals -----------------------------------------------------------
 
@@ -343,7 +404,7 @@ class Minibot:
         self._axis_rt = 0
         self._buttons = 0
 
-    def _init_motor_pwm(self, pin):
+    def _init_motor_pwm(self, pin, neutral_us):
         """Create a motor PWM that is already at neutral on its first output edge.
 
         The duty MUST be passed to the PWM() constructor. If it isn't, the ESP32
@@ -355,7 +416,7 @@ class Minibot:
         return PWM(
             Pin(pin),
             freq=_PWM_FREQ_HZ,
-            duty_u16=_us_to_duty_u16(self._neutral_us),
+            duty_u16=_us_to_duty_u16(neutral_us),
         )
 
     def _slew(self, cur, target, last_ms):
@@ -377,9 +438,9 @@ class Minibot:
         step = _SLEW_PER_S * dt_ms / 1000.0
         return cur + _clamp(target - cur, -step, step), now
 
-    def _motor_write(self, pwm, value):
+    def _motor_write(self, pwm, value, neutral_us):
         value = _clamp(value, -1.0, 1.0)
-        self._pulse_us(pwm, self._neutral_us + int(value * self._range_us))
+        self._pulse_us(pwm, neutral_us + int(value * _PWM_RANGE_US))
 
     def _pulse_us(self, pwm, us):
         if pwm is None:
@@ -404,13 +465,22 @@ class Minibot:
     def _handle(self, mac, data):
         if len(data) < 1:
             return
-        # Learn the dongle's MAC from the first frame we hear.
+        # Learn the dongle's MAC from the first frame we hear. A link coming up
+        # is also a station that knows nothing about our calibration, so re-arm
+        # the announce: this is the path that covers us rebooting (brownout,
+        # power cycle) into an already-running driver station.
         if self._dongle_mac is None:
             self._dongle_mac = bytes(mac)
+            self._calib_announce_left = _CALIB_ANNOUNCE_COUNT
 
         msg_type = data[0]
-        if msg_type == MC_MSG_DISCOVERY_REQ:
+        if msg_type == MC_MSG_SET_NEUTRAL:
+            self._handle_set_neutral(mac, data)
+        elif msg_type == MC_MSG_DISCOVERY_REQ:
             self._send_discovery_resp(mac)
+            # Answer a scan with our calibration too, so the station can fill its
+            # fields the moment we show up in the robot list.
+            self._send_neutral_ack(mac)
         elif msg_type == MC_MSG_ENABLE:
             self._handle_enable(data)
         elif msg_type == MC_MSG_JOYSTICK:
@@ -441,6 +511,101 @@ class Minibot:
         self._buttons = buttons
         self._last_joystick_ms = time.ticks_ms()
 
+    def _handle_set_neutral(self, mac, data):
+        n = struct.calcsize(_FMT_SET_NEUTRAL)
+        if len(data) < n:
+            return
+        _, target_mac, left_us, right_us = struct.unpack(_FMT_SET_NEUTRAL, data[:n])
+        # Addressed to us specifically -- a broadcast is refused outright rather
+        # than filtered. Neutral trim is per-robot ESC calibration, so applying
+        # one robot's values field-wide would change what "stopped" means for
+        # every other robot at once.
+        if target_mac != self._mac:
+            return
+
+        self._neutral_left_us = _clamp(left_us, _NEUTRAL_TRIM_MIN_US, _NEUTRAL_TRIM_MAX_US)
+        self._neutral_right_us = _clamp(right_us, _NEUTRAL_TRIM_MIN_US, _NEUTRAL_TRIM_MAX_US)
+
+        # A neutral change is a step, not a ramp. The slew limiter works in
+        # normalized -1..1 units and neutral is the offset those map onto, so it
+        # has nothing to say here; the trim clamp bounds the step to ~20% of
+        # range and this only happens on a button press, so it is left unramped.
+        #
+        # Re-emit immediately if the motors are already stopped, so the effect is
+        # visible without touching the sticks -- watching for creep at centered
+        # sticks is the entire point of calibrating.
+        if self._out_left == 0.0 and self._out_right == 0.0:
+            self.stop_all_motors()
+
+        self._calib_stored = self._save_calibration()
+        self._send_neutral_ack(mac)
+
+    # --- calibration persistence ---------------------------------------------
+
+    def _load_calibration(self):
+        """Apply a saved station calibration over main.py's values, if present.
+
+        A missing file is the ordinary first-boot case, and a corrupt one must
+        not stop the robot booting -- either way we keep what main.py passed in.
+        Saved values are re-clamped on the way in: the file is editable from the
+        REPL, so it is untrusted input like anything arriving over the radio.
+        """
+        try:
+            with open(_CALIB_PATH) as f:
+                saved = json.load(f)
+            left = int(saved["nl"])
+            right = int(saved["nr"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return
+        self._neutral_left_us = _clamp(left, _NEUTRAL_TRIM_MIN_US, _NEUTRAL_TRIM_MAX_US)
+        self._neutral_right_us = _clamp(right, _NEUTRAL_TRIM_MIN_US, _NEUTRAL_TRIM_MAX_US)
+        self._calib_stored = True
+
+    def _save_calibration(self):
+        """Persist the current neutrals. True if they will survive a reset."""
+        try:
+            with open(_CALIB_PATH, "w") as f:
+                json.dump({"nl": self._neutral_left_us, "nr": self._neutral_right_us}, f)
+            return True
+        except OSError:
+            # Filesystem full or read-only. The values are still applied for this
+            # session -- the station is simply told they are not persistent, so
+            # the driver knows a reset reverts them.
+            return False
+
+    def clear_calibration(self):
+        """Forget the saved calibration; main.py's values win at the next boot.
+
+        Run once from the REPL when a robot should go back to the numbers in its
+        main.py. Editing the constructor alone will not do it: a saved
+        calibration is loaded over the top of those values in begin().
+        """
+        try:
+            os.remove(_CALIB_PATH)
+            return True
+        except OSError:
+            return False
+
+    # --- outbound frames -----------------------------------------------------
+
+    def _link_target(self):
+        """Where robot -> station frames go: the dongle once we have heard from
+        it, else broadcast. ESP-NOW broadcasts are unacknowledged, which is why
+        the calibration announce repeats instead of firing once."""
+        return self._dongle_mac if self._dongle_mac is not None else _BROADCAST
+
+    def _send_neutral_ack(self, target):
+        """Report the neutrals actually in force (post-clamp) to the station."""
+        ack = struct.pack(
+            _FMT_NEUTRAL_ACK,
+            MC_MSG_NEUTRAL_ACK,
+            self._mac,
+            self._neutral_left_us,
+            self._neutral_right_us,
+            1 if self._calib_stored else 0,
+        )
+        self._send(target, ack)
+
     def _send_discovery_resp(self, mac):
         name = self._robot_id.encode()[:MC_ROBOT_ID_MAX]
         resp = struct.pack(
@@ -463,5 +628,4 @@ class Minibot:
             0xFF,  # battery unknown
             1 if self._enabled else 0,
         )
-        target = self._dongle_mac if self._dongle_mac is not None else _BROADCAST
-        self._send(target, hb)
+        self._send(self._link_target(), hb)

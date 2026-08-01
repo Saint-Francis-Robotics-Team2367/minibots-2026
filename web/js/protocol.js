@@ -72,6 +72,40 @@ export function encodeUnpairOut(controllerIndex) {
   return buf;
 }
 
+/**
+ * Set the paired robot's per-motor neutral pulse widths.
+ * Layout: slot index (1) + neutral_left_us (u16 LE) + neutral_right_us (u16 LE).
+ * @returns {ArrayBuffer}
+ */
+export function encodeSetNeutralOut(slotIndex, leftUs, rightUs) {
+  const buf = new ArrayBuffer(C.MC_HID_OUT_SET_NEUTRAL_LEN);
+  const v = new DataView(buf);
+  v.setUint8(0, slotIndex & 0xff);
+  v.setUint16(1, leftUs & 0xffff, true);
+  v.setUint16(3, rightUs & 0xffff, true);
+  for (let o = 5; o < C.MC_HID_OUT_SET_NEUTRAL_LEN; o++) v.setUint8(o, 0);
+  return buf;
+}
+
+/** Robot's report of the neutrals it is actually running (post-clamp). */
+export function decodeNeutralAckIn(buf) {
+  const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  if (v.byteLength < C.MC_HID_IN_NEUTRAL_LEN) return null;
+  let o = 0;
+  const type = v.getUint8(o++);
+  if (type !== C.MC_MSG_NEUTRAL_ACK) return null;
+  const mac = new Uint8Array(6);
+  for (let i = 0; i < 6; i++) mac[i] = v.getUint8(o++);
+  const neutral_left_us = v.getUint16(o, true);
+  o += 2;
+  const neutral_right_us = v.getUint16(o, true);
+  o += 2;
+  // 1 = written to the robot's filesystem, so it survives a reset. 0 means the
+  // values are live but a reboot reverts them.
+  const stored = v.getUint8(o++) === 1;
+  return { type, mac, neutral_left_us, neutral_right_us, stored };
+}
+
 export function decodeHeartbeatIn(buf) {
   const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   if (v.byteLength < C.MC_HID_IN_HEARTBEAT_LEN) return null;

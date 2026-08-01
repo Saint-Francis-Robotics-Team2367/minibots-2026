@@ -119,7 +119,15 @@ function Probe-Python($exe, $pre) {
   # Normalise to a real array: an omitted or $null $pre must become @(), not
   # @($null), which would hand python.exe a stray empty argument.
   $preArgs = @(@($pre) | Where-Object { $_ })
-  $probe = 'import sys; print("%d.%d" % sys.version_info[:2]); print(sys.executable)'
+  # No double quotes anywhere in this snippet, deliberately. Windows PowerShell
+  # 5.1 does not escape embedded quotes when handing an argument to a native
+  # exe, so `print("%d.%d" % ...)` reaches python.exe as `print(%d.%d % ...)`
+  # and dies with a SyntaxError. Every probe then "fails", so no interpreter is
+  # ever found -- including the one this script just installed, which came back
+  # as "did not verify". sys.version's first field gives the same information
+  # with no string literal at all. (PowerShell 7.3+ passes it correctly, so this
+  # only ever broke under the 5.1 that the .cmd launcher starts.)
+  $probe = 'import sys; print(sys.version.split()[0]); print(sys.executable)'
   # -Quiet: a Store stub or a missing `py -3.x` writes to stderr, which is an
   # expected outcome of probing and must not surface as an error.
   $out = Invoke-Tool $exe ($preArgs + @('-c', $probe)) -Quiet
@@ -128,7 +136,9 @@ function Probe-Python($exe, $pre) {
   # normalise both, and Trim() takes care of any trailing CR.
   $lines = @(@($out) | ForEach-Object { "$_" -split "`n" } |
              ForEach-Object { $_.Trim() } | Where-Object { $_ })
-  if ($lines.Count -lt 2 -or $lines[0] -notmatch '^\d+\.\d+$') { return $null }
+  # Prefix match, not anchored at both ends: sys.version reports the full
+  # "3.11.9". Test-PySupported reads the major/minor fields and ignores the rest.
+  if ($lines.Count -lt 2 -or $lines[0] -notmatch '^\d+\.\d+') { return $null }
   return [pscustomobject]@{
     Exe     = $exe
     Pre     = $preArgs
@@ -278,9 +288,21 @@ function Install-Python {
   return $info
 }
 
-# --- ensure the repo-local ESP-IDF exists (first-run setup, then a no-op) ---
-function Ensure-Idf {
-  if (-not (Have git)) { throw 'git not found. Install Git for Windows (https://git-scm.com) and re-run.' }
+# --- pick an ESP-IDF-supported Python and let it own the `python` name --------
+#
+# This must run on EVERY invocation, not only during first-run setup. ESP-IDF's
+# export.ps1 and install.bat both shell out to a bare `python` from PATH and
+# derive the virtualenv directory from THAT interpreter's version
+# (~/.espressif/python_env/idf<idf-ver>_py<X.Y>_env).
+#
+# So on a machine where a too-new Python owns the `python` name, setup builds a
+# correct idf5.3_py3.11_env, and then the *next* run -- which skips setup because
+# ESP-IDF is already cloned -- recomputes the path as idf5.3_py3.14_env, finds
+# nothing there, and fails with "doesn't exist! Please run the install script",
+# pointing at an install that had in fact already succeeded.
+$script:PySelected = $null
+function Use-SupportedPython {
+  if ($script:PySelected) { return $script:PySelected }
 
   $py = Find-Python
   $chosen = $py.Supported
@@ -291,7 +313,7 @@ function Ensure-Idf {
   # in keeping -- the difference is that Python can't be repo-local (ESP-IDF's
   # installer wants a real interpreter, and per-user is the smallest footprint
   # that gives one).
-  if (-not $chosen -and $env:MINICORE_NO_PYINSTALL -ne '1') {
+  if (-not $chosen -and -not $SkipSetup -and $env:MINICORE_NO_PYINSTALL -ne '1') {
     # Take over the persistent PATH only when no working Python exists at all.
     # If one does, it owns the 'python' name for a reason -- other projects may
     # depend on it -- and this build doesn't need to win that argument.
@@ -330,13 +352,22 @@ No working Python, and installing one automatically didn't work (see above).
   }
   Info "Using Python $($chosen.Version) ($($chosen.Label))"
 
-  # ESP-IDF's install.bat runs bare `python.exe` from PATH rather than the
-  # interpreter chosen above, so put the chosen one's directory first. Without
-  # this, selecting `py -3.11` here would still hand ESP-IDF whichever too-new
-  # (or stubbed) Python happens to own the `python` name.
+  # ESP-IDF's install.bat AND export.ps1 both run a bare `python` from PATH
+  # rather than the interpreter chosen above, so put the chosen one's directory
+  # first. Without this, selecting `py -3.11` here would still hand ESP-IDF
+  # whichever too-new (or stubbed) Python happens to own the `python` name -- and
+  # the venv path it derives from that version would not be the one setup built.
   if ($chosen.Home -and (Test-Path $chosen.Home)) {
     $env:PATH = "$($chosen.Home);$env:PATH"
   }
+  $script:PySelected = $chosen
+  return $chosen
+}
+
+# --- ensure the repo-local ESP-IDF exists (first-run setup, then a no-op) ---
+function Ensure-Idf {
+  if (-not (Have git)) { throw 'git not found. Install Git for Windows (https://git-scm.com) and re-run.' }
+  Use-SupportedPython | Out-Null
 
   if (-not (Have cmake)) {
     Warn 'cmake not found - required by ESP-IDF. Install with:  winget install Kitware.CMake'
@@ -384,6 +415,11 @@ if (-not (Have idf.py)) {
   if (-not (Test-Path $export)) { throw "ESP-IDF export script not found at $export." }
   # export.ps1 expects IDF_PATH to point at the SDK tree.
   if (-not $env:IDF_PATH) { $env:IDF_PATH = Split-Path -Parent $export }
+  # Settle the interpreter BEFORE sourcing export.ps1, on every run and not just
+  # the one that installed ESP-IDF: export.ps1 derives the virtualenv path from
+  # whatever `python` resolves to. Memoised, so this is free when Ensure-Idf
+  # already ran above.
+  Use-SupportedPython | Out-Null
   . $export
 }
 

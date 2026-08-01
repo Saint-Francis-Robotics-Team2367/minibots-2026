@@ -64,6 +64,36 @@ Set your robot's **name**, **motor pins**, and **Wi-Fi channel** in the
 `Minibot(...)` line at the top of `main.py`. The channel must match the dongle
 (default `6`).
 
+### Setting neutral from the driver station
+
+Each slot in the web driver station has **Neutral µs** boxes for the left and
+right motor and an **Apply** button. Values are sent only when you click Apply —
+never streamed — and go to that slot's robot alone.
+
+The workflow: pair the robot, enable it, leave the sticks centered, and watch for
+creep. Nudge the neutral for whichever motor is turning until it sits still. The
+line under the boxes shows what the robot reports it is actually running, so you
+can see a value land (or see it clamped).
+
+Values are clamped to the full RC window, **1000–2000 µs**.
+
+> ⚠️ Neutral is the pulse driven on *every* stop, including the 250 ms link-loss
+> failsafe. A neutral near either end of that range therefore makes "motors
+> stopped" mean near-full throttle in that direction. Watch the readout under the
+> boxes to confirm what actually landed, and keep the robot on blocks the first
+> time you apply an unfamiliar value.
+
+> ⚠️ **A calibration set this way is saved on the robot (`calib.json`) and
+> overrides `main.py`.** That's what lets it survive a brownout mid-match, but it
+> means editing `neutral_left_us=` in `main.py` will appear to do nothing while a
+> saved calibration exists. To hand control back to `main.py`, run
+> `bot.clear_calibration()` once from the REPL (`flash-robot --repl`) or delete
+> `calib.json`.
+
+The robot reports its calibration unprompted at power-up and whenever it answers
+a scan, so the boxes fill themselves in — you should never have to guess what a
+robot is currently running.
+
 ### Motor commands ramp
 
 `drive_left_motor()` / `drive_right_motor()` move *toward* the value you pass
