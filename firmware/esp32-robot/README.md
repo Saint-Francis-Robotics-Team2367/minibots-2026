@@ -75,9 +75,13 @@ creep. Nudge the neutral for whichever motor is turning until it sits still. The
 line under the boxes shows what the robot reports it is actually running, so you
 can see a value land (or see it clamped).
 
-Values are clamped to **1400–1600 µs**, tighter than the 1000–2000 µs `main.py`
-allows, because `neutral_us = 2000` from a text box would make "stopped" mean
-full forward.
+Values are clamped to the full RC window, **1000–2000 µs**.
+
+> ⚠️ Neutral is the pulse driven on *every* stop, including the 250 ms link-loss
+> failsafe. A neutral near either end of that range therefore makes "motors
+> stopped" mean near-full throttle in that direction. Watch the readout under the
+> boxes to confirm what actually landed, and keep the robot on blocks the first
+> time you apply an unfamiliar value.
 
 > ⚠️ **A calibration set this way is saved on the robot (`calib.json`) and
 > overrides `main.py`.** That's what lets it survive a brownout mid-match, but it

@@ -38,10 +38,10 @@ export const MC_HID_IN_DISCOVERY_LEN = 24;
 export const MC_HID_IN_NEUTRAL_LEN = 12;
 export const MC_HID_IN_STATUS_LEN = 16;
 
-/* Allowed range for a neutral set from this page. Mirrors MC_NEUTRAL_TRIM_* in
- * minicore_protocol.h — the dongle and the robot both clamp to it, so keeping
- * the inputs' min/max here means the UI refuses what the firmware would silently
- * trim rather than letting the two drift apart. */
-export const MC_NEUTRAL_TRIM_MIN_US = 1400;
-export const MC_NEUTRAL_TRIM_MAX_US = 1600;
+/* Allowed range for a neutral set from this page — the full 1–2 ms RC window.
+ * Mirrors MC_NEUTRAL_TRIM_* in minicore_protocol.h; the dongle and the robot
+ * both clamp to it, so keeping the inputs' min/max here means the UI refuses
+ * what the firmware would silently trim rather than letting the two drift. */
+export const MC_NEUTRAL_TRIM_MIN_US = 1000;
+export const MC_NEUTRAL_TRIM_MAX_US = 2000;
 export const MC_NEUTRAL_DEFAULT_US = 1500;

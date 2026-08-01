@@ -87,15 +87,21 @@ _PWM_MIN_US = 500       # safety minimum (per controller specs)
 _PWM_MAX_US = 2500      # safety maximum (per controller specs)
 
 # --- Remote neutral trim (driver station "Apply") ---
-# Clamp for a neutral pulse arriving over the air, deliberately much tighter than
-# the 1000-2000 us the constructor allows. A neutral set in main.py is a number a
-# student reads in context; one arriving from a web text box is not, and
-# neutral_us = 2000 would make "motors stopped" mean full forward. Real ESC trim
-# is +/-30-50 us, so +/-100 us is generous and bounds a typo to about 20%
-# throttle instead of 100%. Keep in sync with MC_NEUTRAL_TRIM_* in
-# firmware/common/minicore_protocol.h.
-_NEUTRAL_TRIM_MIN_US = 1400
-_NEUTRAL_TRIM_MAX_US = 1600
+# Clamp for a neutral pulse arriving over the air: the full 1-2 ms RC window, so
+# the station can express any neutral the ESC spec allows. This replaced a
+# +/-100 us window around 1500 -- typical trim is +/-30-50 us, but robots here
+# run ESCs offset far enough (1700 us and similar) that the narrow window
+# refused their real neutral.
+#
+# Note what the wider range admits: neutral is the pulse driven on every stop,
+# including the 250 ms link-loss failsafe, so a neutral at either rail makes
+# "motors stopped" mean full throttle that way. What still stands between a typo
+# and that: _pulse_us' own clamp, this only moving on an explicit Apply, and the
+# ack echoing back what actually landed.
+#
+# Keep in sync with MC_NEUTRAL_TRIM_* in firmware/common/minicore_protocol.h.
+_NEUTRAL_TRIM_MIN_US = 1000
+_NEUTRAL_TRIM_MAX_US = 2000
 
 # Where a station-applied calibration is saved so it survives a reset -- notably
 # a brownout mid-match, which is exactly when losing the trim would be worst.

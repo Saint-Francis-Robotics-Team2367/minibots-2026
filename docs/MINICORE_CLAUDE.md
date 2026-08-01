@@ -200,12 +200,16 @@ deliberate:
   trim is per-robot ESC calibration; a broadcast set would redefine "stopped" for
   every robot on the field at once, so the robot refuses anything not addressed
   to it rather than filtering it.
-- **Clamped to `MC_NEUTRAL_TRIM_MIN_US`..`MAX` (1400–1600 µs)** by the dongle,
-  the robot, and the web inputs. Much tighter than the robot's own 1000–2000 µs
-  PWM limits: a neutral set in `main.py` is a number a student reads in context,
-  but `neutral_us = 2000` arriving from a text box would make "motors stopped"
-  mean full forward. Real trim is ±30–50 µs, so ±100 µs bounds a typo to roughly
-  20 % throttle instead of 100 %.
+- **Clamped to `MC_NEUTRAL_TRIM_MIN_US`..`MAX` (1000–2000 µs)** by the dongle,
+  the robot, and the web inputs alike — the full RC pulse window, so the station
+  can express any neutral the ESC spec allows. This replaced a ±100 µs window
+  around 1500: typical trim is ±30–50 µs, but robots in this fleet run ESCs
+  offset far enough (1700 µs) that the narrow window refused their real neutral.
+  Note what the wider range admits — neutral is the pulse driven on every stop,
+  *including the 250 ms link-loss failsafe*, so a neutral at either rail makes
+  "motors stopped" mean full throttle that way. What remains between a typo and
+  that: the robot's own pulse clamp, the fact that this only moves on an explicit
+  Apply, and the echo reporting what actually landed.
 - **Not gated on the global enable**, unlike joystick reports. Calibrating means
   watching the wheels for creep at centered sticks, which requires the robot
   armed; and it changes what "stopped" means rather than driving anything.

@@ -64,13 +64,18 @@ extern "C" {
 
 /* Clamp for a neutral pulse arriving over the air (MC_MSG_SET_NEUTRAL).
  *
- * Deliberately much tighter than the robot's own 1000-2000 us PWM limits. A
- * neutral set in main.py is a number a student reads in context; one arriving
- * from a web text box is not, and neutral_us = 2000 would mean "motors stopped"
- * is full forward. Real ESC trim is +/-30-50 us, so +/-100 us is generous and
- * bounds a typo to roughly 20% throttle instead of 100%. */
-#define MC_NEUTRAL_TRIM_MIN_US 1400u
-#define MC_NEUTRAL_TRIM_MAX_US 1600u
+ * The full 1-2 ms RC pulse window, so the station can express any neutral the
+ * ESC spec allows. This replaced a +/-100 us window around 1500: real trim is
+ * usually +/-30-50 us, but robots in this fleet run ESCs offset far enough
+ * (1700 us and similar) that the narrow window refused their actual neutral.
+ *
+ * Be aware of what the wider range admits. Neutral is the pulse the robot drives
+ * on every stop -- including the 250 ms link-loss failsafe -- so a neutral at
+ * either rail makes "motors stopped" mean full throttle in that direction. The
+ * protections that remain are the robot's own 1-2 ms clamp, the fact that this
+ * only moves on an explicit Apply, and the echo showing what actually landed. */
+#define MC_NEUTRAL_TRIM_MIN_US 1000u
+#define MC_NEUTRAL_TRIM_MAX_US 2000u
 
 #pragma pack(push, 1)
 
