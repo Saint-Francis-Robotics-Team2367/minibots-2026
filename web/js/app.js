@@ -36,6 +36,15 @@ let seq = 0;
 let raf = 0;
 let armed = false;
 let wifiChannel = 6;
+/**
+ * Cleared by the Disconnect button so the automatic path can't immediately undo
+ * a deliberate disconnect. Set again by Connect, or by a physical unplug.
+ */
+let autoReconnect = true;
+/** Guards attachDongle against the load-time scan racing the `connect` event. */
+let attaching = false;
+/** Last discovery request we sent, for the calibration chase's rate limit. */
+let lastDiscoveryMs = 0;
 
 /** Robots we've heard from: macKey -> { mac, id, lastSeen, battery, flags } */
 const discovered = new Map();
@@ -114,6 +123,47 @@ function setDongleUi(connected) {
   refreshSlotControls();
 }
 
+const isDongle = (dev) =>
+  dev.vendorId === MINICORE_USB_VID && dev.productId === MINICORE_USB_PID;
+
+/**
+ * Bring the link up on an already-chosen device. Shared by the picker and the
+ * automatic paths, so an auto-connected dongle lands in exactly the same state
+ * as a hand-picked one — including the disable broadcast below, which is the
+ * reason this is one function and not two.
+ *
+ * @returns {Promise<boolean>} false when a link was already up or coming up.
+ */
+async function attachDongle(dev) {
+  // The load-time scan and the `connect` event can both fire for one plug-in,
+  // and `await dev.open()` is long enough for the second to arrive mid-flight.
+  // Without this guard the loser overwrites `device`, leaking the winner's open
+  // handle and its inputreport listener.
+  if (attaching || (device && device.opened)) {
+    return false;
+  }
+  attaching = true;
+  try {
+    await dev.open();
+    device = dev;
+    device.addEventListener("inputreport", onInputReport);
+  } finally {
+    attaching = false;
+  }
+  setDongleUi(true);
+  log(`Dongle connected — ${device.productName || "MiniCore"}`, "go");
+  // This page starts disarmed, but a robot that stayed powered through a reload
+  // is still latched enabled from the previous session. Push our state onto the
+  // field before the control loop starts, so the UI and the robots agree.
+  await broadcastDisable("link opened");
+  // A robot that has already met this dongle will not re-announce its
+  // calibration on its own, so ask instead of waiting for an announce that is
+  // never coming. See requestCalibration().
+  await requestCalibration();
+  startGamepadLoop();
+  return true;
+}
+
 async function connectDongle() {
   if (!("hid" in navigator)) {
     $("noHid").hidden = false;
@@ -127,16 +177,44 @@ async function connectDongle() {
     log("No dongle selected", "warn");
     return;
   }
-  device = devs[0];
-  await device.open();
-  device.addEventListener("inputreport", onInputReport);
-  setDongleUi(true);
-  log(`Dongle connected — ${device.productName || "MiniCore"}`, "go");
-  // This page starts disarmed, but a robot that stayed powered through a reload
-  // is still latched enabled from the previous session. Push our state onto the
-  // field before the control loop starts, so the UI and the robots agree.
-  await broadcastDisable("link opened");
-  startGamepadLoop();
+  // Picking a dongle by hand is also how you undo an earlier Disconnect.
+  autoReconnect = true;
+  await attachDongle(devs[0]);
+}
+
+/**
+ * Connect with no picker and no click, using a dongle this origin has already
+ * been granted.
+ *
+ * getDevices() returns only devices the driver has chosen here before, so it
+ * needs no user gesture. That makes every load after the first automatic and
+ * leaves the first costing exactly one click: requestDevice() is the only call
+ * that can create the grant, and it requires a gesture by design.
+ *
+ * @returns {Promise<"connected" | "none" | "failed">}
+ */
+async function autoConnect() {
+  if (!("hid" in navigator) || !autoReconnect || (device && device.opened)) {
+    return "none";
+  }
+  let devs = [];
+  try {
+    devs = await navigator.hid.getDevices();
+  } catch (err) {
+    log(`Could not list remembered devices: ${err}`, "warn");
+    return "failed";
+  }
+  const dev = devs.find(isDongle);
+  if (!dev) {
+    return "none";
+  }
+  try {
+    return (await attachDongle(dev)) ? "connected" : "none";
+  } catch (err) {
+    // Usually another tab already holds it — WebHID allows a single opener.
+    log(`Auto-connect failed: ${err} — use Connect dongle`, "warn");
+    return "failed";
+  }
 }
 
 async function disconnectDongle() {
@@ -168,6 +246,28 @@ async function sendReport(reportId, data) {
     return;
   }
   await device.sendReport(reportId, data);
+}
+
+/**
+ * Broadcast a discovery request — which is also how we ask for calibration.
+ *
+ * Robots answer a discovery request with a discovery response *and* a neutral
+ * ack, unconditionally. That matters because their unprompted announce is not
+ * something a fresh driver station can count on: minibot.py re-arms it only
+ * when the robot learns a dongle MAC for the *first* time, and the dongle's MAC
+ * survives a page reload. So a robot that was already talking to this dongle
+ * before the page loaded spent its announces long ago, and would otherwise sit
+ * at "robot: not reported yet" until someone clicked Scan.
+ */
+async function requestCalibration() {
+  // Stamped before the send, not after, so a failure still holds the rate limit
+  // and can't turn into a tight retry loop.
+  lastDiscoveryMs = Date.now();
+  try {
+    await sendReport(MC_HID_RID_DISCOVERY, encodeDiscoveryOut(wifiChannel));
+  } catch (err) {
+    log(`Calibration request failed: ${err}`, "warn");
+  }
 }
 
 /* ── Inbound reports ──────────────────────────────────────────────────────── */
@@ -751,6 +851,9 @@ $("btnConnect").addEventListener("click", () => {
   connectDongle().catch((err) => log(`Connect failed: ${err}`, "err"));
 });
 $("btnDisconnect").addEventListener("click", () => {
+  // A deliberate disconnect has to stick: the dongle is still plugged in and
+  // still granted, so the next auto-connect trigger would otherwise undo it.
+  autoReconnect = false;
   disconnectDongle().catch((err) => log(`Disconnect failed: ${err}`, "err"));
 });
 $("btnArm").addEventListener("click", () => setArmed(!armed));
@@ -761,6 +864,7 @@ $("btnClearLog").addEventListener("click", () => {
 // Scan was specified and handled by the dongle, but never reachable from the UI.
 $("btnScan").addEventListener("click", async () => {
   try {
+    lastDiscoveryMs = Date.now();
     await sendReport(MC_HID_RID_DISCOVERY, encodeDiscoveryOut(wifiChannel));
     log(`Scanning channel ${wifiChannel}…`);
   } catch (err) {
@@ -807,16 +911,33 @@ window.addEventListener("pagehide", () => {
 // A dongle unplugged mid-match must not leave the UI claiming robots are live.
 if ("hid" in navigator) {
   navigator.hid.addEventListener("disconnect", (e) => {
+    if (!isDongle(e.device)) {
+      return;
+    }
+    // A physical unplug clears an earlier Disconnect: pulling the dongle and
+    // putting it back is an unambiguous "use this again", and shouldn't need
+    // the button pressed as well.
+    autoReconnect = true;
     if (device && e.device === device) {
       log("Dongle unplugged", "err");
       // The device is already gone — the disable send inside will no-op.
       disconnectDongle().catch(() => {});
     }
   });
+  // Plugged in while the page was already open — come up without a click.
+  navigator.hid.addEventListener("connect", (e) => {
+    if (!isDongle(e.device)) {
+      return;
+    }
+    autoConnect().catch(() => {});
+  });
 } else {
   $("noHid").hidden = false;
   $("btnConnect").disabled = true;
 }
+
+// How long to wait before re-asking a robot that owes us its calibration.
+const CALIB_CHASE_MS = 3000;
 
 // Age out robots we've stopped hearing from; repaint staleness every second.
 setInterval(() => {
@@ -843,6 +964,22 @@ setInterval(() => {
   $("txRate").textContent = String(txCount);
   txCount = 0;
   renderSlots();
+
+  // Chase the calibration of any robot that hasn't reported one. Covers the ack
+  // being lost (ESP-NOW does not retry), and a robot that powers up into an
+  // already-running station. Stops asking the moment every robot has answered.
+  if (device && device.opened && now - lastDiscoveryMs >= CALIB_CHASE_MS) {
+    let missing = false;
+    for (const v of discovered.values()) {
+      if (v.neutralLeft === undefined) {
+        missing = true;
+        break;
+      }
+    }
+    if (missing) {
+      requestCalibration();
+    }
+  }
 }, 1000);
 
 // The robot's enable flag expires after MC_ENABLE_TIMEOUT_MS (3 s) so it can't
@@ -861,3 +998,14 @@ renderRobots();
 renderGamepads();
 setDongleUi(false);
 log("Driver station ready");
+
+// Reconnect to a dongle this browser already knows, so the usual case is to
+// open the page and drive. The button remains the fallback — and the only way
+// to grant a dongle the first time.
+autoConnect()
+  .then((status) => {
+    if (status === "none" && !(device && device.opened)) {
+      log('No remembered dongle — click "Connect dongle" once; later loads reconnect on their own');
+    }
+  })
+  .catch(() => {});
