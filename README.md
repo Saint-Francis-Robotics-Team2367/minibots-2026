@@ -97,6 +97,25 @@ for you if it's missing.
   (Python is handled for you; to do it by hand, use
   [Python 3.11](https://python.org/downloads/release/python-3119/) with *Add to PATH* checked).
 
+## Type Checking with Pyright
+
+Before flashing your code, check for type errors with **pyright**:
+
+**Install & run:**
+```bash
+cd firmware/esp32-robot
+uv pip install pyright
+uv run pyright .
+```
+
+Or with your system Python:
+```bash
+pip install pyright
+pyright firmware/esp32-robot
+```
+
+Pyright will catch attribute typos and type mismatches. Type checks also run automatically on pull requests against `main`.
+
 ### Flash script options
 
 **Robot** (`flash-robot.*`, MicroPython).
