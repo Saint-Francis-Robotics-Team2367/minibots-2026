@@ -49,13 +49,15 @@ from minibot_config import MinibotConfig
 # neutral pulse widths (1500 is the RC standard; try 20-30 us at a time).
 # Motors always have ±300 us swing centered on their neutral.
 
+print("starting bot...")
+
 config = (MinibotConfig("MiniBot1", left_motor_pin=16, right_motor_pin=17, channel=6)
-          .with_neutral_left_us(1500)
           .with_neutral_right_us(1700))
 
 bot = Minibot(config)
 
 bot.begin()
+print("bot started")
 
 while True:
     bot.update()  # ALWAYS FIRST — handles comms, enable and the safety stop.
