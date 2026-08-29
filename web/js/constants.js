@@ -38,10 +38,17 @@ export const MC_HID_IN_DISCOVERY_LEN = 24;
 export const MC_HID_IN_NEUTRAL_LEN = 12;
 export const MC_HID_IN_STATUS_LEN = 16;
 
+/* Bumped in lockstep with MC_PROTOCOL_VERSION in minicore_protocol.h. The dongle
+ * reports the value it was BUILT with; if it differs from this, the dongle is
+ * running firmware that predates (or postdates) this page and needs reflashing.
+ * Surfacing that beats debugging a silent mismatch. */
+export const MC_PROTOCOL_VERSION = 1;
+
 /* Allowed range for a neutral set from this page — the full 1–2 ms RC window.
- * Mirrors MC_NEUTRAL_TRIM_* in minicore_protocol.h; the dongle and the robot
- * both clamp to it, so keeping the inputs' min/max here means the UI refuses
- * what the firmware would silently trim rather than letting the two drift. */
+ * Mirrors MC_NEUTRAL_TRIM_* in firmware/common/minicore_policy.h (policy, NOT
+ * the wire protocol — changing it needs no dongle reflash). The robot enforces
+ * it authoritatively; these bounds exist so the UI refuses a bad value up front
+ * instead of letting the driver discover it from the echo. */
 export const MC_NEUTRAL_TRIM_MIN_US = 1000;
 export const MC_NEUTRAL_TRIM_MAX_US = 2000;
 export const MC_NEUTRAL_DEFAULT_US = 1500;

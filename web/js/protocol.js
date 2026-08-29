@@ -150,6 +150,7 @@ export function decodeDongleStatus(buf) {
     paired_count: v.getUint8(1),
     global_enabled: v.getUint8(2),
     error_flags: v.getUint8(3),
+    protocol_version: v.getUint8(4),
   };
 }
 

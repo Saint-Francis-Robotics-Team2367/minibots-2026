@@ -200,8 +200,15 @@ deliberate:
   trim is per-robot ESC calibration; a broadcast set would redefine "stopped" for
   every robot on the field at once, so the robot refuses anything not addressed
   to it rather than filtering it.
-- **Clamped to `MC_NEUTRAL_TRIM_MIN_US`..`MAX` (1000–2000 µs)** by the dongle,
-  the robot, and the web inputs alike — the full RC pulse window, so the station
+- **Clamped to `MC_NEUTRAL_TRIM_MIN_US`..`MAX` (1000–2000 µs)** by the **robot**,
+  which is authoritative, and mirrored by the **web inputs** so the driver is told
+  before sending. The **dongle does not clamp** — it is a transport and forwards
+  the frame untouched. Two tiers, not three: the browser is the least trustworthy
+  point (editable, cacheable) and the robot is the only one that sees *every* path
+  in, including a `calib.json` hand-edited over the REPL. Putting the clamp in the
+  dongle as well bought nothing observable and made an ESC policy number a
+  compiled-in constant, so widening the range forced a rebuild and a BOOT/RESET
+  reflash. The range is the full RC pulse window, so the station
   can express any neutral the ESC spec allows. This replaced a ±100 µs window
   around 1500: typical trim is ±30–50 µs, but robots in this fleet run ESCs
   offset far enough (1700 µs) that the narrow window refused their real neutral.
@@ -308,7 +315,7 @@ The browser communicates with the ESP32-S3 dongle over USB HID. This requires de
 | `0x03` | Heartbeat from robot | heartbeat_packet_t data |
 | `0x05` | Discovery response | discovery_response_t data |
 | `0x06` | Neutral calibration echo | neutral_ack_packet_t data |
-| `0xFE` | Dongle status | Channel, paired count, error flags |
+| `0xFE` | Dongle status | Channel, paired count, global enable, error flags, `protocol_version` |
 
 **`error_flags` bit 0 — ESP-NOW send failure.** The browser mirrors this bit
 straight onto the "Radio send failing" chip, so the dongle is responsible for
@@ -328,6 +335,30 @@ Don't reintroduce a "clear the flag on each inbound report" reset. Send outcomes
 arrive asynchronously in the ESP-NOW send callback, well after `esp_now_send()`
 returns, so a reset at report rate erases the result before the 200 ms status
 task can sample it — which is what made the chip flicker instead of holding.
+
+### Two shared headers, and which one forces a reflash
+
+`minicore_protocol.h` is **compiled into the dongle**, so editing it costs a
+rebuild plus a physical BOOT/RESET reflash. `minicore_policy.h` is not — the
+dongle neither includes nor uses it.
+
+| Edited | Dongle reflash | Robot upload | Web reload |
+|--------|----------------|--------------|------------|
+| `minicore_protocol.h` (packets, message types, report ids) | **yes** | yes | yes |
+| `minicore_policy.h` (timeouts, neutral-trim range) | no | yes | yes |
+
+Keep behaviour constants in the policy header. The rule exists because a policy
+number once leaked into the transport: `minicore_bridge.c` clamped the neutral
+trim as well as the robot, so widening that range forced a dongle reflash for no
+functional gain. The dongle addresses and routes frames; it does not interpret
+what they mean.
+
+**`MC_PROTOCOL_VERSION`** must be bumped whenever anything structural in
+`minicore_protocol.h` changes — a message type, report id, report length, or
+packet layout. The dongle reports the value it was *built* with in `0xFE`, and
+the web app compares it against its own copy in `constants.js` and logs a
+mismatch. That turns "the dongle is running old firmware" from a silent,
+hours-long debugging session into one line in the Activity log.
 
 ### Implementation Notes
 
@@ -431,13 +462,18 @@ Fallback options if 2.4GHz is completely unusable:
 
   | Spec | Datasheet | Code |
   |------|-----------|------|
-  | Pulse high time | 1–2 ms nominal, 1.5 ms center | `_PWM_MIN_US=1000`, `_PWM_CENTER_US=1500`, `_PWM_MAX_US=2000` |
+  | Pulse high time | 1–2 ms nominal, 1.5 ms center | `_PWM_CENTER_US=1500`, `_PWM_RANGE_US=300` (± swing at full stick) |
+  | Accepted range | 0.5–2.5 ms per controller spec | `_PWM_MIN_US=500`, `_PWM_MAX_US=2500` — the hard clamp in `_pulse_us()` |
   | Period | 2.9–100 ms (≈10–345 Hz) | `_PWM_FREQ_HZ=50` → 20 ms (mid-range) |
   | Logic high min 1.0 V / low max 0.4 V | — | ESP32 GPIO drives 0/3.3 V push-pull ✓ |
   | Input current | <1 mA | Direct GPIO, no buffer needed ✓ |
-  | Deadband | 4% default (0.1–25%) | ESC-side; our *stick* deadband is ±2000/32767 ≈ 6.1% (±30.5 µs), wider, so the ESC's is covered |
+  | Deadband | 4% default (0.1–25%) | ESC-side (±12 µs of the 300 µs travel); our *stick* deadband is ±2000/32767 ≈ 6.1% (±18.3 µs), wider, so the ESC's is covered |
 
-  Overridable per robot via `Minibot(..., neutral_us=, range_us=)`; both are clamped into the 1–2 ms window so a typo can't emit an out-of-spec pulse.
+  Neutral is per **motor** and per robot: `Minibot(..., neutral_left_us=, neutral_right_us=)`,
+  clamped into the `_PWM_MIN_US`–`_PWM_MAX_US` window so a typo can't emit an out-of-spec pulse.
+  The ± swing is **not** a constructor argument — it is the `_PWM_RANGE_US` library constant,
+  shared by every robot. Neutral can also be set at runtime from the driver station; see the
+  Set Neutral / Neutral Ack section above.
 - **Do not reuse the old firmware's 1758 µs / ±391 µs.** Those came from the original Arduino library writing LEDC duty `90` on a 10-bit 50 Hz timer (`90/1024*20000 = 1757.8 µs`) — a trim value for that specific hardware, not a true neutral. The servo helper in that same old file used `0.01*angle + 1.5` (1500 µs at rest). Carrying 1758 µs into the MicroPython port made every robot hold ~50% throttle at "neutral", spinning the wheels on power-up.
 - **Motor commands are slew-rate limited** (`_SLEW_PER_S` in `minibot.py` — a library constant,
   deliberately *not* a `Minibot(...)` parameter, so student code in `main.py` cannot opt out of a
@@ -465,34 +501,47 @@ Fallback options if 2.4GHz is completely unusable:
 
 ## Task Checklist
 
-- [ ] Design the HID report descriptor for the dongle firmware
-- [ ] Build ESP32-S3 control station firmware
-  - [ ] USB HID device initialization (TinyUSB)
-  - [ ] HID report parsing (output reports from browser)
-  - [ ] HID report sending (input reports to browser)
-  - [ ] ESP-NOW initialization and peer management
-  - [ ] Joystick routing (WebHID --> ESP-NOW unicast to paired robot)
-  - [ ] Enable/disable broadcast
-  - [ ] Discovery request broadcast and response collection
-  - [ ] LCD status display (ST7789)
-  - [ ] RGB LED state indication
-- [ ] Build robot-side ESP-NOW receiver firmware
-  - [ ] ESP-NOW receive callback
-  - [ ] Discovery response handler
-  - [ ] Joystick-to-PWM mapping (tank drive)
-  - [ ] Auxiliary channel handling (servos, pneumatics)
-  - [ ] Safety timeout (250ms)
-  - [ ] Heartbeat transmission
-  - [ ] Robot name/ID configuration
-- [ ] Build browser-based control panel UI
-  - [ ] WebHID connection flow (device selection, connect/disconnect)
-  - [ ] Gamepad API polling and state display
-  - [ ] Robot discovery UI (scan button, results list)
-  - [ ] Controller-to-robot pairing UI (drag and drop or dropdown)
-  - [ ] Enable/disable controls (global + per-robot)
-  - [ ] Connection health display (heartbeat status, latency)
-  - [ ] Channel selection UI (optional)
-- [ ] Define and test joystick-to-motor mapping (tank drive + aux channels)
+Status as of the neutral-calibration work. Unchecked items are genuinely not
+built, not merely unverified.
+
+- [x] Design the HID report descriptor for the dongle firmware
+- [x] Build ESP32-S3 control station firmware
+  - [x] USB HID device initialization (TinyUSB)
+  - [x] HID report parsing (output reports from browser)
+  - [x] HID report sending (input reports to browser)
+  - [x] ESP-NOW initialization and peer management
+  - [x] Joystick routing (WebHID --> ESP-NOW unicast to paired robot)
+  - [x] Enable/disable broadcast
+  - [x] Discovery request broadcast and response collection
+  - [x] LCD status display (ST7789) — `waveshare_s3_lcd147_ui_init()` in `minicore_app.c`
+  - [ ] RGB LED state indication — driver exists (`RGB.c`), not wired to link/enable state
+- [x] Build robot-side ESP-NOW receiver firmware
+  - [x] ESP-NOW receive callback
+  - [x] Discovery response handler
+  - [x] Joystick-to-PWM mapping (tank drive)
+  - [ ] Auxiliary channel handling (servos, pneumatics) — `aux[8]` rides the wire but
+        `_handle_joystick()` discards it; no student-facing getter yet
+  - [x] Safety timeout (250ms)
+  - [x] Heartbeat transmission
+  - [x] Robot name/ID configuration
+- [x] Build browser-based control panel UI
+  - [x] WebHID connection flow (device selection, connect/disconnect)
+  - [x] Gamepad API polling and state display
+  - [x] Robot discovery UI (scan button, results list)
+  - [x] Controller-to-robot pairing UI (dropdown per slot)
+  - [x] Enable/disable controls (global) — broadcast only; `encodeEnable()` takes a
+        target MAC, but no per-robot control is exposed in the UI
+  - [x] Connection health display (heartbeat staleness, radio-fault chip) — no latency readout
+  - [ ] Channel selection UI (optional) — the channel is displayed, not settable
+- [x] Define and test joystick-to-motor mapping (tank drive)
+- [x] Per-motor ESC neutral trim, settable from the driver station and persisted on the robot
+- [x] Motor slew-rate limiting (brownout mitigation on direction reversal)
+- [ ] Generic relay report ids, so a new robot<->station message needs no dongle
+      change at all: `RELAY_OUT` = `[slot][opaque bytes]` unicast verbatim to that
+      slot's MAC, `RELAY_IN` = any unrecognised inbound frame forwarded up. Sized
+      generously once (resizing is itself a descriptor change). Joystick must stay
+      on its own path and the relay must refuse `MC_MSG_JOYSTICK` payloads, or it
+      becomes a way around the `s_global_enabled` gate.
 - [ ] Test in congested RF environment
 - [ ] Field test with multiple robots (up to 4)
 

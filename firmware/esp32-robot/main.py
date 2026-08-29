@@ -46,7 +46,7 @@ from minibot import Minibot
 #
 # If your wheels creep or spin while the sticks are centered, adjust the motor
 # neutral pulse widths (1500 is the RC standard; try 20-30 us at a time).
-# Motors always have ±500 us swing centered on their neutral.
+# Motors always have ±300 us swing centered on their neutral.
 #     bot = Minibot("MiniBot1", ..., neutral_left_us=1500, neutral_right_us=1500)
 
 #

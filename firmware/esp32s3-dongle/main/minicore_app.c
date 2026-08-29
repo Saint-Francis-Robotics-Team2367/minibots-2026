@@ -33,6 +33,7 @@ static void dongle_status_task(void *arg)
         st.paired_count = (uint8_t)minicore_paired_count();
         st.global_enabled = minicore_global_enabled() ? 1u : 0u;
         st.error_flags = minicore_error_flags();
+        st.protocol_version = MC_PROTOCOL_VERSION;
         if (tud_mounted()) {
             tud_hid_report(MC_HID_RID_DONGLE_STATUS, &st, sizeof(st));
         }
