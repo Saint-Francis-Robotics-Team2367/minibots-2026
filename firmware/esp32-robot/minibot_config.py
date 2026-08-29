@@ -1,15 +1,5 @@
 """Configuration builder for Minibot instances."""
 
-from dataclasses import dataclass
-
-
-@dataclass
-class Point:
-    """Simple test dataclass."""
-
-    x: int
-    y: int
-
 
 class MinibotConfig:
     """Builder for Minibot configuration."""
