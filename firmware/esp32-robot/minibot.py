@@ -25,6 +25,7 @@ import os
 import struct
 import time
 from machine import Pin, PWM
+from minibot_config import MinibotConfig
 
 # --- Protocol constants (keep in sync with firmware/common/minicore_protocol.h) ---
 MC_MSG_JOYSTICK = 0x01
@@ -189,29 +190,33 @@ class Minibot:
     STANDBY = 0
     TELEOP = 1
 
-    def __init__(self, robot_id, left_motor_pin=16, right_motor_pin=17, channel=6,
-                 neutral_left_us=None, neutral_right_us=None):
-        """Calibrate ESC pulse widths per motor.
+    # Type hints for all instance attributes
+    _robot_id: str
+    _axis_ly: int
+    _axis_lx: int
+    _axis_rx: int
+    _axis_ry: int
+    _axis_lt: int
+    _axis_rt: int
+    _buttons: int
 
-        neutral_left_us / neutral_right_us set the neutral (stopped) pulse for each
-        motor independently. Defaults are 1500 us (RC standard). If your motors
-        creep when the sticks are centered, adjust these until they sit still.
+    def __init__(self, config):
+        """Initialize from a MinibotConfig.
 
         Motors always swing ±_PWM_RANGE_US (300 us) at full stick, centered on
         their neutral. That span is a library constant, not a per-robot setting.
-        So a motor with neutral_left_us=1500 ranges 1000–2000 us.
 
         The motor slew limit is not settable here on purpose -- it is fixed at
         _SLEW_PER_S so robot code cannot opt out of it. See the note there.
         """
-        self._robot_id = robot_id[:MC_ROBOT_ID_MAX]
-        self._left_pin = left_motor_pin
-        self._right_pin = right_motor_pin
-        self._channel = channel
+        self._robot_id = config.robot_id[:MC_ROBOT_ID_MAX]
+        self._left_pin = config.left_motor_pin
+        self._right_pin = config.right_motor_pin
+        self._channel = config.channel
         # Per-motor calibration: neutral pulse width
         # Swing is always ±_PWM_RANGE_US (300 us); _motor_write reads that constant.
-        self._neutral_left_us = _clamp(neutral_left_us, _PWM_MIN_US, _PWM_MAX_US) if neutral_left_us is not None else _PWM_CENTER_US
-        self._neutral_right_us = _clamp(neutral_right_us, _PWM_MIN_US, _PWM_MAX_US) if neutral_right_us is not None else _PWM_CENTER_US
+        self._neutral_left_us = _clamp(config.neutral_left_us, _PWM_MIN_US, _PWM_MAX_US) if config.neutral_left_us is not None else _PWM_CENTER_US
+        self._neutral_right_us = _clamp(config.neutral_right_us, _PWM_MIN_US, _PWM_MAX_US) if config.neutral_right_us is not None else _PWM_CENTER_US
 
         # Controller state (raw int16 axes, -32767..32767; neutral 0)
         self._axis_lx = 0
