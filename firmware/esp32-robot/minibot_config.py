@@ -10,6 +10,7 @@ class MinibotConfig:
     channel: int
     neutral_left_us: int
     neutral_right_us: int
+    display_enabled: bool
 
     def __init__(
         self,
@@ -20,6 +21,7 @@ class MinibotConfig:
         channel: int,
         neutral_left_us: int = 1500,
         neutral_right_us: int = 1500,
+        display_enabled: bool = True,
     ) -> None:
         """Initialize with required parameters.
 
@@ -37,6 +39,7 @@ class MinibotConfig:
         self.channel = channel
         self.neutral_left_us = neutral_left_us
         self.neutral_right_us = neutral_right_us
+        self.display_enabled = display_enabled
 
     def with_neutral_left_us(self, us: int) -> "MinibotConfig":
         """Set neutral pulse width for left motor in microseconds.

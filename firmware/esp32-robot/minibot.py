@@ -26,6 +26,7 @@ import struct
 import time
 from machine import Pin, PWM
 from minibot_config import MinibotConfig
+from display import Display
 
 # --- Protocol constants (keep in sync with firmware/common/minicore_protocol.h) ---
 MC_MSG_JOYSTICK = 0x01
@@ -199,6 +200,7 @@ class Minibot:
     _axis_lt: int
     _axis_rt: int
     _buttons: int
+    _display: Display | None
 
     def __init__(self, config):
         """Initialize from a MinibotConfig.
@@ -253,6 +255,8 @@ class Minibot:
         self._out_right = 0.0
         self._slew_ms_left = time.ticks_ms()
         self._slew_ms_right = self._slew_ms_left
+
+        self._display = self._init_display(config)
 
     # --- lifecycle -----------------------------------------------------------
 
@@ -409,6 +413,20 @@ class Minibot:
         self._slew_ms_right = self._slew_ms_left
         self._pulse_us(self._left_pwm, self._neutral_left_us)
         self._pulse_us(self._right_pwm, self._neutral_right_us)
+
+    # --- display -----------------------------------------------------------
+
+    def _init_display(self, config) -> object:
+        """Create and initialize display if enabled. Returns Display | None."""
+        if not config.display_enabled:
+            return None
+        try:
+            display = Display()
+            display.set_line1(self._robot_id)
+            return display
+        except Exception as e:
+            print(f"[warn] Failed to initialize display: {e}")
+            return None
 
     # --- internals -----------------------------------------------------------
 
