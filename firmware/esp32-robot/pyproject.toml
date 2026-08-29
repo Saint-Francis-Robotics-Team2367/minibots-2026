@@ -1,0 +1,9 @@
+[tool.pyright]
+typeCheckingMode = "basic"
+pythonVersion = "3.12"
+exclude = [".venv"]
+reportMissingImports = false
+reportUndefinedVariable = false
+reportAttributeAccessIssue = false
+reportOptionalMemberAccess = false
+reportUninitializedInstanceVariable = true
