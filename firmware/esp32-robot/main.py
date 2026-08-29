@@ -38,8 +38,12 @@
 #    the board. stop_all_motors() is always immediate.
 # ============================================================================
 
-print("starting bot...")
+import esp
 
+# Enable ESP32 debug logging to see Wi-Fi/ESP-NOW messages
+esp.osdebug(esp.LOG_DEBUG)
+
+print("starting bot...")
 
 from minibot import Minibot
 from minibot_config import MinibotConfig
@@ -56,9 +60,7 @@ config = (MinibotConfig("MiniBot1", left_motor_pin=16, right_motor_pin=17, chann
           .with_neutral_right_us(1700))
 
 bot = Minibot(config)
-
 bot.begin()
-print("bot started")
 
 while True:
     bot.update()  # ALWAYS FIRST — handles comms, enable and the safety stop.
