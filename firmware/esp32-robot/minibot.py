@@ -190,6 +190,16 @@ class Minibot:
     STANDBY = 0
     TELEOP = 1
 
+    # Type hints for all instance attributes
+    _robot_id: str
+    _axis_ly: int
+    _axis_lx: int
+    _axis_rx: int
+    _axis_ry: int
+    _axis_lt: int
+    _axis_rt: int
+    _buttons: int
+
     def __init__(self, config):
         """Initialize from a MinibotConfig.
 
