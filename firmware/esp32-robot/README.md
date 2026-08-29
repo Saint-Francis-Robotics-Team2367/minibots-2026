@@ -59,6 +59,7 @@ Open `main.py`. The `Minibot` object gives you everything:
 | Buttons (bool) | `get_cross()`, `get_circle()`, `get_square()`, `get_triangle()` |
 | Enabled? | `get_game_status()` → `Minibot.TELEOP` / `Minibot.STANDBY` |
 | Motors (−1.0..1.0) | `drive_left_motor(v)`, `drive_right_motor(v)`, `stop_all_motors()` |
+| Forget saved trim | `clear_calibration()` — REPL only, see below |
 
 Set your robot's **name**, **motor pins**, and **Wi-Fi channel** in the
 `Minibot(...)` line at the top of `main.py`. The channel must match the dongle
@@ -119,8 +120,10 @@ disable path still cut the motors instantly.
 ## How it connects
 
 The robot speaks **ESP-NOW** to the USB dongle, which the browser driver station
-(`web/`) talks to over USB. The wire format is identical to the previous C++
-firmware (`firmware/common/minicore_protocol.h`), so the dongle and web app are
-unchanged. `minibot.py` answers discovery, honors enable/disable, decodes
-joystick packets, sends heartbeats, and stops the motors if the link drops for
-more than 250 ms.
+(`web/`) talks to over USB. `firmware/common/minicore_protocol.h` defines every
+packet and is shared by all three, so a protocol change means reflashing the
+dongle too — not just re-uploading this robot's code.
+
+`minibot.py` answers discovery, honors enable/disable, decodes joystick packets,
+sends heartbeats, applies and persists the driver station's neutral trim, and
+stops the motors if the link drops for more than 250 ms.

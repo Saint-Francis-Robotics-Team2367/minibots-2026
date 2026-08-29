@@ -112,6 +112,12 @@ for you if it's missing.
 **Dongle** (`flash-dongle.*`, ESP-IDF): `--port`/`-Port`, `--build-only`/`-BuildOnly`,
 `--monitor`/`-Monitor`, `--skip-setup`/`-SkipSetup` (skip the first-run ESP-IDF install check).
 
+> **After flashing, the dongle stays in the bootloader.** esptool's `--after hard_reset`
+> drives reset over RTS, which does not stick on this board's native USB — it will still
+> enumerate as `PID_1001` with a COM port. Press **RESET** (without holding BOOT) or replug
+> the cable; it then comes back as `PID_4002` with no COM port, which is the HID firmware
+> running normally.
+
 **Dongle in download mode** (if flashing fails on native USB): hold **BOOT**, press+release
 **RESET**, release **BOOT**, then re-run the dongle flash script.
 
@@ -130,7 +136,8 @@ scripts remain the source of truth for the pinned versions.
 |------|-------------|
 | `flash-robot.cmd` (repo root) | Windows one-stop launcher for the robot — **double-click** it, or pass flags from a terminal. Drives `scripts/flash-robot.ps1`. |
 | [scripts/](scripts/) | The rest of the flash helpers: `flash-robot.{sh,ps1}` and `flash-dongle.{sh,cmd,ps1}`. Each installs its own toolchain on first run (robot: esptool + mpremote; dongle: ESP-IDF v5.3.2). `flash-robot` also does firmware reset (`--firmware`) and live REPL (`--repl`). |
-| [firmware/common/minicore_protocol.h](firmware/common/minicore_protocol.h) | Shared C structs, USB VID/PID, HID report IDs (keep in sync with JS + `minibot.py`). |
+| [firmware/common/minicore_protocol.h](firmware/common/minicore_protocol.h) | **Wire format**: packet structs, message types, USB VID/PID, HID report IDs, `MC_PROTOCOL_VERSION`. **Compiled into the dongle** — editing it means `flash-dongle` *and* `flash-robot` *and* a web reload, and bump the version so a stale dongle is detected. |
+| [firmware/common/minicore_policy.h](firmware/common/minicore_policy.h) | **Behaviour**: timeouts, neutral-trim range. The dongle neither uses nor includes it, so changes here need only `flash-robot` + a web reload. Put new policy constants here, not in the protocol header. |
 | [firmware/esp32s3-dongle/](firmware/esp32s3-dongle/) | ESP-IDF project for the Waveshare ESP32-S3-LCD-1.47 class USB HID dongle. |
 | [firmware/esp32-robot/](firmware/esp32-robot/) | MicroPython robot code (classic ESP32) — students edit `main.py`. |
 | [web/](web/) | Static driver station (Chrome or Edge; HTTPS or localhost). Deployed to <https://minibots.team2367.org>. |
@@ -158,9 +165,10 @@ in the `Minibot(...)` constructor there — no rebuild, just re-upload.
 - **Each change:** `./scripts/flash-robot.sh` copies `main.py` + `minibot.py` to the board with
   `mpremote` and reboots; `./scripts/flash-robot.sh --repl` opens a live prompt to see `print()` output.
 
-`minibot.py` handles ESP-NOW discovery/enable/joystick/heartbeat and the 250 ms motor failsafe,
-speaking the same wire protocol as before ([minicore_protocol.h](firmware/common/minicore_protocol.h)),
-so the dongle and web driver station are unchanged. See
+`minibot.py` handles ESP-NOW discovery/enable/joystick/heartbeat, the 250 ms motor failsafe,
+the motor slew limit and the driver-station neutral trim, all speaking
+[minicore_protocol.h](firmware/common/minicore_protocol.h). That header is shared with the
+dongle and the web app, so protocol changes land in all three at once. See
 [firmware/esp32-robot/README.md](firmware/esp32-robot/README.md) for the full student API.
 
 ## Dongle firmware (ESP-IDF) — details
@@ -193,7 +201,10 @@ CI builds the dongle firmware on every change and uploads flashable artifacts
 ## Web driver station
 
 **Live: <https://minibots.team2367.org>** — the deployed driver station. Open it in Chrome or
-Edge, connect the dongle, run **Scan**, **Pair** a slot to a robot, enable **Global enable**, and
+Edge, connect the dongle, run **Scan**, **Pair** a slot to a robot, set the per-motor
+**Neutral µs** if the robot creeps (see
+[the robot README](firmware/esp32-robot/README.md#setting-neutral-from-the-driver-station)),
+enable **Global enable**, and
 use gamepads at indices **0–3** matching each slot.
 
 To run it locally instead, serve [web/](web/) over **HTTPS** or **http://localhost** (WebHID

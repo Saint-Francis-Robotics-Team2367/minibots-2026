@@ -70,17 +70,6 @@ static bool is_broadcast_mac(const uint8_t *mac)
     return memcmp(mac, k_broadcast_mac, 6) == 0;
 }
 
-static uint16_t clamp_neutral_us(uint16_t us)
-{
-    if (us < MC_NEUTRAL_TRIM_MIN_US) {
-        return MC_NEUTRAL_TRIM_MIN_US;
-    }
-    if (us > MC_NEUTRAL_TRIM_MAX_US) {
-        return MC_NEUTRAL_TRIM_MAX_US;
-    }
-    return us;
-}
-
 static esp_err_t ensure_broadcast_peer(void)
 {
     if (esp_now_is_peer_exist(k_broadcast_mac)) {
@@ -379,13 +368,22 @@ void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t le
         memcpy(&left, buf + 1, sizeof(left));
         memcpy(&right, buf + 3, sizeof(right));
 
-        /* Clamped here as well as on the robot. The robot is the authority and
-         * echoes back what it actually applied, but there is no reason to put a
-         * pulse width we already know is out of range onto the air. */
+        /* Forwarded exactly as received -- deliberately NOT clamped here.
+         *
+         * The dongle is a transport: it addresses and routes frames, it does not
+         * interpret them. An ESC pulse width is not a routing concern, and the
+         * robot clamps authoritatively anyway -- it has to, since calibration
+         * loaded from its own filesystem never passes through here at all.
+         *
+         * A clamp here bought nothing observable and cost a great deal: it
+         * compiled an ESC-calibration policy number into firmware that can only
+         * be updated by a physical BOOT/RESET dance, so widening the allowed
+         * range turned into a dongle rebuild + reflash. Keep policy out of the
+         * transport and that whole class of reflash disappears. */
         set_neutral_packet_t sn = {
             .type = MC_MSG_SET_NEUTRAL,
-            .neutral_left_us = clamp_neutral_us(left),
-            .neutral_right_us = clamp_neutral_us(right),
+            .neutral_left_us = left,
+            .neutral_right_us = right,
         };
         memcpy(sn.target_mac, s_paired_mac[idx], 6);
 
