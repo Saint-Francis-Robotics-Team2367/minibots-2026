@@ -14,6 +14,7 @@ import {
   MC_MAX_ROBOTS,
   MC_NEUTRAL_TRIM_MIN_US,
   MC_NEUTRAL_TRIM_MAX_US,
+  MC_PROTOCOL_VERSION,
 } from "./constants.js";
 import {
   encodeJoystickOut,
@@ -51,6 +52,8 @@ const calibDirty = [];
 
 /** Joystick reports sent in the current second, for the rail readout. */
 let txCount = 0;
+/** Latched so a mismatched dongle logs once, not five times a second. */
+let warnedProtocolMismatch = false;
 
 const BROADCAST_MAC = new Uint8Array(6).fill(0xff);
 const STALE_MS = 2500;
@@ -254,6 +257,17 @@ function onInputReport(e) {
     if (s) {
       wifiChannel = s.wifi_channel;
       $("chanDisp").textContent = String(s.wifi_channel);
+      // A dongle built against a different minicore_protocol.h than this page
+      // was. Report ids and packet layouts may not line up; say so once rather
+      // than letting it surface as a feature that silently does nothing.
+      if (s.protocol_version !== MC_PROTOCOL_VERSION && !warnedProtocolMismatch) {
+        warnedProtocolMismatch = true;
+        log(
+          `Dongle firmware is protocol v${s.protocol_version}, this page expects ` +
+            `v${MC_PROTOCOL_VERSION} — reflash the dongle (scripts/flash-dongle)`,
+          "err",
+        );
+      }
       // error_flags bit0 = ESP-NOW send failure on the dongle.
       const fault = (s.error_flags & 1) !== 0;
       const chip = $("faultChip");

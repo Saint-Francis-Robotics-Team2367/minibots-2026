@@ -12,8 +12,10 @@ What it does for you:
   * Safety: motors are forced to neutral when the robot is disabled or when
     the radio link drops for more than 250 ms (matches the old C++ firmware).
 
-Wire protocol: byte-for-byte identical to firmware/common/minicore_protocol.h,
-so the ESP32-S3 dongle and the web driver station work unchanged.
+Wire protocol: firmware/common/minicore_protocol.h is the single source of truth
+for every packet layout here. That header is also compiled into the ESP32-S3
+dongle, so a change to it means reflashing the dongle as well as re-uploading
+this file -- they are not independently versioned.
 """
 
 import json
@@ -67,7 +69,8 @@ assert struct.calcsize(_FMT_NEUTRAL_ACK) == 12
 
 # --- PWM calibration ---
 # Matched to the ESC datasheet:
-#   Pulse high time  1-2 ms nominal, 1.5 ms center   -> MIN/CENTER/MAX below
+#   Pulse high time  1-2 ms nominal, 1.5 ms center   -> _PWM_CENTER_US +/- _PWM_RANGE_US
+#   Accepted range   0.5-2.5 ms per controller spec  -> _PWM_MIN_US / _PWM_MAX_US clamp
 #   Period           2.9-100 ms (~10-345 Hz)         -> 50 Hz = 20 ms, mid-range
 #   Logic high min   1.0 V / low max 0.4 V           -> ESP32 drives 0/3.3 V, fine
 #   Input current    <1 mA                           -> direct GPIO, no buffer
@@ -78,9 +81,16 @@ assert struct.calcsize(_FMT_NEUTRAL_ACK) == 12
 # (90 / 1024 * 20000us = 1757.8us); that was a trim value for *that* hardware's
 # ESCs, not a real neutral -- the servo helper in the same old file used
 # `0.01 * angle + 1.5`, i.e. 1500us at rest. Carrying 1758us over meant every
-# robot held ~50% throttle at "neutral" and the wheels spun on power-up, and the
-# 2500us clamp allowed pulses 500us past this ESC's 2 ms maximum.
-# If your ESCs need a different center, pass neutral_us= (see Minibot.__init__).
+# robot held ~50% throttle at "neutral" and the wheels spun on power-up.
+#
+# The 1000-2500us clamp it used is a separate question from that bad neutral, and
+# _PWM_MIN_US/_PWM_MAX_US are now 500-2500 deliberately: the clamp is the
+# controller's absolute accepted range, a last guard against an out-of-spec
+# pulse, not the operating range. What keeps normal output inside 1-2 ms is
+# _PWM_CENTER_US +/- _PWM_RANGE_US (1500 +/- 300 = 1200-1800us).
+# If your ESCs need a different center, pass neutral_left_us= / neutral_right_us=
+# (see Minibot.__init__), or set them live from the driver station -- see the
+# remote trim block below.
 _PWM_FREQ_HZ = 50
 _PWM_CENTER_US = 1500   # neutral pulse width (motors stopped)
 _PWM_RANGE_US = 300     # +/- swing at full stick
@@ -100,7 +110,8 @@ _PWM_MAX_US = 2500      # safety maximum (per controller specs)
 # and that: _pulse_us' own clamp, this only moving on an explicit Apply, and the
 # ack echoing back what actually landed.
 #
-# Keep in sync with MC_NEUTRAL_TRIM_* in firmware/common/minicore_protocol.h.
+# Keep in sync with MC_NEUTRAL_TRIM_* in firmware/common/minicore_policy.h --
+# policy, not wire format, so changing it needs no dongle reflash.
 _NEUTRAL_TRIM_MIN_US = 1000
 _NEUTRAL_TRIM_MAX_US = 2000
 
@@ -119,9 +130,9 @@ _CALIB_ANNOUNCE_COUNT = 3
 # Stick deadband, as a fraction of full travel (carried over from the old
 # firmware's `if (abs(axis) < 2000) axis = 0`). This is a *stick* deadband, so a
 # controller resting off-center doesn't make the robot creep; it is separate
-# from -- and wider than -- the ESC's own 4% throttle deadband (+/-20us of the
-# 500us travel), so the ESC's deadband is fully covered either way.
-_DEADBAND = 2000.0 / 32767.0  # ~6.1% of stick travel = +/-30.5us of pulse
+# from -- and wider than -- the ESC's own 4% throttle deadband (+/-12us of the
+# 300us travel), so the ESC's deadband is fully covered either way.
+_DEADBAND = 2000.0 / 32767.0  # ~6.1% of stick travel = +/-18.3us of pulse
 
 # --- Motor slew rate ---
 # Cap on how fast a motor command may change, in units of stick travel per
@@ -182,7 +193,10 @@ class Minibot:
     def __init__(self, config):
         """Initialize from a MinibotConfig.
 
-        The motor slew limit is not settable on purpose -- it is fixed at
+        Motors always swing ±_PWM_RANGE_US (300 us) at full stick, centered on
+        their neutral. That span is a library constant, not a per-robot setting.
+
+        The motor slew limit is not settable here on purpose -- it is fixed at
         _SLEW_PER_S so robot code cannot opt out of it. See the note there.
         """
         self._robot_id = config.robot_id[:MC_ROBOT_ID_MAX]
@@ -190,7 +204,7 @@ class Minibot:
         self._right_pin = config.right_motor_pin
         self._channel = config.channel
         # Per-motor calibration: neutral pulse width
-        # Motors always use ±500 us swing (hardcoded in _motor_write)
+        # Swing is always ±_PWM_RANGE_US (300 us); _motor_write reads that constant.
         self._neutral_left_us = _clamp(config.neutral_left_us, _PWM_MIN_US, _PWM_MAX_US) if config.neutral_left_us is not None else _PWM_CENTER_US
         self._neutral_right_us = _clamp(config.neutral_right_us, _PWM_MIN_US, _PWM_MAX_US) if config.neutral_right_us is not None else _PWM_CENTER_US
 

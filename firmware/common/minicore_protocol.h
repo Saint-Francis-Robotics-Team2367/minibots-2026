@@ -1,6 +1,16 @@
 /**
- * MiniCore wire protocol — shared by dongle (ESP-IDF), robot (Arduino), and web (protocol.js).
- * Keep in sync with web/js/protocol.js
+ * MiniCore WIRE PROTOCOL — packet layouts, message types, HID report IDs.
+ * Shared by the dongle (ESP-IDF), the robot (MicroPython) and the web app.
+ * Keep in sync with web/js/protocol.js + web/js/constants.js + minibot.py.
+ *
+ * THIS HEADER IS COMPILED INTO THE DONGLE. Any change here means a dongle
+ * rebuild and a physical BOOT/RESET reflash, not just a robot upload — and
+ * MC_PROTOCOL_VERSION below must be bumped so a stale dongle is detected
+ * instead of silently misbehaving.
+ *
+ * Behaviour constants that the dongle does NOT need (timeouts, calibration
+ * ranges) live in minicore_policy.h precisely so they can change without any of
+ * that. Put new policy there, not here.
  */
 #ifndef MINICORE_PROTOCOL_H
 #define MINICORE_PROTOCOL_H
@@ -20,6 +30,13 @@ extern "C" {
 #define MC_MSG_DISCOVERY_RESP 0x05u
 #define MC_MSG_SET_NEUTRAL 0x06u /* dongle -> robot, unicast only */
 #define MC_MSG_NEUTRAL_ACK 0x07u /* robot -> dongle */
+
+/* Bumped whenever anything structural in THIS file changes: a message type, a
+ * HID report id, a report length, or a packet layout. The dongle reports it in
+ * dongle_status_t so the web app can tell the driver their dongle firmware is
+ * older than the page, rather than leaving them to debug a silent mismatch --
+ * which is exactly what a stale trim clamp cost us once already. */
+#define MC_PROTOCOL_VERSION 1u
 
 /* --- USB HID identity (Espressif VID, project-specific PID) --- */
 #define MINICORE_USB_VID 0x303Au
@@ -56,26 +73,12 @@ extern "C" {
 #define MC_JOY_AUX_BYTES 8u
 #define MC_MAX_ROBOTS 4u
 
+/* Dongle-owned: how long it collects discovery responses before closing the
+ * window. Behaviour of THIS device, so it belongs here rather than in policy. */
 #define MC_DISCOVERY_COLLECT_MS 500u
-#define MC_HEARTBEAT_INTERVAL_MS 1000u
-#define MC_MOTOR_TIMEOUT_MS 250u
 
 #define MC_BROADCAST_MAC_BYTE 0xFFu
 
-/* Clamp for a neutral pulse arriving over the air (MC_MSG_SET_NEUTRAL).
- *
- * The full 1-2 ms RC pulse window, so the station can express any neutral the
- * ESC spec allows. This replaced a +/-100 us window around 1500: real trim is
- * usually +/-30-50 us, but robots in this fleet run ESCs offset far enough
- * (1700 us and similar) that the narrow window refused their actual neutral.
- *
- * Be aware of what the wider range admits. Neutral is the pulse the robot drives
- * on every stop -- including the 250 ms link-loss failsafe -- so a neutral at
- * either rail makes "motors stopped" mean full throttle in that direction. The
- * protections that remain are the robot's own 1-2 ms clamp, the fact that this
- * only moves on an explicit Apply, and the echo showing what actually landed. */
-#define MC_NEUTRAL_TRIM_MIN_US 1000u
-#define MC_NEUTRAL_TRIM_MAX_US 2000u
 
 #pragma pack(push, 1)
 
@@ -156,7 +159,8 @@ typedef struct {
     uint8_t paired_count;
     uint8_t global_enabled; /* 0/1 */
     uint8_t error_flags;    /* bit0: espnow send err */
-    uint8_t reserved[12];
+    uint8_t protocol_version; /* MC_PROTOCOL_VERSION the dongle was built with */
+    uint8_t reserved[11];
 } dongle_status_t;
 
 #pragma pack(pop)
