@@ -38,11 +38,11 @@
 #    the board. stop_all_motors() is always immediate.
 # ============================================================================
 
-import esp
 import time
 
 # Enable ESP32 debug logging to see Wi-Fi/ESP-NOW messages
-esp.osdebug(esp.LOG_DEBUG)
+# import esp
+# esp.osdebug(esp.LOG_DEBUG)
 
 time.sleep(0.5)  # Wait for REPL to connect
 print("starting bot...")
