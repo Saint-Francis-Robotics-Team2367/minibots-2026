@@ -117,6 +117,22 @@ disable path still cut the motors instantly.
 > supply it. If a robot browns out, still add bulk capacitance across the ESC's
 > power input and check the battery connectors.
 
+### The driver station can cap your speed
+
+There is a **Speed limit** slider on the driver station that applies to every
+robot at once. It caps the same number you pass to `drive_left_motor()`: with the
+limit at `0.60`, `drive_left_motor(1.0)` drives at `0.60`, and everything below
+that is unaffected.
+
+Like the ramp rate, it is not a `Minibot(...)` option and robot code cannot raise
+it — a coach who has slowed the field down for a demo shouldn't be undone by an
+edit to `main.py`. If your robot feels slower than the numbers in your code
+suggest, check the slider before you go looking for a bug; the station also logs
+the limit each robot has confirmed.
+
+Robots start unrestricted at every power-up. The limit is not saved on the robot,
+so a driver station has to be connected to apply one.
+
 ## How it connects
 
 The robot speaks **ESP-NOW** to the USB dongle, which the browser driver station

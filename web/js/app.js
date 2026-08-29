@@ -7,6 +7,8 @@ import {
   MC_HID_RID_PAIR,
   MC_HID_RID_UNPAIR,
   MC_HID_RID_SET_NEUTRAL,
+  MC_HID_RID_SET_SPEED_LIMIT,
+  MC_HID_RID_SPEED_LIMIT_IN,
   MC_HID_RID_HEARTBEAT_IN,
   MC_HID_RID_NEUTRAL_IN,
   MC_HID_RID_DISCOVERY_IN,
@@ -14,6 +16,8 @@ import {
   MC_MAX_ROBOTS,
   MC_NEUTRAL_TRIM_MIN_US,
   MC_NEUTRAL_TRIM_MAX_US,
+  MC_SPEED_LIMIT_MIN,
+  MC_SPEED_LIMIT_MAX,
   MC_PROTOCOL_VERSION,
 } from "./constants.js";
 import {
@@ -23,8 +27,10 @@ import {
   encodePairOut,
   encodeUnpairOut,
   encodeSetNeutralOut,
+  encodeSetSpeedLimitOut,
   decodeHeartbeatIn,
   decodeNeutralAckIn,
+  decodeSpeedLimitAckIn,
   decodeDiscoveryIn,
   decodeDongleStatus,
   gamepadToJoystick,
@@ -45,6 +51,37 @@ let autoReconnect = true;
 let attaching = false;
 /** Last discovery request we sent, for the calibration chase's rate limit. */
 let lastDiscoveryMs = 0;
+/**
+ * Cap on normalized motor output, field-wide. Same -1..1 units the robot's
+ * drive_left_motor() takes, so this number and the one in a student's main.py
+ * mean the same thing.
+ *
+ * The browser is the durable copy: robots deliberately boot unrestricted and
+ * never persist a limit, so if this were not restored on load a reload would
+ * silently return the field to full speed. Of the two ways to be wrong, that is
+ * much the worse one.
+ */
+let speedLimit = loadSpeedLimit();
+/** Last time we pushed the limit, for the re-assert rate limit below. */
+let lastLimitPushMs = 0;
+
+const SPEED_LIMIT_KEY = "minicore.speedLimit";
+
+function loadSpeedLimit() {
+  let raw = NaN;
+  try {
+    raw = Number(localStorage.getItem(SPEED_LIMIT_KEY));
+  } catch (err) {
+    return MC_SPEED_LIMIT_MAX;
+  }
+  // Anything unparseable, out of range, or absent means unrestricted. Having
+  // stored a value is not a reason to trust it: localStorage is editable by
+  // hand, and this number bounds how fast the robots go.
+  if (!Number.isFinite(raw) || raw < MC_SPEED_LIMIT_MIN || raw > MC_SPEED_LIMIT_MAX) {
+    return MC_SPEED_LIMIT_MAX;
+  }
+  return raw;
+}
 
 /** Robots we've heard from: macKey -> { mac, id, lastSeen, battery, flags } */
 const discovered = new Map();
@@ -160,6 +197,9 @@ async function attachDongle(dev) {
   // calibration on its own, so ask instead of waiting for an announce that is
   // never coming. See requestCalibration().
   await requestCalibration();
+  // Robots boot unrestricted, so a station coming up owes the field its limit
+  // before anything can be driven.
+  await pushSpeedLimit();
   startGamepadLoop();
   return true;
 }
@@ -270,6 +310,71 @@ async function requestCalibration() {
   }
 }
 
+/**
+ * Broadcast the current speed limit to the whole field.
+ *
+ * Robots clamp it themselves and answer with what they actually applied, so an
+ * ack is the only evidence a robot is really capped. renderSpeedLimit() reports
+ * on the ones that have not sent one.
+ */
+async function pushSpeedLimit() {
+  lastLimitPushMs = Date.now();
+  try {
+    await sendReport(MC_HID_RID_SET_SPEED_LIMIT, encodeSetSpeedLimitOut(speedLimit));
+  } catch (err) {
+    log(`Speed limit send failed: ${err}`, "err");
+  }
+}
+
+/** Robots whose last ack does not match the limit we are asking for. */
+function robotsOffLimit() {
+  const out = [];
+  for (const v of discovered.values()) {
+    // A robot that has never acked counts. It is either running firmware with
+    // no speed limit at all or it has not heard us yet, and both mean "not
+    // known to be capped" — which is the thing the driver needs told.
+    if (v.speedLimit === undefined || Math.abs(v.speedLimit - speedLimit) > 0.001) {
+      out.push(v);
+    }
+  }
+  return out;
+}
+
+function renderSpeedLimit() {
+  const capped = speedLimit < MC_SPEED_LIMIT_MAX;
+  $("speedLimit").value = String(speedLimit);
+  $("speedLimitRead").textContent = speedLimit.toFixed(2);
+  $("speedLimit").parentElement.dataset.capped = String(capped);
+
+  // Only worth saying while a cap is actually being asked for. At 1.00 a robot
+  // that has not acked is not a hazard, and a warning that is always on is one
+  // nobody reads by the third match.
+  const pending = capped ? robotsOffLimit() : [];
+  const note = $("speedLimitNote");
+  note.hidden = pending.length === 0;
+  if (pending.length) {
+    note.textContent = `Not confirmed on: ${pending.map((v) => v.id || macKey(v.mac)).join(", ")}`;
+  }
+}
+
+function setSpeedLimit(next, { push = true } = {}) {
+  const clamped = Math.min(MC_SPEED_LIMIT_MAX, Math.max(MC_SPEED_LIMIT_MIN, next));
+  // Two decimals: the slider steps in 0.05 and the wire carries thousandths, so
+  // this only guards against float drift making 0.85 render as 0.8500000001.
+  speedLimit = Math.round(clamped * 100) / 100;
+  try {
+    localStorage.setItem(SPEED_LIMIT_KEY, String(speedLimit));
+  } catch (err) {
+    // Private browsing or a full quota. The limit still applies to this
+    // session; it just will not survive a reload.
+    log(`Could not save speed limit: ${err}`, "warn");
+  }
+  renderSpeedLimit();
+  if (push) {
+    pushSpeedLimit();
+  }
+}
+
 /* ── Inbound reports ──────────────────────────────────────────────────────── */
 
 function touchRobot(mac, id, extra) {
@@ -346,6 +451,17 @@ function onInputReport(e) {
         );
       }
       renderSlots();
+    }
+  } else if (reportId === MC_HID_RID_SPEED_LIMIT_IN) {
+    const sl = decodeSpeedLimitAckIn(buf);
+    if (sl) {
+      const prev = discovered.get(macKey(sl.mac));
+      const changed = !prev || prev.speedLimit !== sl.limit;
+      const rec = touchRobot(sl.mac, null, { speedLimit: sl.limit });
+      if (changed) {
+        log(`${rec.id || macKey(sl.mac)}: speed limit ${sl.limit.toFixed(2)}`);
+      }
+      renderSpeedLimit();
     }
   } else if (reportId === MC_HID_RID_DISCOVERY_IN) {
     const d = decodeDiscoveryIn(buf);
@@ -857,6 +973,17 @@ $("btnDisconnect").addEventListener("click", () => {
   disconnectDongle().catch((err) => log(`Disconnect failed: ${err}`, "err"));
 });
 $("btnArm").addEventListener("click", () => setArmed(!armed));
+
+// `input` fires continuously while dragging: move the readout, but do not put a
+// line in the log or a frame on the radio for every value swept through.
+$("speedLimit").addEventListener("input", () => {
+  setSpeedLimit(Number($("speedLimit").value), { push: false });
+});
+// `change` fires on release — one send and one log line per adjustment.
+$("speedLimit").addEventListener("change", () => {
+  setSpeedLimit(Number($("speedLimit").value));
+  log(`Speed limit ${speedLimit.toFixed(2)}`, speedLimit < MC_SPEED_LIMIT_MAX ? "warn" : "go");
+});
 $("btnClearLog").addEventListener("click", () => {
   $("log").innerHTML = "";
 });
@@ -939,6 +1066,11 @@ if ("hid" in navigator) {
 // How long to wait before re-asking a robot that owes us its calibration.
 const CALIB_CHASE_MS = 3000;
 
+// How long to wait before re-broadcasting the speed limit to robots that are not
+// holding it. Slower than the enable re-assert (500 ms) because the limit does
+// not expire on the robot: this only has to catch a reboot, not hold a latch.
+const LIMIT_REASSERT_MS = 2000;
+
 // Age out robots we've stopped hearing from; repaint staleness every second.
 setInterval(() => {
   const now = Date.now();
@@ -980,6 +1112,16 @@ setInterval(() => {
       requestCalibration();
     }
   }
+
+  // Re-assert the limit at any robot not known to be holding it. This is what
+  // covers a robot rebooting mid-match: it comes back unrestricted, its ack says
+  // so, and the next tick caps it again. Broadcast, so a single frame fixes all
+  // of them however many are adrift.
+  if (device && device.opened && now - lastLimitPushMs >= LIMIT_REASSERT_MS) {
+    if (robotsOffLimit().length) {
+      pushSpeedLimit();
+    }
+  }
 }, 1000);
 
 // The robot's enable flag expires after MC_ENABLE_TIMEOUT_MS (3 s) so it can't
@@ -997,6 +1139,12 @@ buildSlots();
 renderRobots();
 renderGamepads();
 setDongleUi(false);
+renderSpeedLimit();
+if (speedLimit < MC_SPEED_LIMIT_MAX) {
+  // Restored from a previous session. Say so unprompted — a cap nobody
+  // remembers setting is exactly the one that wastes an afternoon.
+  log(`Speed limit ${speedLimit.toFixed(2)} restored from last session`, "warn");
+}
 log("Driver station ready");
 
 // Reconnect to a dongle this browser already knows, so the usual case is to

@@ -30,13 +30,15 @@ extern "C" {
 #define MC_MSG_DISCOVERY_RESP 0x05u
 #define MC_MSG_SET_NEUTRAL 0x06u /* dongle -> robot, unicast only */
 #define MC_MSG_NEUTRAL_ACK 0x07u /* robot -> dongle */
+#define MC_MSG_SET_SPEED_LIMIT 0x08u /* dongle -> robot, broadcast only */
+#define MC_MSG_SPEED_LIMIT_ACK 0x09u /* robot -> dongle */
 
 /* Bumped whenever anything structural in THIS file changes: a message type, a
  * HID report id, a report length, or a packet layout. The dongle reports it in
  * dongle_status_t so the web app can tell the driver their dongle firmware is
  * older than the page, rather than leaving them to debug a silent mismatch --
  * which is exactly what a stale trim clamp cost us once already. */
-#define MC_PROTOCOL_VERSION 1u
+#define MC_PROTOCOL_VERSION 2u
 
 /* --- USB HID identity (Espressif VID, project-specific PID) --- */
 #define MINICORE_USB_VID 0x303Au
@@ -49,11 +51,13 @@ extern "C" {
 #define MC_HID_RID_PAIR 0x10u
 #define MC_HID_RID_UNPAIR 0x11u
 #define MC_HID_RID_SET_NEUTRAL 0x12u
+#define MC_HID_RID_SET_SPEED_LIMIT 0x13u
 
 /* --- HID report IDs: dongle -> host (input) --- */
 #define MC_HID_RID_HEARTBEAT_IN 0x03u
 #define MC_HID_RID_NEUTRAL_IN 0x06u
 #define MC_HID_RID_DISCOVERY_IN 0x05u
+#define MC_HID_RID_SPEED_LIMIT_IN 0x07u
 #define MC_HID_RID_DONGLE_STATUS 0xFEu
 
 /* Fixed sizes for HID reports (padded where needed) */
@@ -63,10 +67,12 @@ extern "C" {
 #define MC_HID_OUT_PAIR_LEN 8u
 #define MC_HID_OUT_UNPAIR_LEN 8u
 #define MC_HID_OUT_SET_NEUTRAL_LEN 8u /* 1 byte slot idx + two uint16 us, padded */
+#define MC_HID_OUT_SET_SPEED_LIMIT_LEN 8u /* one uint16 milli, padded */
 
 #define MC_HID_IN_HEARTBEAT_LEN 26u
 #define MC_HID_IN_DISCOVERY_LEN 24u
 #define MC_HID_IN_NEUTRAL_LEN 12u
+#define MC_HID_IN_SPEED_LIMIT_LEN 9u
 #define MC_HID_IN_STATUS_LEN 16u
 
 #define MC_ROBOT_ID_MAX 16u
@@ -153,6 +159,39 @@ typedef struct {
     uint8_t stored; /* 1 = saved to the robot's filesystem */
 } neutral_ack_packet_t;
 
+/** Browser -> dongle -> robot: cap the normalized motor output.
+ *
+ * Broadcast, which is the opposite of MC_MSG_SET_NEUTRAL and deliberately so.
+ * Neutral trim is per-robot ESC calibration, so applying one robot's value
+ * field-wide would be a bug; a speed limit is a field-wide rule, and a robot
+ * that missed it would be the fastest thing on the floor.
+ *
+ * limit_milli is thousandths of full output, so 1000 means unrestricted. Those
+ * are the units of Minibot.drive_left_motor() scaled by 1000 -- the number the
+ * robot clamps against, not a percentage of it -- so the value the driver sets
+ * and the value a student writes in main.py can be compared directly.
+ *
+ * No target_mac: a broadcast frame has no single addressee, and the robot must
+ * not be able to decide the cap was meant for someone else. */
+typedef struct {
+    uint8_t type; /* MC_MSG_SET_SPEED_LIMIT */
+    uint16_t limit_milli;
+} set_speed_limit_packet_t;
+
+/** Robot -> dongle -> browser: the speed limit actually in force (post-clamp).
+ *
+ * Sent on applying a MC_MSG_SET_SPEED_LIMIT and in answer to a discovery
+ * request. There is no `stored` flag because the robot deliberately does not
+ * persist this: a speed limit is event policy, not a property of the robot, and
+ * one that survived a power cycle would silently cap a robot days later. The
+ * station is the durable copy and re-sends to any robot whose ack does not match
+ * what it asked for, which is what covers a robot rebooting mid-match. */
+typedef struct {
+    uint8_t type; /* MC_MSG_SPEED_LIMIT_ACK */
+    uint8_t mac[6];
+    uint16_t limit_milli;
+} speed_limit_ack_packet_t;
+
 /** Dongle -> browser status (report 0xFE) */
 typedef struct {
     uint8_t wifi_channel;
@@ -172,11 +211,14 @@ _Static_assert(sizeof(heartbeat_packet_t) == 26, "heartbeat_packet_t size");
 _Static_assert(sizeof(discovery_request_t) == 2, "discovery_request_t size");
 _Static_assert(sizeof(discovery_response_t) == 24, "discovery_response_t size");
 _Static_assert(sizeof(set_neutral_packet_t) == 11, "set_neutral_packet_t size");
+_Static_assert(sizeof(set_speed_limit_packet_t) == 3, "set_speed_limit_packet_t size");
 _Static_assert(sizeof(dongle_status_t) == 16, "dongle_status_t size");
 /* The HID report descriptor's byte counts must track these, or reports are
  * silently truncated rather than rejected. Tie them together here. */
 _Static_assert(sizeof(neutral_ack_packet_t) == MC_HID_IN_NEUTRAL_LEN, "neutral_ack_packet_t size");
 _Static_assert(1 + 2 * sizeof(uint16_t) <= MC_HID_OUT_SET_NEUTRAL_LEN, "set-neutral report too small");
+_Static_assert(sizeof(speed_limit_ack_packet_t) == MC_HID_IN_SPEED_LIMIT_LEN, "speed_limit_ack_packet_t size");
+_Static_assert(sizeof(uint16_t) <= MC_HID_OUT_SET_SPEED_LIMIT_LEN, "set-speed-limit report too small");
 #endif
 
 #ifdef __cplusplus

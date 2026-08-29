@@ -79,6 +79,21 @@
         <button type="button" id="btnArm" class="arm__switch" disabled>
           Enable all robots
         </button>
+        <div class="limit">
+          <label class="limit__label" for="speedLimit">Speed limit</label>
+          <input
+            type="range"
+            id="speedLimit"
+            class="limit__range"
+            min="0.1"
+            max="1"
+            step="0.05"
+            value="1"
+          />
+          <output class="limit__read" id="speedLimitRead" for="speedLimit">1.00</output>
+          <p class="limit__note" id="speedLimitNote" hidden></p>
+        </div>
+
         <p class="arm__panic">
           <kbd>Space</kbd> or <kbd>Esc</kbd> — emergency stop
         </p>

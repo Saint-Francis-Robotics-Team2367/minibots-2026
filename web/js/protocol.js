@@ -43,6 +43,35 @@ export function encodeEnable(enabled, targetMac6) {
   return buf;
 }
 
+/**
+ * Cap the normalized motor output on every robot.
+ * Layout: limit in thousandths (u16 LE), padded.
+ *
+ * No target MAC: the dongle broadcasts this one. A speed limit is a field-wide
+ * rule, so unlike the neutral trim there is no addressee to carry.
+ */
+export function encodeSetSpeedLimitOut(limit) {
+  const buf = new ArrayBuffer(C.MC_HID_OUT_SET_SPEED_LIMIT_LEN);
+  const v = new DataView(buf);
+  v.setUint16(0, Math.round(limit * 1000), true);
+  for (let o = 2; o < C.MC_HID_OUT_SET_SPEED_LIMIT_LEN; o++) v.setUint8(o, 0);
+  return buf;
+}
+
+/** Robot's report of the speed limit it is actually enforcing (post-clamp). */
+export function decodeSpeedLimitAckIn(buf) {
+  const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  if (v.byteLength < C.MC_HID_IN_SPEED_LIMIT_LEN) return null;
+  let o = 0;
+  const type = v.getUint8(o++);
+  if (type !== C.MC_MSG_SPEED_LIMIT_ACK) return null;
+  // Copied, not a view: this mac is kept in `discovered`, and a view would
+  // alias a HID report buffer the browser is free to reuse.
+  const mac = new Uint8Array(6);
+  for (let i = 0; i < 6; i++) mac[i] = v.getUint8(o++);
+  return { type, mac, limit: v.getUint16(o, true) / 1000 };
+}
+
 /** @returns {ArrayBuffer} */
 export function encodeDiscoveryOut(channel) {
   const buf = new ArrayBuffer(C.MC_HID_OUT_DISCOVERY_LEN);

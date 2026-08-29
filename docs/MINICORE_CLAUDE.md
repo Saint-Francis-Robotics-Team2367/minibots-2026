@@ -345,7 +345,7 @@ dongle neither includes nor uses it.
 | Edited | Dongle reflash | Robot upload | Web reload |
 |--------|----------------|--------------|------------|
 | `minicore_protocol.h` (packets, message types, report ids) | **yes** | yes | yes |
-| `minicore_policy.h` (timeouts, neutral-trim range) | no | yes | yes |
+| `minicore_policy.h` (timeouts, neutral-trim range, speed-limit range) | no | yes | yes |
 
 Keep behaviour constants in the policy header. The rule exists because a policy
 number once leaked into the transport: `minicore_bridge.c` clamped the neutral
@@ -359,6 +359,46 @@ packet layout. The dongle reports the value it was *built* with in `0xFE`, and
 the web app compares it against its own copy in `constants.js` and logs a
 mismatch. That turns "the dongle is running old firmware" from a silent,
 hours-long debugging session into one line in the Activity log.
+
+### The global speed limit
+
+A cap on normalized motor output, set once on the driver station and applied by
+every robot. It is enforced by **narrowing the clamp `Minibot._slew()` already
+performs** (`-1.0..1.0` becomes `-limit..limit`) rather than by adding a second
+one, which is what makes it hard to get around and cheap to reason about:
+
+- Both public motor calls route through `_slew()`, so `main.py` has no path to
+  exceed it. Like `_SLEW_PER_S`, it is deliberately not a `Minibot(...)`
+  parameter — a driver who capped the field so a rookie could practise must not
+  be overridable from the file students edit.
+- Lowering the limit mid-drive **ramps** the output down at `_SLEW_PER_S`
+  instead of stepping it. Clamping downstream of the limiter, in
+  `_motor_write()`, would cut the command abruptly — the current spike the slew
+  limiter exists to prevent.
+- `stop_all_motors()` writes neutral through `_pulse_us()` and is untouched. A
+  stop is never ramped and never limited.
+
+Two things differ from the neutral trim, which is otherwise the same shape:
+
+**It broadcasts.** Neutral trim is unicast-only because it is per-robot ESC
+calibration and applying one robot's values field-wide would be a bug. A speed
+limit is the opposite — a field-wide rule, where the robot that missed the frame
+is the fastest thing on the floor. So `set_speed_limit_packet_t` carries no
+target MAC at all, and the robot does not get to decide it was meant for
+somebody else.
+
+**The robot does not persist it.** A neutral belongs to that robot's ESCs and
+should survive a reset; a speed limit belongs to what is happening in the room
+today. One that outlived the session would quietly cap a robot days later, and
+the first symptom is "this robot feels slow" with nothing on screen to explain
+it. Robots boot unrestricted, the browser holds the durable copy in
+`localStorage`, and the station re-broadcasts every 2 s to any robot whose ack
+does not match — which is what catches a robot that rebooted mid-match.
+
+That ack is the only evidence a robot is actually capped, so the arm band names
+any robot that has not confirmed the current limit. A robot running firmware
+without speed-limit support never acks, and so is correctly listed as
+unconfirmed rather than silently assumed safe.
 
 ### Implementation Notes
 
@@ -540,6 +580,8 @@ built, not merely unverified.
 - [x] Define and test joystick-to-motor mapping (tank drive)
 - [x] Per-motor ESC neutral trim, settable from the driver station and persisted on the robot
 - [x] Motor slew-rate limiting (brownout mitigation on direction reversal)
+- [x] Global speed limit, set field-wide from the driver station and enforced on
+      the robot
 - [ ] Generic relay report ids, so a new robot<->station message needs no dongle
       change at all: `RELAY_OUT` = `[slot][opaque bytes]` unicast verbatim to that
       slot's MAC, `RELAY_IN` = any unrecognised inbound frame forwarded up. Sized

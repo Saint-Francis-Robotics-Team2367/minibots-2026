@@ -34,6 +34,8 @@ MC_MSG_DISCOVERY_REQ = 0x04
 MC_MSG_DISCOVERY_RESP = 0x05
 MC_MSG_SET_NEUTRAL = 0x06
 MC_MSG_NEUTRAL_ACK = 0x07
+MC_MSG_SET_SPEED_LIMIT = 0x08
+MC_MSG_SPEED_LIMIT_ACK = 0x09
 
 MC_ROBOT_ID_MAX = 16
 MC_HEARTBEAT_INTERVAL_MS = 1000
@@ -57,6 +59,8 @@ _FMT_DISCOVERY_REQ = "<BB"       # 2 bytes
 _FMT_DISCOVERY_RESP = "<B6sB16s" # 24 bytes
 _FMT_SET_NEUTRAL = "<B6sHH"      # 11 bytes
 _FMT_NEUTRAL_ACK = "<B6sHHB"     # 12 bytes
+_FMT_SET_SPEED_LIMIT = "<BH"     # 3 bytes
+_FMT_SPEED_LIMIT_ACK = "<B6sH"   # 9 bytes
 
 assert struct.calcsize(_FMT_JOYSTICK) == 24
 assert struct.calcsize(_FMT_ENABLE) == 8
@@ -65,6 +69,8 @@ assert struct.calcsize(_FMT_DISCOVERY_REQ) == 2
 assert struct.calcsize(_FMT_DISCOVERY_RESP) == 24
 assert struct.calcsize(_FMT_SET_NEUTRAL) == 11
 assert struct.calcsize(_FMT_NEUTRAL_ACK) == 12
+assert struct.calcsize(_FMT_SET_SPEED_LIMIT) == 3
+assert struct.calcsize(_FMT_SPEED_LIMIT_ACK) == 9
 
 # --- PWM calibration ---
 # Matched to the ESC datasheet:
@@ -165,6 +171,25 @@ _SLEW_PER_S = 4.0
 # step this exists to prevent. Erring short only makes the ramp gentler.
 _SLEW_MAX_DT_MS = 50
 
+# --- Global speed limit ---
+# Cap on normalized motor output, in the same -1..1 units as
+# drive_left_motor(). 1.0 is unrestricted. Set field-wide from the driver
+# station (MC_MSG_SET_SPEED_LIMIT); see MC_SPEED_LIMIT_* in
+# firmware/common/minicore_policy.h -- policy, not wire format.
+#
+# Deliberately NOT a Minibot(...) parameter, for the same reason as _SLEW_PER_S
+# above: a driver who has capped the field so a rookie can practise, or so the
+# robots are safe indoors, must not be overridable from the file students edit.
+#
+# NOT persisted, unlike the neutral trim. A neutral is a property of this
+# robot's ESCs and should survive a reset; a speed limit is a property of what
+# is happening in the room today. One that outlived the session would quietly
+# cap a robot days later, and the first symptom is a robot that "feels slow"
+# with nothing on screen explaining why. Robots boot unrestricted and the
+# station re-asserts.
+_SPEED_LIMIT_MIN = 0.10
+_SPEED_LIMIT_MAX = 1.00
+
 
 def _clamp(v, lo, hi):
     return lo if v < lo else hi if v > hi else v
@@ -248,6 +273,10 @@ class Minibot:
         self._out_right = 0.0
         self._slew_ms_left = time.ticks_ms()
         self._slew_ms_right = self._slew_ms_left
+
+        # Unrestricted until a station says otherwise. See _SPEED_LIMIT_* above
+        # for why this is not loaded from anywhere.
+        self._speed_limit = _SPEED_LIMIT_MAX
 
     # --- lifecycle -----------------------------------------------------------
 
@@ -443,9 +472,23 @@ class Minibot:
         True` whose rate depends on the interpreter and on whatever the student
         put in the loop, so a fixed step per call would ramp at a speed nobody
         chose and would change whenever the loop body did.
+
+        The global speed limit is applied here, by narrowing the range clamp
+        this already performs rather than adding a second one. Two consequences
+        are the reason it belongs here and not in _motor_write():
+
+        - Every public motor call routes through this method, so there is no
+          path by which main.py can exceed the cap.
+        - Lowering the limit while driving ramps the output down at _SLEW_PER_S
+          instead of stepping it. Clamping after the limiter would cut the
+          command abruptly -- the exact current spike the limiter exists to
+          prevent.
+
+        stop_all_motors() writes neutral through _pulse_us() and is untouched:
+        a stop must never be ramped, and must never be limited either.
         """
         now = time.ticks_ms()
-        target = _clamp(target, -1.0, 1.0)
+        target = _clamp(target, -self._speed_limit, self._speed_limit)
         dt_ms = _clamp(time.ticks_diff(now, last_ms), 0, _SLEW_MAX_DT_MS)
         step = _SLEW_PER_S * dt_ms / 1000.0
         return cur + _clamp(target - cur, -step, step), now
@@ -488,11 +531,16 @@ class Minibot:
         msg_type = data[0]
         if msg_type == MC_MSG_SET_NEUTRAL:
             self._handle_set_neutral(mac, data)
+        elif msg_type == MC_MSG_SET_SPEED_LIMIT:
+            self._handle_set_speed_limit(mac, data)
         elif msg_type == MC_MSG_DISCOVERY_REQ:
             self._send_discovery_resp(mac)
             # Answer a scan with our calibration too, so the station can fill its
             # fields the moment we show up in the robot list.
             self._send_neutral_ack(mac)
+            # And with the speed limit in force, so a station that has just come
+            # up learns immediately that this robot is still unrestricted.
+            self._send_speed_limit_ack(mac)
         elif msg_type == MC_MSG_ENABLE:
             self._handle_enable(data)
         elif msg_type == MC_MSG_JOYSTICK:
@@ -551,6 +599,25 @@ class Minibot:
 
         self._calib_stored = self._save_calibration()
         self._send_neutral_ack(mac)
+
+    def _handle_set_speed_limit(self, mac, data):
+        n = struct.calcsize(_FMT_SET_SPEED_LIMIT)
+        if len(data) < n:
+            return
+        _, limit_milli = struct.unpack(_FMT_SET_SPEED_LIMIT, data[:n])
+
+        # No addressee check, unlike _handle_set_neutral. This frame is
+        # broadcast by design: the cap is field-wide, and a robot that decided
+        # it was meant for someone else would be the one robot still at full
+        # speed. Clamped here because the robot is authoritative -- the dongle
+        # forwards the value untouched.
+        self._speed_limit = _clamp(limit_milli / 1000.0, _SPEED_LIMIT_MIN, _SPEED_LIMIT_MAX)
+
+        # No immediate re-write of the motors. A lower cap takes effect through
+        # _slew() on the next drive_*_motor() call, which ramps the output down
+        # rather than stepping it; if nothing is driving, the motors are already
+        # at neutral and there is nothing to bring down.
+        self._send_speed_limit_ack(mac)
 
     # --- calibration persistence ---------------------------------------------
 
@@ -615,6 +682,16 @@ class Minibot:
             self._neutral_left_us,
             self._neutral_right_us,
             1 if self._calib_stored else 0,
+        )
+        self._send(target, ack)
+
+    def _send_speed_limit_ack(self, target):
+        """Report the speed limit actually in force (post-clamp) to the station."""
+        ack = struct.pack(
+            _FMT_SPEED_LIMIT_ACK,
+            MC_MSG_SPEED_LIMIT_ACK,
+            self._mac,
+            int(round(self._speed_limit * 1000.0)),
         )
         self._send(target, ack)
 

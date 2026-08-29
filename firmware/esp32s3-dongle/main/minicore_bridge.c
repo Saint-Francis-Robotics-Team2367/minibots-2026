@@ -154,6 +154,14 @@ static void espnow_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data,
             tud_hid_report(MC_HID_RID_NEUTRAL_IN, data, sizeof(neutral_ack_packet_t));
         }
         break;
+    case MC_MSG_SPEED_LIMIT_ACK:
+        /* Also ungated. This ack is how the station learns a robot is NOT at the
+         * limit it asked for -- a robot that rebooted back to unrestricted is
+         * exactly the case worth hearing about, and it will not be mid-scan. */
+        if (len >= (int)sizeof(speed_limit_ack_packet_t)) {
+            tud_hid_report(MC_HID_RID_SPEED_LIMIT_IN, data, sizeof(speed_limit_ack_packet_t));
+        }
+        break;
     default:
         break;
     }
@@ -287,6 +295,39 @@ void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t le
             s_bcast_err_us = esp_timer_get_time();
         }
         esp_err_t e = esp_now_send(k_broadcast_mac, (uint8_t *)&ep, sizeof(ep));
+        if (e != ESP_OK) {
+            s_bcast_err_us = esp_timer_get_time();
+        }
+        break;
+    }
+    case MC_HID_RID_SET_SPEED_LIMIT: {
+        if (len < sizeof(uint16_t)) {
+            return;
+        }
+        uint16_t milli;
+        memcpy(&milli, buf, sizeof(milli));
+
+        /* Forwarded exactly as received -- deliberately NOT clamped here, for
+         * the same reason the neutral trim is not: a motor-output cap is a
+         * behaviour policy, and compiling one into the dongle would put its
+         * range behind a BOOT/RESET reflash. The robot clamps authoritatively.
+         * See minicore_policy.h. */
+        set_speed_limit_packet_t sl = {
+            .type = MC_MSG_SET_SPEED_LIMIT,
+            .limit_milli = milli,
+        };
+
+        /* Broadcast, never unicast. The cap has to reach every robot on the
+         * field, including ones no slot has paired -- an unpaired robot can
+         * still be enabled by the global broadcast, so it can still move.
+         *
+         * Not gated on s_global_enabled: lowering the limit while the field is
+         * stood down is the normal way to set it, and this frame only narrows a
+         * clamp. It cannot start a motor. */
+        if (ensure_broadcast_peer() != ESP_OK) {
+            s_bcast_err_us = esp_timer_get_time();
+        }
+        esp_err_t e = esp_now_send(k_broadcast_mac, (uint8_t *)&sl, sizeof(sl));
         if (e != ESP_OK) {
             s_bcast_err_us = esp_timer_get_time();
         }
