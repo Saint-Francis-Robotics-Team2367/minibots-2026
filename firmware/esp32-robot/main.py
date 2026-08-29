@@ -48,7 +48,11 @@ time.sleep(0.5)  # Wait for REPL to connect
 print("starting bot...")
 
 from minibot import Minibot
-from minibot_config import MinibotConfig
+from minibot_config import MinibotConfig, Point
+
+# Test dataclass
+p = Point(10, 20)
+print(f"Test Point: {p}")
 
 # Create your robot. Put YOUR robot's name in the quotes so it shows up in the
 # driver station. Change the pins if your motors are wired differently, and
