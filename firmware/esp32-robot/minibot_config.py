@@ -1,9 +1,6 @@
 """Configuration builder for Minibot instances."""
 
-from dataclasses import dataclass, field
 
-
-@dataclass
 class MinibotConfig:
     """Builder for Minibot configuration."""
 
@@ -11,8 +8,35 @@ class MinibotConfig:
     left_motor_pin: int
     right_motor_pin: int
     channel: int
-    neutral_left_us: int = 1500
-    neutral_right_us: int = 1500
+    neutral_left_us: int
+    neutral_right_us: int
+
+    def __init__(
+        self,
+        robot_id: str,
+        *,
+        left_motor_pin: int,
+        right_motor_pin: int,
+        channel: int,
+        neutral_left_us: int = 1500,
+        neutral_right_us: int = 1500,
+    ) -> None:
+        """Initialize with required parameters.
+
+        Args:
+            robot_id: Unique identifier for the robot (truncated to MC_ROBOT_ID_MAX)
+            left_motor_pin: GPIO pin for left motor
+            right_motor_pin: GPIO pin for right motor
+            channel: ESP-NOW channel
+            neutral_left_us: Neutral pulse width for left motor (default: 1500 us)
+            neutral_right_us: Neutral pulse width for right motor (default: 1500 us)
+        """
+        self.robot_id = robot_id
+        self.left_motor_pin = left_motor_pin
+        self.right_motor_pin = right_motor_pin
+        self.channel = channel
+        self.neutral_left_us = neutral_left_us
+        self.neutral_right_us = neutral_right_us
 
     def with_neutral_left_us(self, us: int) -> "MinibotConfig":
         """Set neutral pulse width for left motor in microseconds.
