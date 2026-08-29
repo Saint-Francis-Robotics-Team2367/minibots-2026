@@ -201,7 +201,13 @@ CI builds the dongle firmware on every change and uploads flashable artifacts
 ## Web driver station
 
 **Live: <https://minibots.team2367.org>** — the deployed driver station. Open it in Chrome or
-Edge, connect the dongle, run **Scan**, **Pair** a slot to a robot, set the per-motor
+Edge and click **Connect dongle** once to grant this browser access to it. After that the page
+reconnects to that dongle by itself — on load, and when you plug it in with the page already
+open — and **Connect dongle** stays as the manual fallback. **Disconnect** stays disconnected
+until you click Connect or replug the dongle.
+
+Connecting also scans, so robots and their calibration appear on their own; **Scan** re-runs it
+by hand. **Pair** a slot to a robot, set the per-motor
 **Neutral µs** if the robot creeps (see
 [the robot README](firmware/esp32-robot/README.md#setting-neutral-from-the-driver-station)),
 enable **Global enable**, and

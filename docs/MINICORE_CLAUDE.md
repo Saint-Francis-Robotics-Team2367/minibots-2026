@@ -365,6 +365,10 @@ hours-long debugging session into one line in the Activity log.
 - The ESP32-S3 firmware should use the TinyUSB stack (included in ESP-IDF and Arduino ESP32 core) to present as a custom HID device
 - The HID report descriptor must define all the report IDs and their sizes
 - On the browser side, use `navigator.hid.requestDevice()` with a filter matching the dongle's VID/PID
+- `requestDevice()` needs a user gesture and is the only call that can *create* the permission, so
+  the first connection always costs one click. Every later one is automatic: `navigator.hid.getDevices()`
+  returns the already-granted dongle with no gesture, and the `connect` event covers plugging it in
+  with the page already open
 - Send output reports with `device.sendReport(reportId, data)`
 - Receive input reports with `device.addEventListener('inputreport', callback)`
 
