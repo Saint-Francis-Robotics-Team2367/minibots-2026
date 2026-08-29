@@ -39,7 +39,6 @@
 # ============================================================================
 
 import esp
-import sys
 import time
 
 # Enable ESP32 debug logging to see Wi-Fi/ESP-NOW messages
@@ -47,7 +46,6 @@ esp.osdebug(esp.LOG_DEBUG)
 
 time.sleep(0.5)  # Wait for REPL to connect
 print("starting bot...")
-sys.stdout.flush()
 
 from minibot import Minibot
 from minibot_config import MinibotConfig
@@ -66,7 +64,6 @@ config = (MinibotConfig("MiniBot1", left_motor_pin=16, right_motor_pin=17, chann
 bot = Minibot(config)
 bot.begin()
 print("bot started")
-sys.stdout.flush()
 
 while True:
     bot.update()  # ALWAYS FIRST — handles comms, enable and the safety stop.
