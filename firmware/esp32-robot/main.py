@@ -39,6 +39,7 @@
 # ============================================================================
 
 from minibot import Minibot
+from minibot_config import MinibotConfig
 
 # Create your robot. Put YOUR robot's name in the quotes so it shows up in the
 # driver station. Change the pins if your motors are wired differently, and
@@ -47,20 +48,12 @@ from minibot import Minibot
 # If your wheels creep or spin while the sticks are centered, adjust the motor
 # neutral pulse widths (1500 is the RC standard; try 20-30 us at a time).
 # Motors always have ±500 us swing centered on their neutral.
-#     bot = Minibot("MiniBot1", ..., neutral_left_us=1500, neutral_right_us=1500)
 
-#
-# For mismatched motors, set each independently:
-#     bot = Minibot("MiniBot1", ..., neutral_left_us=1500, neutral_right_us=1520)
-#
-# NOTE: you can also set these from the driver station's "Neutral µs" boxes. A
-# calibration applied that way is SAVED ON THE ROBOT and overrides the values
-# below, so that it survives a reset. If changing the numbers here seems to do
-# nothing, that's why — run bot.clear_calibration() once from the REPL (or delete
-# calib.json) to hand control back to this file.
+config = (MinibotConfig("MiniBot1", left_motor_pin=16, right_motor_pin=17, channel=6)
+          .with_neutral_left_us(1500)
+          .with_neutral_right_us(1700))
 
-bot = Minibot("MiniBot1", left_motor_pin=16, right_motor_pin=17, channel=6,
-              neutral_left_us=1500, neutral_right_us=1700)
+bot = Minibot(config)
 
 bot.begin()
 
