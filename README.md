@@ -226,7 +226,9 @@ open — and **Connect dongle** stays as the manual fallback. **Disconnect** sta
 until you click Connect or replug the dongle.
 
 Connecting also scans, so robots and their calibration appear on their own; **Scan** re-runs it
-by hand. **Pair** a slot to a robot, set the per-motor
+by hand. **Pair** a slot to a robot, drag **Speed limit** down if the robots should be slower than
+full output (it applies to every robot, survives a reload, and names any robot that hasn't
+confirmed it), set the per-motor
 **Neutral µs** if the robot creeps (see
 [the robot README](firmware/esp32-robot/README.md#setting-neutral-from-the-driver-station)),
 enable **Global enable**, and

@@ -316,6 +316,56 @@ body[data-armed="true"] .arm__switch:hover:not(:disabled) {
   border-color: var(--line-bright);
   cursor: not-allowed;
 }
+/* Global speed limit. Lives in the arm band because it is field state, and
+   because a cap the driver has forgotten about is worse than no cap: it belongs
+   where they are already looking when a robot feels wrong. */
+.limit {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 1rem auto 0;
+  max-width: min(23rem, 100%);
+}
+
+.limit__label {
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.limit__range {
+  flex: 1 1 8rem;
+  min-width: 6rem;
+  height: 1.2rem;
+  cursor: pointer;
+  accent-color: var(--info);
+  background: transparent;
+}
+
+.limit__read {
+  min-width: 3ch;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* Capped is a state worth seeing at a glance, so the readout stops being
+   ordinary ink once it is. */
+.limit[data-capped="true"] .limit__read {
+  color: var(--info);
+}
+
+.limit__note {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  color: var(--warn);
+}
 
 .arm__panic {
   margin: 0.7rem 0 0;

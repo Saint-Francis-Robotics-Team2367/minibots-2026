@@ -56,6 +56,21 @@ extern "C" {
 #define MC_NEUTRAL_TRIM_MIN_US 1000u
 #define MC_NEUTRAL_TRIM_MAX_US 2000u
 
+/* Clamp for a global speed limit arriving over the air (MC_MSG_SET_SPEED_LIMIT),
+ * in thousandths of full motor output. 1000 = unrestricted.
+ *
+ * Enforced by the ROBOT, which narrows its existing +/-1.0 output clamp to this
+ * instead of adding a second one. Mirrored by the WEB slider so the driver is
+ * told before sending. The dongle does not clamp -- it broadcasts the frame
+ * verbatim, the same rule that keeps the neutral trim out of the transport.
+ *
+ * The floor is 100 (0.10) rather than 0 on purpose. A limit of zero produces a
+ * robot that is enabled, streaming joystick frames, and completely inert -- a
+ * state that looks exactly like a wiring fault. Stopping the field is what
+ * Disable is for, and it says so on the screen. */
+#define MC_SPEED_LIMIT_MIN_MILLI 100u
+#define MC_SPEED_LIMIT_MAX_MILLI 1000u
+
 #ifdef __cplusplus
 }
 #endif
