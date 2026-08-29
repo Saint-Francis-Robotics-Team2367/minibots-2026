@@ -44,7 +44,6 @@ import time
 # import esp
 # esp.osdebug(esp.LOG_DEBUG)
 
-time.sleep(0.5)  # Wait for REPL to connect
 print("starting bot...")
 
 from minibot import Minibot
