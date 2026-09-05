@@ -26,6 +26,7 @@ import struct
 import time
 from machine import Pin, PWM
 from minibot_config import MinibotConfig
+from display import Display
 
 # --- Protocol constants (keep in sync with firmware/common/minicore_protocol.h) ---
 MC_MSG_JOYSTICK = 0x01
@@ -224,6 +225,7 @@ class Minibot:
     _axis_lt: int
     _axis_rt: int
     _buttons: int
+    _display: Display | None
 
     def __init__(self, config):
         """Initialize from a MinibotConfig.
@@ -234,7 +236,14 @@ class Minibot:
         The motor slew limit is not settable here on purpose -- it is fixed at
         _SLEW_PER_S so robot code cannot opt out of it. See the note there.
         """
-        self._robot_id = config.robot_id[:MC_ROBOT_ID_MAX]
+        # Fail loudly rather than truncating: the name is how the driver station
+        # identifies this robot, and a silently shortened one looks like a
+        # different (or duplicate) robot on the station and the OLED.
+        assert len(config.robot_id) <= MC_ROBOT_ID_MAX, (
+            "robot_id %r is %d characters; max is %d"
+            % (config.robot_id, len(config.robot_id), MC_ROBOT_ID_MAX)
+        )
+        self._robot_id = config.robot_id
         self._left_pin = config.left_motor_pin
         self._right_pin = config.right_motor_pin
         self._channel = config.channel
@@ -278,6 +287,8 @@ class Minibot:
         self._out_right = 0.0
         self._slew_ms_left = time.ticks_ms()
         self._slew_ms_right = self._slew_ms_left
+
+        self._display = self._init_display(config)
 
         # Unrestricted until a station says otherwise. See _SPEED_LIMIT_* above
         # for why this is not loaded from anywhere.
@@ -438,6 +449,23 @@ class Minibot:
         self._slew_ms_right = self._slew_ms_left
         self._pulse_us(self._left_pwm, self._neutral_left_us)
         self._pulse_us(self._right_pwm, self._neutral_right_us)
+
+    # --- display -----------------------------------------------------------
+
+    def _init_display(self, config) -> object:
+        """Create and initialize display if enabled. Returns Display | None."""
+        if not config.display_enabled:
+            return None
+        try:
+            display = Display()
+            display.set_line1(self._robot_id)
+            # set_line*() only stages text in RAM; nothing reaches the panel
+            # until show() pushes the framebuffer over I2C.
+            display.show()
+            return display
+        except Exception as e:
+            print(f"[warn] Failed to initialize display: {e}")
+            return None
 
     # --- internals -----------------------------------------------------------
 
