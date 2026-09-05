@@ -27,7 +27,7 @@ import time
 from machine import Pin, PWM
 from minibot_config import MinibotConfig
 from display import Display
-from neopixel_ring import NeoPixelRing, RingRotation
+from neopixel_ring import NeoPixelRing, RingRotation, RingConnectionStatus, RAINBOW_COLORS
 from button import Button
 
 # --- Protocol constants (keep in sync with firmware/common/minicore_protocol.h) ---
@@ -230,6 +230,8 @@ class Minibot:
     _display: Display | None
     _ring: NeoPixelRing | None
     _ring_rotation: RingRotation | None
+    _ring_connection_status: RingConnectionStatus | None
+    _ring_show_rainbow: bool
     _button: Button | None
 
     def __init__(self, config):
@@ -295,8 +297,9 @@ class Minibot:
 
         self._display = self._init_display(config)
         self._ring = self._init_ring()
-        colors = [(255, 0, 0), (255, 0, 255), (0, 0, 255), (0, 255, 255), (0, 255, 0), (255, 255, 0)]
-        self._ring_rotation = RingRotation(colors, rotate_delay_ms=200)
+        self._ring_rotation = RingRotation(RAINBOW_COLORS, rotate_delay_ms=200)
+        self._ring_connection_status = RingConnectionStatus()
+        self._ring_show_rainbow = False
         self._button = self._init_button()
         self._set_ring_colors()
 
@@ -473,12 +476,13 @@ class Minibot:
             return None
 
     def _check_button(self) -> None:
-        """Check button state and toggle rotation direction."""
-        if self._button is None or self._ring_rotation is None:
+        """Check button state and toggle display mode."""
+        if self._button is None:
             return
         if self._button.check():
-            self._ring_rotation.toggle_direction()
-            print(f"Button pressed: direction = {self._ring_rotation.direction}")
+            self._ring_show_rainbow = not self._ring_show_rainbow
+            mode = "rainbow" if self._ring_show_rainbow else "connection"
+            print(f"Button pressed: switched to {mode} mode")
 
     # --- neopixel ring ---------------------------------------------------
 
@@ -494,14 +498,35 @@ class Minibot:
             return None
 
     def _set_ring_colors(self) -> None:
-        """Set the color pattern on the ring with auto-rotation."""
-        if self._ring is None or self._ring_rotation is None:
+        """Set the ring color based on display mode."""
+        if self._ring is None or self._ring_rotation is None or self._ring_connection_status is None:
             return
         try:
             self._check_button()
-            self._ring_rotation.update()
-            rotated_colors = self._ring_rotation.get_colors()
-            self._ring.set_colors(rotated_colors)
+
+            if self._ring_show_rainbow:
+                # Rainbow rotation mode
+                self._ring_rotation.update()
+                colors = self._ring_rotation.get_colors()
+            else:
+                # Connection status mode
+                if self._dongle_mac is None:
+                    # Not connected to dongle
+                    self._ring_connection_status.set_status(self._ring_connection_status.STATUS_DISCONNECTED)
+                elif not self._enabled:
+                    # Connected but not assigned/enabled
+                    self._ring_connection_status.set_status(self._ring_connection_status.STATUS_CONNECTED_UNASSIGNED)
+                elif self._axis_ly != 0 or self._axis_ry != 0 or self._axis_lx != 0 or self._axis_rx != 0:
+                    # Driving (has input)
+                    self._ring_connection_status.set_status(self._ring_connection_status.STATUS_DRIVING)
+                    self._ring_connection_status.update_blink()
+                else:
+                    # Connected and assigned but not driving
+                    self._ring_connection_status.set_status(self._ring_connection_status.STATUS_CONNECTED_ASSIGNED)
+
+                colors = self._ring_connection_status.get_colors()
+
+            self._ring.set_colors(colors)
             self._ring.write()
         except Exception as e:
             print(f"[warn] Failed to set ring colors: {e}")

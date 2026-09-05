@@ -2,6 +2,9 @@ import neopixel
 import machine
 import time
 
+# Color constants
+RAINBOW_COLORS = [(255, 0, 0), (255, 0, 255), (0, 0, 255), (0, 255, 255), (0, 255, 0), (255, 255, 0)]
+
 
 class NeoPixelRing:
     def __init__(self, num_leds: int = 12, pin: int = 14, *, max_intensity: int = 255):
@@ -56,6 +59,67 @@ class NeoPixelRing:
         for i in range(self.num_leds):
             r, g, b = colors[i % len(colors)]
             self.set_color(i, r, g, b)
+
+
+class RingConnectionStatus:
+    """Displays connection status on the NeoPixel ring."""
+
+    STATUS_DISCONNECTED = 0
+    STATUS_CONNECTED_UNASSIGNED = 1
+    STATUS_CONNECTED_ASSIGNED = 2
+    STATUS_DRIVING = 3
+
+    def __init__(self, num_leds: int = 12):
+        """Initialize connection status display.
+
+        Args:
+            num_leds: Number of LEDs in the ring
+        """
+        self.num_leds = num_leds
+        self.status = self.STATUS_DISCONNECTED
+        self.blink_state = False
+        self.blink_ticks = 0
+
+    def set_status(self, status: int) -> None:
+        """Set the connection status.
+
+        Args:
+            status: One of STATUS_DISCONNECTED, STATUS_CONNECTED_UNASSIGNED,
+                   STATUS_CONNECTED_ASSIGNED, STATUS_DRIVING
+        """
+        self.status = status
+
+    def update_blink(self) -> None:
+        """Update blink state for driving mode (blinks every ~500ms)."""
+        self.blink_ticks += 1
+        if self.blink_ticks >= 5:  # 5 updates = ~500ms at 10Hz update rate
+            self.blink_state = not self.blink_state
+            self.blink_ticks = 0
+
+    def get_color(self) -> tuple:
+        """Get the color for the current status.
+
+        Returns:
+            (r, g, b) tuple
+        """
+        if self.status == self.STATUS_DISCONNECTED:
+            return (255, 0, 0)  # Red
+        elif self.status == self.STATUS_CONNECTED_UNASSIGNED:
+            return (255, 255, 0)  # Yellow
+        elif self.status == self.STATUS_DRIVING:
+            # Blinking green
+            return (0, 255, 0) if self.blink_state else (0, 0, 0)
+        else:  # STATUS_CONNECTED_ASSIGNED
+            return (0, 255, 0)  # Green
+
+    def get_colors(self) -> list:
+        """Get color list for all LEDs.
+
+        Returns:
+            List of (r, g, b) tuples for all LEDs
+        """
+        color = self.get_color()
+        return [color] * self.num_leds
 
 
 class RingRotation:
