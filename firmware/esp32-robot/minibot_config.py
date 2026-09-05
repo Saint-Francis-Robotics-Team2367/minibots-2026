@@ -10,6 +10,7 @@ class MinibotConfig:
     channel: int
     neutral_left_us: int
     neutral_right_us: int
+    display_enabled: bool
 
     def __init__(
         self,
@@ -20,16 +21,18 @@ class MinibotConfig:
         channel: int,
         neutral_left_us: int = 1500,
         neutral_right_us: int = 1500,
+        display_enabled: bool = True,
     ) -> None:
         """Initialize with required parameters.
 
         Args:
-            robot_id: Unique identifier for the robot (truncated to MC_ROBOT_ID_MAX)
+            robot_id: Unique identifier for the robot (max 16 characters)
             left_motor_pin: GPIO pin for left motor
             right_motor_pin: GPIO pin for right motor
             channel: ESP-NOW channel
             neutral_left_us: Neutral pulse width for left motor (default: 1500 us)
             neutral_right_us: Neutral pulse width for right motor (default: 1500 us)
+            display_enabled: Show robot status on the OLED (default: True)
         """
         self.robot_id = robot_id
         self.left_motor_pin = left_motor_pin
@@ -37,6 +40,7 @@ class MinibotConfig:
         self.channel = channel
         self.neutral_left_us = neutral_left_us
         self.neutral_right_us = neutral_right_us
+        self.display_enabled = display_enabled
 
     def with_neutral_left_us(self, us: int) -> "MinibotConfig":
         """Set neutral pulse width for left motor in microseconds.
