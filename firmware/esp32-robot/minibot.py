@@ -296,7 +296,7 @@ class Minibot:
         self._display = self._init_display(config)
         self._ring = self._init_ring()
         colors = [(255, 0, 0), (255, 0, 255), (0, 0, 255), (0, 255, 255), (0, 255, 0), (255, 255, 0)]
-        self._ring_rotation = RingRotation(colors, rotate_delay_ms=1000)
+        self._ring_rotation = RingRotation(colors, rotate_delay_ms=200)
         self._button = self._init_button()
         self._set_ring_colors()
 
