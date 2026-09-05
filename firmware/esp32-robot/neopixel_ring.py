@@ -1,5 +1,6 @@
 import neopixel
 import machine
+import time
 
 
 class NeoPixelRing:
@@ -55,3 +56,48 @@ class NeoPixelRing:
         for i in range(self.num_leds):
             r, g, b = colors[i % len(colors)]
             self.set_color(i, r, g, b)
+
+
+class RingRotation:
+    """Handles color rotation logic for the NeoPixel ring."""
+
+    def __init__(self, colors: list, rotate_delay_ms: int = 1000):
+        """Initialize ring rotation.
+
+        Args:
+            colors: List of (r, g, b) tuples to rotate through
+            rotate_delay_ms: Delay between rotations in milliseconds (default: 1000)
+        """
+        self.colors = colors
+        self.rotate_delay_ms = rotate_delay_ms
+        self.offset = 0
+        self.direction = 1
+        self.last_rotate_ms = time.ticks_ms()
+
+    def toggle_direction(self) -> None:
+        """Toggle rotation direction (forward/backward)."""
+        self.direction *= -1
+
+    def update(self) -> bool:
+        """Update rotation and return True if colors should be refreshed.
+
+        Returns:
+            True if rotation occurred, False otherwise
+        """
+        now = time.ticks_ms()
+        if time.ticks_diff(now, self.last_rotate_ms) >= self.rotate_delay_ms:
+            self.offset += self.direction
+            self.last_rotate_ms = now
+            return True
+        return False
+
+    def get_colors(self) -> list:
+        """Get the current rotated color pattern.
+
+        Returns:
+            List of rotated colors
+        """
+        if not self.colors:
+            return []
+        rotated = self.colors[self.offset % len(self.colors):] + self.colors[:self.offset % len(self.colors)]
+        return rotated

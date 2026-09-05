@@ -27,7 +27,7 @@ import time
 from machine import Pin, PWM
 from minibot_config import MinibotConfig
 from display import Display
-from neopixel_ring import NeoPixelRing
+from neopixel_ring import NeoPixelRing, RingRotation
 from button import Button
 
 # --- Protocol constants (keep in sync with firmware/common/minicore_protocol.h) ---
@@ -229,9 +229,7 @@ class Minibot:
     _buttons: int
     _display: Display | None
     _ring: NeoPixelRing | None
-    _ring_offset: int
-    _ring_direction: int
-    _ring_last_rotate_ms: int
+    _ring_rotation: RingRotation | None
     _button: Button | None
 
     def __init__(self, config):
@@ -297,9 +295,8 @@ class Minibot:
 
         self._display = self._init_display(config)
         self._ring = self._init_ring()
-        self._ring_offset = 0
-        self._ring_direction = 1
-        self._ring_last_rotate_ms = time.ticks_ms()
+        colors = [(255, 0, 0), (255, 0, 255), (0, 0, 255), (0, 255, 255), (0, 255, 0), (255, 255, 0)]
+        self._ring_rotation = RingRotation(colors, rotate_delay_ms=1000)
         self._button = self._init_button()
         self._set_ring_colors()
 
@@ -477,18 +474,18 @@ class Minibot:
 
     def _check_button(self) -> None:
         """Check button state and toggle rotation direction."""
-        if self._button is None:
+        if self._button is None or self._ring_rotation is None:
             return
         if self._button.check():
-            self._ring_direction *= -1
-            print(f"Button pressed: direction = {self._ring_direction}")
+            self._ring_rotation.toggle_direction()
+            print(f"Button pressed: direction = {self._ring_rotation.direction}")
 
     # --- neopixel ring ---------------------------------------------------
 
     def _init_ring(self) -> object:
         """Create and initialize NeoPixel ring. Returns NeoPixelRing | None."""
         try:
-            ring = NeoPixelRing(max_intensity=30)
+            ring = NeoPixelRing(max_intensity=20)
             ring.clear()
             ring.write()
             return ring
@@ -498,17 +495,12 @@ class Minibot:
 
     def _set_ring_colors(self) -> None:
         """Set the color pattern on the ring with auto-rotation."""
-        if self._ring is None:
+        if self._ring is None or self._ring_rotation is None:
             return
         try:
             self._check_button()
-            now = time.ticks_ms()
-            if time.ticks_diff(now, self._ring_last_rotate_ms) >= 1000:
-                self._ring_offset += self._ring_direction
-                self._ring_last_rotate_ms = now
-
-            colors = [(255, 0, 0), (255, 255, 0), (0, 255, 0), (0, 255, 255), (0, 0, 255), (255, 0, 255)]
-            rotated_colors = colors[self._ring_offset % len(colors):] + colors[:self._ring_offset % len(colors)]
+            self._ring_rotation.update()
+            rotated_colors = self._ring_rotation.get_colors()
             self._ring.set_colors(rotated_colors)
             self._ring.write()
         except Exception as e:
