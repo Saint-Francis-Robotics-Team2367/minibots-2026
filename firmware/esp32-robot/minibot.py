@@ -236,7 +236,14 @@ class Minibot:
         The motor slew limit is not settable here on purpose -- it is fixed at
         _SLEW_PER_S so robot code cannot opt out of it. See the note there.
         """
-        self._robot_id = config.robot_id[:MC_ROBOT_ID_MAX]
+        # Fail loudly rather than truncating: the name is how the driver station
+        # identifies this robot, and a silently shortened one looks like a
+        # different (or duplicate) robot on the station and the OLED.
+        assert len(config.robot_id) <= MC_ROBOT_ID_MAX, (
+            "robot_id %r is %d characters; max is %d"
+            % (config.robot_id, len(config.robot_id), MC_ROBOT_ID_MAX)
+        )
+        self._robot_id = config.robot_id
         self._left_pin = config.left_motor_pin
         self._right_pin = config.right_motor_pin
         self._channel = config.channel
@@ -452,6 +459,9 @@ class Minibot:
         try:
             display = Display()
             display.set_line1(self._robot_id)
+            # set_line*() only stages text in RAM; nothing reaches the panel
+            # until show() pushes the framebuffer over I2C.
+            display.show()
             return display
         except Exception as e:
             print(f"[warn] Failed to initialize display: {e}")

@@ -26,12 +26,13 @@ class MinibotConfig:
         """Initialize with required parameters.
 
         Args:
-            robot_id: Unique identifier for the robot (truncated to MC_ROBOT_ID_MAX)
+            robot_id: Unique identifier for the robot (max 16 characters)
             left_motor_pin: GPIO pin for left motor
             right_motor_pin: GPIO pin for right motor
             channel: ESP-NOW channel
             neutral_left_us: Neutral pulse width for left motor (default: 1500 us)
             neutral_right_us: Neutral pulse width for right motor (default: 1500 us)
+            display_enabled: Show robot status on the OLED (default: True)
         """
         self.robot_id = robot_id
         self.left_motor_pin = left_motor_pin
