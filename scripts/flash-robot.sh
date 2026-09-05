@@ -186,11 +186,12 @@ fi
 # Python can't be interrupted). When it loses that race you get
 # "could not enter raw repl". Retrying re-runs the race and one attempt lands
 # while the board is interruptible, so a small bounded retry loop is reliable.
-echo "[info] Uploading main.py + minibot.py + minibot_config.py + display.py + ssd1306.py + neopixel_ring.py + button.py"
+echo "[info] Uploading Python files from ${PROJ}"
 UPLOAD_TRIES=5
 uploaded=0
 for (( try=1; try<=UPLOAD_TRIES; try++ )); do
-  if "${MPREMOTE[@]}" ${MPR_DEV[@]+"${MPR_DEV[@]}"} fs cp "${PROJ}/minibot.py" "${PROJ}/minibot_config.py" "${PROJ}/display.py" "${PROJ}/ssd1306.py" "${PROJ}/neopixel_ring.py" "${PROJ}/button.py" "${PROJ}/main.py" : ; then
+  PY_FILES=( $(cd "${PROJ}" && find . -maxdepth 1 -name "*.py" -type f ! -name "boot.py" | sed 's|^\./||' | sed "s|^|${PROJ}/|" | sort) )
+  if "${MPREMOTE[@]}" ${MPR_DEV[@]+"${MPR_DEV[@]}"} fs cp "${PY_FILES[@]}" : ; then
     uploaded=1
     break
   fi
