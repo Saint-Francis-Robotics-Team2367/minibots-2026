@@ -27,6 +27,8 @@ import time
 from machine import Pin, PWM
 from minibot_config import MinibotConfig
 from display import Display
+from neopixel_ring import NeoPixelRing
+from button import Button
 
 # --- Protocol constants (keep in sync with firmware/common/minicore_protocol.h) ---
 MC_MSG_JOYSTICK = 0x01
@@ -226,6 +228,11 @@ class Minibot:
     _axis_rt: int
     _buttons: int
     _display: Display | None
+    _ring: NeoPixelRing | None
+    _ring_offset: int
+    _ring_direction: int
+    _ring_last_rotate_ms: int
+    _button: Button | None
 
     def __init__(self, config):
         """Initialize from a MinibotConfig.
@@ -289,6 +296,12 @@ class Minibot:
         self._slew_ms_right = self._slew_ms_left
 
         self._display = self._init_display(config)
+        self._ring = self._init_ring()
+        self._ring_offset = 0
+        self._ring_direction = 1
+        self._ring_last_rotate_ms = time.ticks_ms()
+        self._button = self._init_button()
+        self._set_ring_colors()
 
         # Unrestricted until a station says otherwise. See _SPEED_LIMIT_* above
         # for why this is not loaded from anywhere.
@@ -338,6 +351,8 @@ class Minibot:
     def update(self):
         """Call FIRST each loop. Drains the radio, applies enable/failsafe,
         and sends periodic heartbeats."""
+        self._set_ring_colors()
+
         # Drain all pending ESP-NOW frames without blocking.
         while True:
             mac, msg = self._espnow.irecv(0)
@@ -449,6 +464,55 @@ class Minibot:
         self._slew_ms_right = self._slew_ms_left
         self._pulse_us(self._left_pwm, self._neutral_left_us)
         self._pulse_us(self._right_pwm, self._neutral_right_us)
+
+    # --- button -----------------------------------------------------------
+
+    def _init_button(self) -> object:
+        """Create and initialize button. Returns Button | None."""
+        try:
+            return Button()
+        except Exception as e:
+            print(f"[warn] Failed to initialize button: {e}")
+            return None
+
+    def _check_button(self) -> None:
+        """Check button state and toggle rotation direction."""
+        if self._button is None:
+            return
+        if self._button.check():
+            self._ring_direction *= -1
+            print(f"Button pressed: direction = {self._ring_direction}")
+
+    # --- neopixel ring ---------------------------------------------------
+
+    def _init_ring(self) -> object:
+        """Create and initialize NeoPixel ring. Returns NeoPixelRing | None."""
+        try:
+            ring = NeoPixelRing(max_intensity=30)
+            ring.clear()
+            ring.write()
+            return ring
+        except Exception as e:
+            print(f"[warn] Failed to initialize NeoPixel ring: {e}")
+            return None
+
+    def _set_ring_colors(self) -> None:
+        """Set the color pattern on the ring with auto-rotation."""
+        if self._ring is None:
+            return
+        try:
+            self._check_button()
+            now = time.ticks_ms()
+            if time.ticks_diff(now, self._ring_last_rotate_ms) >= 1000:
+                self._ring_offset += self._ring_direction
+                self._ring_last_rotate_ms = now
+
+            colors = [(255, 0, 0), (255, 255, 0), (0, 255, 0), (0, 255, 255), (0, 0, 255), (255, 0, 255)]
+            rotated_colors = colors[self._ring_offset % len(colors):] + colors[:self._ring_offset % len(colors)]
+            self._ring.set_colors(rotated_colors)
+            self._ring.write()
+        except Exception as e:
+            print(f"[warn] Failed to set ring colors: {e}")
 
     # --- display -----------------------------------------------------------
 
