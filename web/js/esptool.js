@@ -112,7 +112,6 @@ export class PortOwner {
  * @param {(pct: number, label: string) => void} [opts.onProgress]
  * @param {(line: string) => void} [opts.onLog]
  * @param {string} [opts.flashSize]
- * @param {"classic" | "usb-jtag" | "default"} [opts.resetMode]
  * @param {number} [opts.baudRate]
  */
 export async function flash({
@@ -122,11 +121,10 @@ export async function flash({
   onProgress,
   onLog,
   flashSize = "keep",
-  resetMode = "default",
   baudRate = 115200,
 }) {
   const mod = await loadEsptool();
-  const { ESPLoader, Transport, ClassicReset, HardReset } = mod;
+  const { ESPLoader, Transport } = mod;
 
   const say = (s) => onLog?.(String(s).replace(/\r?\n$/, ""));
   // esptool-js writes progress and chip detection through a terminal-shaped
@@ -140,17 +138,25 @@ export async function flash({
   const transport = new Transport(port, /* tracing */ false);
   let loader = null;
   try {
+    // No resetConstructors override.
+    //
+    // An earlier version passed `{ classicReset: ClassicReset }` for the robot,
+    // which threw "Class constructor Fe cannot be invoked without 'new'" on the
+    // first real board: ESPLoader stores FACTORIES, not classes, and calls them
+    // as `resetConstructors.classicReset(transport, delay)`. Read from the pinned
+    // bundle, its defaults are already
+    //     classicReset: (t, d) => new ClassicReset(t, d)
+    //     usbJTAGSerialReset: (t) => new UsbJtagSerialReset(t)
+    // and constructResetSequence() picks between them by PID: a board whose
+    // transport PID is USB_JTAG_SERIAL_PID (0x1001) gets the JTAG reset, anything
+    // else — a CH340 or CP210x UART bridge, which is what the robot boards use —
+    // gets Classic DTR/RTS with the 50 ms / 550 ms pair. That is exactly the
+    // behaviour the override was reaching for, so the correct fix is to pass
+    // nothing and let the library dispatch on the hardware it actually found.
     loader = new ESPLoader({
       transport,
       baudrate: baudRate,
       terminal,
-      // ClassicReset is the DTR/RTS sequence that puts a board with a UART
-      // bridge (the robot's) into the bootloader with no button press. The
-      // dongle has no bridge while its HID-only firmware runs, so it needs the
-      // manual BOOT/RESET and gets the default here.
-      ...(resetMode === "classic"
-        ? { resetConstructors: { classicReset: ClassicReset, hardReset: HardReset } }
-        : {}),
     });
 
     const chip = await loader.main();
@@ -181,18 +187,29 @@ export async function flash({
     onProgress?.(100, "done");
     say("Flash written.");
   } finally {
+    // Reset BEFORE disconnecting, and with the library's own sequence.
+    //
+    // The previous version called transport.setDTR(false) AFTER disconnect(),
+    // which is a no-op twice over: the port is already closed by then, and
+    // dropping DTR is not a reset. On real hardware the board stayed in the ROM
+    // bootloader after a successful write, so the reconnect that follows found no
+    // REPL and the six-file upload failed with "Not in raw REPL" — while the
+    // flash itself was perfect. `after("hard_reset")` pulses RTS through the
+    // still-open transport, which is exactly what esptool's own --after
+    // hard_reset does and what made the board come up at the REPL from the CLI.
+    if (loader) {
+      try {
+        await loader.after("hard_reset");
+      } catch (err) {
+        say(`Could not reset the board: ${err.message} — power-cycle it by hand`);
+      }
+    }
     // Always disconnect, including on failure: leaving the transport holding the
     // port would make the next attempt hang in waitForUnlock instead of failing.
     try {
       await transport.disconnect();
     } catch (err) {
       /* the device may already be gone */
-    }
-    try {
-      // Take the board out of the bootloader so it boots what was just written.
-      await transport.setDTR?.(false);
-    } catch (err) {
-      /* optional */
     }
   }
 }

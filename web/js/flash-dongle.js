@@ -126,10 +126,10 @@ async function run() {
       port,
       images: fetched,
       flashSize,
-      // No ClassicReset here: the dongle is already sitting in its ROM bootloader
-      // from the manual BOOT/RESET, and its HID-only firmware means DTR/RTS have
-      // nothing to toggle.
-      resetMode: "default",
+      // Nothing to pass: the dongle is already sitting in its ROM bootloader from
+      // the manual BOOT/RESET. In that state it enumerates as PID 0x1001, which is
+      // esptool-js's USB_JTAG_SERIAL_PID, so it selects the JTAG reset by itself.
+      // Verified on a real dongle.
       onProgress: (pct, label) => {
         fill.style.width = `${pct}%`;
         note(`Writing ${label} — ${pct}%`);

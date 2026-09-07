@@ -40,7 +40,28 @@ let cm = null;
 let dirty = false;
 /** Stop function from streamOutput(), while output is being watched. */
 let stopStream = null;
-let connected = false;
+/**
+ * Two states, not one, because the fresh-ESP32 case needs them apart.
+ *
+ * `portOpen` — we hold the serial port.
+ * `atRepl`   — the board answered the raw-REPL handshake.
+ *
+ * A board with no MicroPython on it opens fine and never reaches a REPL. Gating
+ * full reflash on `atRepl` would disable it on exactly the boards it exists for,
+ * so pull/upload require `atRepl` while reflash requires only `portOpen`.
+ */
+let portOpen = false;
+let atRepl = false;
+/**
+ * True while a device operation owns the port.
+ *
+ * connect() is awaited inside an async click handler, so its 5-attempt REPL loop
+ * runs for ~30 s WITHOUT blocking anything. renderFlashGate() would open the gate
+ * as soon as portOpen flipped, so a reflash could start while those retries were
+ * still writing Ctrl-C to the same port. PortOwner does not catch this: connect()
+ * claims "repl" and fullReflash() releases "repl", so the claim looks satisfied.
+ */
+let busy = false;
 
 /* ── Editor ─────────────────────────────────────────────────────────────── */
 
@@ -128,33 +149,70 @@ function renderBuf() {
 /* ── Connection ─────────────────────────────────────────────────────────── */
 
 function renderConn() {
-  document.body.dataset.link = connected ? "up" : "down";
-  $("portState").textContent = connected ? "Connected" : "Not connected";
-  $("btnConnect").disabled = connected;
-  $("btnDisconnect").disabled = !connected;
+  document.body.dataset.link = atRepl ? "up" : "down";
+  $("portState").textContent = atRepl
+    ? "Connected"
+    : portOpen
+      ? "Port open — no REPL"
+      : "Not connected";
+  $("btnConnect").disabled = portOpen;
+  $("btnDisconnect").disabled = !portOpen;
+  // These three all execute Python on the board, so they need a live REPL.
   for (const id of ["btnPull", "btnPush", "btnClearCalib"]) {
-    $(id).disabled = !connected;
+    $(id).disabled = !atRepl;
   }
   renderFlashGate();
 }
 
+/**
+ * Open the port, then try for a REPL.
+ *
+ * A REPL failure is deliberately NOT a connect failure: a board with no
+ * MicroPython, or one whose main.py cannot be interrupted, still needs the port
+ * held so full reflash can take it. Only a port that will not open at all is
+ * fatal here.
+ *
+ * @param {SerialPort} port
+ * @returns {Promise<boolean>} true when the REPL was reached
+ */
 async function connect(port) {
   owner.claim("repl");
+  busy = true;
+  renderConn();
   try {
     await mp.connect(port);
-    connected = true;
+    portOpen = true;
     renderConn();
     log("Serial port open — interrupting the robot to reach its REPL");
-    await mp.enterRawWithRetry((m) => log(m, "warn"));
-    log("At the robot's REPL", "go");
   } catch (err) {
     // Leave nothing half-owned: a port still held here cannot be reopened by
     // the flasher, and that failure would present as a hang.
     await mp.close().catch(() => {});
     owner.release("repl");
-    connected = false;
+    portOpen = false;
+    atRepl = false;
+    busy = false;
     renderConn();
     throw err;
+  }
+  try {
+    await mp.enterRawWithRetry((m) => log(m, "warn"));
+    atRepl = true;
+    log("At the robot's REPL", "go");
+    return true;
+  } catch (err) {
+    atRepl = false;
+    log(`No REPL on this board: ${err.message}`, "warn");
+    log(
+      "If this board has never had MicroPython on it, use Reflash — that is what " +
+        "it is for. Otherwise unplug and retry.",
+      "warn",
+    );
+    return false;
+  } finally {
+    // Only now is the port genuinely idle, so only now may reflash have it.
+    busy = false;
+    renderConn();
   }
 }
 
@@ -162,7 +220,8 @@ async function disconnect() {
   stopWatching();
   await mp.close();
   owner.release("repl");
-  connected = false;
+  portOpen = false;
+  atRepl = false;
   renderConn();
   log("Disconnected");
 }
@@ -258,6 +317,28 @@ async function push() {
   prog.hidden = false;
   setBusy(true);
   try {
+    // boot.py is checked first, and written when it is missing or is not ours.
+    //
+    // The scripts send five files and assume boot.py is already right
+    // (flash-robot.sh:193). That assumption can be false on a board this page
+    // itself flashed: MicroPython ships its own 139-byte boot.py, and a reflash
+    // that installs the firmware but then fails to reconnect never reaches its
+    // six-file step, leaving the stock one in place. Seen on real hardware. Since
+    // boot.py is what creates the interruptible window every later upload needs,
+    // an upload is the right moment to repair it.
+    const bootBody = await fetchLib(BOOT_FILE);
+    let needBoot = true;
+    try {
+      const onBoard = await mp.readFile(BOOT_FILE);
+      needBoot = onBoard.length !== bootBody.length;
+    } catch (err) {
+      needBoot = true; // absent, unreadable — either way, write it
+    }
+    if (needBoot) {
+      await mp.writeFile(BOOT_FILE, bootBody);
+      log(`Wrote ${BOOT_FILE} — the board did not have ours`, "warn");
+    }
+
     const files = [...LIB_FILES];
     const total = files.length + 1;
     let done = 0;
@@ -327,7 +408,19 @@ function stopWatching() {
 
 function renderFlashGate() {
   const typed = $("flashConfirm").value.trim().toUpperCase() === "ERASE";
-  $("btnFlash").disabled = !(connected && typed);
+  // portOpen, not atRepl: this is the tool for a board that has no REPL.
+  // `!busy` matters as much: see the note on `busy`.
+  $("btnFlash").disabled = !(portOpen && typed && !busy);
+  // Say WHICH precondition is missing. A disabled button next to a correctly
+  // typed confirmation reads as a broken page, and the one thing a student
+  // cannot deduce is that the gate has two halves.
+  if (!portOpen) {
+    note("flashNote", "Connect the robot first — then type ERASE.");
+  } else if (!typed) {
+    note("flashNote", 'Type ERASE above to unlock the button.');
+  } else if (!$("flashNote").dataset.kind) {
+    note("flashNote", "Ready. This erases everything on the board.");
+  }
 }
 
 /**
@@ -336,17 +429,19 @@ function renderFlashGate() {
  * without it there is no interruptible window, so no later upload can get in.
  */
 async function fullReflash() {
+  // Checked BEFORE the confirmation: asking someone to approve an irreversible
+  // erase and only then telling them to load code is the wrong order.
+  const code = getCode();
+  if (!code.trim()) {
+    note("flashNote", "Load a main.py first — the robot will have no code otherwise.", "err");
+    return;
+  }
   if (
     !confirm(
       "Erase the entire robot and install MicroPython? Its code and saved " +
         "calibration are gone for good.",
     )
   ) {
-    return;
-  }
-  const code = getCode();
-  if (!code.trim()) {
-    note("flashNote", "Load a main.py first — the robot will have no code otherwise.", "err");
     return;
   }
 
@@ -367,7 +462,8 @@ async function fullReflash() {
     stopWatching();
     await mp.close();
     owner.release("repl");
-    connected = false;
+    portOpen = false;
+    atRepl = false;
     renderConn();
 
     owner.claim("esptool");
@@ -377,9 +473,11 @@ async function fullReflash() {
         port,
         images: [{ address: ROBOT_MICROPYTHON_OFFSET, data: image }],
         eraseAll: true,
-        // The robot board has a UART bridge, so DTR/RTS reach the bootloader
-        // with no button press.
-        resetMode: "classic",
+        // No reset option: esptool-js picks the sequence from the transport's PID.
+        // The robot boards use a UART bridge (CH340 here, CP210x on others), which
+        // is not USB_JTAG_SERIAL_PID, so it uses Classic DTR/RTS — the bootloader
+        // is entered with no button press. Confirmed on an ESP32-D0WD-V3 behind a
+        // CH340 (VID 0x1a86 PID 0x7523).
         onProgress: (pct) => {
           fill.style.width = `${pct}%`;
         },
@@ -390,9 +488,20 @@ async function fullReflash() {
     }
     log("MicroPython installed", "go");
 
+    // Let the board actually boot before asking it anything. esptool's hard reset
+    // has only just pulsed RTS, and a fresh MicroPython takes a moment to reach
+    // its prompt; reconnecting instantly meant the first Ctrl-C landed before
+    // there was anything listening.
+    await new Promise((r) => setTimeout(r, 1500));
+
     // Reopen the REPL to put the six files on the fresh filesystem.
     log("Reconnecting to write the robot files");
-    await connect(port);
+    if (!(await connect(port))) {
+      throw new Error(
+        "MicroPython is installed, but the board did not come back at a REPL. " +
+          "Unplug it, plug it back in, then use Upload to write the robot files.",
+      );
+    }
     const bootBody = await fetchLib(BOOT_FILE);
     await mp.writeFile(BOOT_FILE, bootBody);
     log(`Wrote ${BOOT_FILE} — this is what makes future uploads possible`, "go");
@@ -435,9 +544,12 @@ function note(id, msg, kind = "") {
 
 /** Lock the actions during a device operation, so two cannot overlap. */
 function setBusy(on) {
+  busy = on;
   for (const id of ["btnPull", "btnPush", "btnFlash", "btnClearCalib", "btnDisconnect"]) {
-    $(id).disabled = on || !connected;
+    $(id).disabled = on;
   }
+  // renderConn re-derives each button from portOpen/atRepl/busy, which is the
+  // only place that logic should live.
   if (!on) {
     renderConn();
   }
