@@ -349,11 +349,12 @@ if ($Firmware) {
 # Python can't be interrupted). When it loses that race you get
 # "could not enter raw repl". Retrying re-runs the race and one attempt lands
 # while the board is interruptible, so a small bounded retry loop is reliable.
-Write-Host "[info] Uploading main.py + minibot.py + minibot_config.py + display.py + ssd1306.py"
+Write-Host "[info] Uploading Python files from $Proj"
 $UploadTries = 5
 $uploaded = $false
 for ($try = 1; $try -le $UploadTries; $try++) {
-  Invoke-Tool $PyBin ($MpremoteArgs + $MprDev + @('fs', 'cp', (Join-Path $Proj 'minibot.py'), (Join-Path $Proj 'minibot_config.py'), (Join-Path $Proj 'display.py'), (Join-Path $Proj 'ssd1306.py'), (Join-Path $Proj 'main.py'), ':'))
+  $PyFiles = @(Get-ChildItem -Path (Join-Path $Proj '*.py') -File | Where-Object { $_.Name -ne 'boot.py' } | Sort-Object Name | ForEach-Object { $_.FullName })
+  Invoke-Tool $PyBin ($MpremoteArgs + $MprDev + @('fs', 'cp') + $PyFiles + @(':'))
   if ($LASTEXITCODE -eq 0) { $uploaded = $true; break }
   if ($try -lt $UploadTries) {
     Write-Host "[warn] Couldn't reach the board (attempt $try/$UploadTries); the running program may be blocking the REPL. Retrying..." -ForegroundColor Yellow

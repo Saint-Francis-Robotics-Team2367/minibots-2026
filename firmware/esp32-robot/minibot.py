@@ -27,6 +27,8 @@ import time
 from machine import Pin, PWM
 from minibot_config import MinibotConfig
 from display import Display
+from neopixel_ring import NeoPixelRing, RingRotation, RingConnectionStatus, RAINBOW_COLORS
+from button import Button
 
 # --- Protocol constants (keep in sync with firmware/common/minicore_protocol.h) ---
 MC_MSG_JOYSTICK = 0x01
@@ -226,6 +228,11 @@ class Minibot:
     _axis_rt: int
     _buttons: int
     _display: Display | None
+    _ring: NeoPixelRing | None
+    _ring_rotation: RingRotation | None
+    _ring_connection_status: RingConnectionStatus | None
+    _ring_show_rainbow: bool
+    _button: Button | None
 
     def __init__(self, config):
         """Initialize from a MinibotConfig.
@@ -289,6 +296,12 @@ class Minibot:
         self._slew_ms_right = self._slew_ms_left
 
         self._display = self._init_display(config)
+        self._ring = self._init_ring()
+        self._ring_rotation = RingRotation(RAINBOW_COLORS, rotate_delay_ms=200)
+        self._ring_connection_status = RingConnectionStatus()
+        self._ring_show_rainbow = False
+        self._button = self._init_button()
+        self._set_ring_colors()
 
         # Unrestricted until a station says otherwise. See _SPEED_LIMIT_* above
         # for why this is not loaded from anywhere.
@@ -338,6 +351,8 @@ class Minibot:
     def update(self):
         """Call FIRST each loop. Drains the radio, applies enable/failsafe,
         and sends periodic heartbeats."""
+        self._set_ring_colors()
+
         # Drain all pending ESP-NOW frames without blocking.
         while True:
             mac, msg = self._espnow.irecv(0)
@@ -449,6 +464,72 @@ class Minibot:
         self._slew_ms_right = self._slew_ms_left
         self._pulse_us(self._left_pwm, self._neutral_left_us)
         self._pulse_us(self._right_pwm, self._neutral_right_us)
+
+    # --- button -----------------------------------------------------------
+
+    def _init_button(self) -> object:
+        """Create and initialize button. Returns Button | None."""
+        try:
+            return Button()
+        except Exception as e:
+            print(f"[warn] Failed to initialize button: {e}")
+            return None
+
+    def _check_button(self) -> None:
+        """Check button state and toggle display mode."""
+        if self._button is None:
+            return
+        if self._button.check():
+            self._ring_show_rainbow = not self._ring_show_rainbow
+            mode = "rainbow" if self._ring_show_rainbow else "connection"
+            print(f"Button pressed: switched to {mode} mode")
+
+    # --- neopixel ring ---------------------------------------------------
+
+    def _init_ring(self) -> object:
+        """Create and initialize NeoPixel ring. Returns NeoPixelRing | None."""
+        try:
+            ring = NeoPixelRing(max_intensity=20)
+            ring.clear()
+            ring.write()
+            return ring
+        except Exception as e:
+            print(f"[warn] Failed to initialize NeoPixel ring: {e}")
+            return None
+
+    def _set_ring_colors(self) -> None:
+        """Set the ring color based on display mode."""
+        if self._ring is None or self._ring_rotation is None or self._ring_connection_status is None:
+            return
+        try:
+            self._check_button()
+
+            if self._ring_show_rainbow:
+                # Rainbow rotation mode
+                self._ring_rotation.update()
+                colors = self._ring_rotation.get_colors()
+            else:
+                # Connection status mode
+                if self._dongle_mac is None:
+                    # Not connected to dongle
+                    self._ring_connection_status.set_status(self._ring_connection_status.STATUS_DISCONNECTED)
+                elif not self._enabled:
+                    # Connected but not assigned/enabled
+                    self._ring_connection_status.set_status(self._ring_connection_status.STATUS_CONNECTED_UNASSIGNED)
+                elif self._axis_ly != 0 or self._axis_ry != 0 or self._axis_lx != 0 or self._axis_rx != 0:
+                    # Driving (has input)
+                    self._ring_connection_status.set_status(self._ring_connection_status.STATUS_DRIVING)
+                    self._ring_connection_status.update_blink()
+                else:
+                    # Connected and assigned but not driving
+                    self._ring_connection_status.set_status(self._ring_connection_status.STATUS_CONNECTED_ASSIGNED)
+
+                colors = self._ring_connection_status.get_colors()
+
+            self._ring.set_colors(colors)
+            self._ring.write()
+        except Exception as e:
+            print(f"[warn] Failed to set ring colors: {e}")
 
     # --- display -----------------------------------------------------------
 
