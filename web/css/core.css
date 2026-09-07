@@ -1,0 +1,693 @@
+/* ============================================================================
+   MiniCore — core chrome, shared by every page.
+
+   Palette validated for dark surface #17202A (OKLCH lightness band 0.48–0.67,
+   chroma floor, normal-vision floor, 3:1 contrast). Green and red separate by
+   only ΔE 2.6 under tritanopia, so NO state in this UI is signalled by colour
+   alone — every one carries a word, and the arm band carries a full wordmark.
+
+   Split out of style.css when the site grew from one page to four. This file is
+   the bezel, rail, buttons, notices, log and tokens; per-page stylesheets carry
+   only what one page renders. Rules here are byte-for-byte the originals — the
+   driver station must not shift by a pixel.
+   ========================================================================= */
+
+:root {
+  /* Surfaces — cool graphite, near-black but not black */
+  --s-void: #0c1116;
+  --s-deck: #11181f;
+  --s-card: #17202a;
+  --s-rise: #1e2935;
+  --line: #26333f;
+  --line-bright: #33475a;
+
+  /* Ink */
+  --ink: #e6edf3;
+  --ink-dim: #96a5b4;
+  --ink-mute: #6b7c8c;
+
+  /* Validated status set */
+  --go: #2fae6c;
+  --warn: #ad8a14;
+  --stop: #d0453e;
+  --info: #2e9bc4;
+
+  --go-lift: #43c47e;
+  --stop-lift: #e35c54;
+
+  /* Type: one monospace system, sized as an instrument face. No webfont —
+     a competition venue is where a font CDN fetch fails. */
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", "Segoe UI Mono",
+    "Roboto Mono", Menlo, Consolas, monospace;
+
+
+  /* Status text on a status-tinted ground. Every tinted *background* in this
+     sheet is derived with color-mix(), but the ink on top was nine one-off
+     hexes — so a tenth got invented for each new component. These are those
+     values, named. Kept as literals, not color-mix(--go, white): the hexes were
+     hand-picked against the validated palette and mixing lands elsewhere. */
+  --go-text: #eafff2;
+  --stop-text: #ffd9d6;
+  --warn-text: #f4dcc8;
+  --info-text: #d6f0fa;
+  /* Armed reverses the arm switch to a stop ground, which wants its own ink. */
+  --stop-text-solid: #ffeceb;
+
+  /* Hover chrome for a neutral control — was a hardcoded pair on .btn:hover. */
+  --s-hover: #26333f;
+  --line-hover: #43596e;
+
+  /* Spacing scale. No formal scale existed, just ~30 ad-hoc rem values around
+     these steps. Named for NEW code; existing declarations are grandfathered
+     rather than churned, because re-deriving 848 lines of hand-tuned instrument
+     spacing risks the panel to buy consistency nobody can see. */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+
+  --r: 3px;
+  --gut: 0.875rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--s-void);
+}
+
+body {
+  margin: 0;
+  padding: var(--gut);
+  min-height: 100vh;
+  font-family: var(--mono);
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--ink);
+  background: var(--s-void);
+  font-variant-ligatures: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── The bezel: signature element. Its ring is the field state, visible from
+   across the room in peripheral vision. ─────────────────────────────────── */
+
+.bezel {
+  max-width: 74rem;
+  margin: 0 auto;
+  padding: 3px;
+  border-radius: calc(var(--r) + 3px);
+  background: var(--line);
+  box-shadow: 0 0 0 1px #000 inset;
+  transition: background 140ms linear, box-shadow 140ms linear;
+}
+
+body[data-armed="true"] .bezel {
+  background: var(--go);
+  box-shadow: 0 0 0 1px #000 inset, 0 0 34px -6px color-mix(in srgb, var(--go) 62%, transparent);
+}
+
+/* ── Top rail ───────────────────────────────────────────────────────────── */
+
+.rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gut);
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.7rem 0.9rem;
+  background: var(--s-card);
+  border-radius: var(--r) var(--r) 0 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rail__mark {
+  display: block;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.rail__sub {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--ink-mute);
+  letter-spacing: 0.06em;
+}
+
+/* Telemetry readouts — label above value, the way a panel is labelled */
+
+.rail__tele {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.35rem;
+  margin: 0;
+}
+
+.tele dt {
+  font-size: 0.62rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.tele dd {
+  margin: 0.1rem 0 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.num {
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.unit {
+  color: var(--ink-mute);
+  font-size: 0.7rem;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-mute);
+  flex: none;
+}
+
+/* Scoped to the rail's own indicator — a bare `.dot` rule would also repaint
+   every slot status dot, showing empty slots as live. */
+
+body[data-link="up"] #dongleDot {
+  background: var(--go);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--go) 75%, transparent);
+}
+
+.rail__act {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+
+.btn {
+  font: inherit;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  padding: 0.42rem 0.8rem;
+  color: var(--ink);
+  background: var(--s-rise);
+  border: 1px solid var(--line-bright);
+  border-radius: var(--r);
+  cursor: pointer;
+  transition: background 100ms linear, border-color 100ms linear;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--s-hover);
+  border-color: var(--line-hover);
+}
+
+.btn--primary {
+  border-color: var(--info);
+  color: var(--info-text);
+  background: color-mix(in srgb, var(--info) 20%, var(--s-rise));
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--info) 32%, var(--s-rise));
+}
+
+.btn--sm {
+  font-size: 0.68rem;
+  padding: 0.25rem 0.55rem;
+}
+
+.btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+/* Focus: always visible, never removed */
+
+:where(button, select, input, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+
+/* ── Notices ────────────────────────────────────────────────────────────── */
+
+.notice {
+  margin: 0;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.8rem;
+  color: var(--warn-text);
+  background: color-mix(in srgb, var(--warn) 22%, var(--s-card));
+  border-bottom: 1px solid var(--line);
+}
+
+.fault {
+  margin: 0;
+  padding: 0.28rem 0.55rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  color: var(--stop-text);
+  background: color-mix(in srgb, var(--stop) 26%, var(--s-rise));
+  border: 1px solid var(--stop);
+  border-radius: var(--r);
+}
+
+kbd {
+  font: inherit;
+  font-size: 0.66rem;
+  padding: 0.1rem 0.32rem;
+  color: var(--ink-dim);
+  background: var(--s-rise);
+  border: 1px solid var(--line-bright);
+  border-radius: 2px;
+}
+
+select {
+  font: inherit;
+  font-size: 0.78rem;
+  width: 100%;
+  padding: 0.4rem 0.45rem;
+  color: var(--ink);
+  background: var(--s-rise);
+  border: 1px solid var(--line-bright);
+  border-radius: var(--r);
+  cursor: pointer;
+}
+
+select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Utility column ─────────────────────────────────────────────────────── */
+
+.util {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--line);
+}
+
+.card--util {
+  padding: 0.75rem 0.8rem;
+  background: var(--s-card);
+}
+
+.card--log {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.card__head h2 {
+  margin: 0;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.empty {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--ink-mute);
+}
+
+/* Activity log */
+
+.log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  max-height: 15rem;
+  font-size: 0.68rem;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+
+.log li {
+  display: flex;
+  gap: 0.45rem;
+  padding: 0.1rem 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+}
+
+.log time {
+  flex: none;
+  color: var(--ink-mute);
+  font-variant-numeric: tabular-nums;
+}
+
+.log li[data-kind="warn"] {
+  color: color-mix(in srgb, var(--warn) 60%, var(--ink));
+}
+
+.log li[data-kind="err"] {
+  color: var(--stop-lift);
+}
+
+.log li[data-kind="go"] {
+  color: var(--go-lift);
+}
+
+/* ── Links ──────────────────────────────────────────────────────────────── */
+/* No <a> was styled at all while this was one page. Underline stays on: these
+   sit inside dense instrument text where a colour shift alone is not a reliable
+   signal, and the palette note above rules out colour-only distinctions. */
+a {
+  color: var(--info);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+a:hover {
+  color: color-mix(in srgb, var(--info) 70%, var(--ink));
+}
+
+/* ── Nav ────────────────────────────────────────────────────────────────── */
+/* Sits in the rail. Tool pages need a way back that is not the browser button,
+   because a student who lands on /code-robot from a shared link has no back
+   entry to use. */
+.nav {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nav a {
+  display: block;
+  padding: 0.28rem 0.55rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--ink-dim);
+  border: 1px solid transparent;
+  border-radius: var(--r);
+}
+
+.nav a:hover {
+  color: var(--ink);
+  background: var(--s-rise);
+  border-color: var(--line);
+}
+
+/* The current page. Carries aria-current, so the state is a word to a screen
+   reader and not only a tint. */
+.nav a[aria-current="page"] {
+  color: var(--ink);
+  background: var(--s-rise);
+  border-color: var(--line-bright);
+}
+
+/* ── Prose ──────────────────────────────────────────────────────────────── */
+/* The tool pages have to explain themselves; the panel had no body-copy measure
+   at all. Capped near 62ch because monospace runs wide and a line spanning the
+   full 74rem bezel is unreadable. */
+.prose {
+  max-width: 62ch;
+}
+
+.prose p {
+  margin: 0 0 var(--sp-3);
+  color: var(--ink-dim);
+  font-size: 0.82rem;
+}
+
+.prose p:last-child {
+  margin-bottom: 0;
+}
+
+.prose strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ── Section heading ────────────────────────────────────────────────────── */
+/* .card__head h2 is scoped to a card header. This is the same instrument label
+   standing on its own above a block of controls. */
+.hd {
+  margin: 0 0 var(--sp-2);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* ── Field ──────────────────────────────────────────────────────────────── */
+/* Generalized from .calib__field input (style.css:561) — the only text input in
+   the project, with its pattern locked to the slot card. */
+.field {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.field > span,
+.field > label {
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.field input[type="text"],
+.field input[type="number"],
+.field textarea {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.34rem 0.45rem;
+  color: var(--ink);
+  background: var(--s-deck);
+  border: 1px solid var(--line-bright);
+  border-radius: var(--r);
+  min-width: 0;
+}
+
+.field input:disabled,
+.field textarea:disabled {
+  color: var(--ink-mute);
+  background: var(--s-card);
+  border-color: var(--line);
+}
+
+.field__note {
+  margin: 0;
+  font-size: 0.66rem;
+  color: var(--ink-mute);
+}
+
+.field__note[data-kind="err"] {
+  color: var(--stop-lift);
+}
+
+/* ── Code block ─────────────────────────────────────────────────────────── */
+/* Everything here is already monospace, so a code block earns its keep through
+   surface and bezel rather than through face. */
+.code {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  overflow-x: auto;
+  font-size: 0.74rem;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--s-void);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  tab-size: 4;
+}
+
+/* ── Tabs ───────────────────────────────────────────────────────────────── */
+/* For /code-robot's three modes, one of which erases the board. Tabs rather than
+   a dropdown so all three are visible at once — nobody should reach a wipe by
+   scrolling a collapsed list. */
+.tabs {
+  display: flex;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+
+.tabs button {
+  flex: 1;
+  font: inherit;
+  font-size: 0.7rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 0.42rem 0.6rem;
+  cursor: pointer;
+  color: var(--ink-dim);
+  background: var(--s-card);
+  border: 0;
+}
+
+.tabs button:hover {
+  color: var(--ink);
+  background: var(--s-rise);
+}
+
+.tabs button[aria-selected="true"] {
+  color: var(--ink);
+  background: var(--s-rise);
+  box-shadow: inset 0 -2px 0 var(--info);
+}
+
+/* The destructive mode is marked in the tab itself, so the warning arrives
+   before the click rather than after it. */
+.tabs button[data-danger="true"][aria-selected="true"] {
+  box-shadow: inset 0 -2px 0 var(--stop);
+}
+
+/* ── Alert ──────────────────────────────────────────────────────────────── */
+/* .notice is chrome-width and warn-only. This is a block-level alert in any of
+   the four states — what a tool page needs to report an outcome in place. */
+.alert {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: 0.76rem;
+  color: var(--ink-dim);
+  background: var(--s-rise);
+  border: 1px solid var(--line-bright);
+  border-radius: var(--r);
+}
+
+.alert[data-kind="go"] {
+  color: var(--go-text);
+  background: color-mix(in srgb, var(--go) 20%, var(--s-rise));
+  border-color: var(--go);
+}
+
+.alert[data-kind="warn"] {
+  color: var(--warn-text);
+  background: color-mix(in srgb, var(--warn) 22%, var(--s-rise));
+  border-color: var(--warn);
+}
+
+.alert[data-kind="err"] {
+  color: var(--stop-text);
+  background: color-mix(in srgb, var(--stop) 24%, var(--s-rise));
+  border-color: var(--stop);
+}
+
+.alert[data-kind="info"] {
+  color: var(--info-text);
+  background: color-mix(in srgb, var(--info) 20%, var(--s-rise));
+  border-color: var(--info);
+}
+
+/* ── Progress ───────────────────────────────────────────────────────────── */
+/* Flashing runs for tens of seconds with no feedback from the device itself. A
+   bar is what stands between the student and pulling the cable mid-write. */
+.prog {
+  height: 5px;
+  background: var(--s-void);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+
+.prog__fill {
+  height: 100%;
+  width: 0;
+  background: var(--info);
+  transition: width 160ms linear;
+}
+
+/* ── Destructive action ─────────────────────────────────────────────────── */
+/* .btn--primary is the affirmative one. This is its opposite, and it must never
+   land where muscle memory expects to find that one. */
+.btn--danger {
+  color: var(--stop-text);
+  background: color-mix(in srgb, var(--stop) 22%, var(--s-rise));
+  border-color: var(--stop);
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--stop) 34%, var(--s-rise));
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+/* The two breakpoint blocks were split by selector, not by file: the originals
+   named chrome and control content in one block. Same declarations, same
+   order, same cascade — only the file boundary is new. */
+@media (max-width: 62rem) {
+  .util {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .card--util {
+    flex: 1 1 15rem;
+  }
+}
+
+@media (max-width: 40rem) {
+  body {
+    padding: 0.5rem;
+  }
+
+  .rail {
+    justify-content: flex-start;
+  }
+
+  .rail__tele {
+    gap: 0.9rem;
+    order: 3;
+    width: 100%;
+  }
+}
+
+/* ── Reduced motion ─────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* ── Forced colours: state must survive with no palette at all ──────────── */
+@media (forced-colors: active) {
+  .bezel {
+    border: 1px solid CanvasText;
+  }
+
+  .dot {
+    border: 1px solid CanvasText;
+  }
+}

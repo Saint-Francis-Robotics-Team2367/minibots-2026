@@ -1,6 +1,4 @@
 import {
-  MINICORE_USB_VID,
-  MINICORE_USB_PID,
   MC_HID_RID_JOYSTICK,
   MC_HID_RID_ENABLE,
   MC_HID_RID_DISCOVERY,
@@ -35,6 +33,17 @@ import {
   decodeDongleStatus,
   gamepadToJoystick,
 } from "./protocol.js";
+import { $, log, clearLog } from "./dom.js";
+import { local } from "./store.js";
+import {
+  hasWebHID,
+  isDongle,
+  grantedDongles,
+  requestDongle,
+  openDongle,
+  closeDongle,
+  sendReport as hidSendReport,
+} from "./hid.js";
 
 /** @type {HIDDevice | null} */
 let device = null;
@@ -51,6 +60,8 @@ let autoReconnect = true;
 let attaching = false;
 /** Last discovery request we sent, for the calibration chase's rate limit. */
 let lastDiscoveryMs = 0;
+const SPEED_LIMIT_KEY = "minicore.speedLimit";
+
 /**
  * Cap on normalized motor output, field-wide. Same -1..1 units the robot's
  * drive_left_motor() takes, so this number and the one in a student's main.py
@@ -65,22 +76,22 @@ let speedLimit = loadSpeedLimit();
 /** Last time we pushed the limit, for the re-assert rate limit below. */
 let lastLimitPushMs = 0;
 
-const SPEED_LIMIT_KEY = "minicore.speedLimit";
-
+// NOTE: SPEED_LIMIT_KEY must be declared ABOVE the `let speedLimit` initializer
+// that calls this. It used to sit below, which put it in its temporal dead zone
+// at call time; the ReferenceError that threw was caught by this function's own
+// try/catch and returned the unrestricted default. The saved limit therefore
+// never survived a reload — silently, and in the direction the comment on
+// `speedLimit` calls "much the worse one".
 function loadSpeedLimit() {
-  let raw = NaN;
-  try {
-    raw = Number(localStorage.getItem(SPEED_LIMIT_KEY));
-  } catch (err) {
-    return MC_SPEED_LIMIT_MAX;
-  }
   // Anything unparseable, out of range, or absent means unrestricted. Having
   // stored a value is not a reason to trust it: localStorage is editable by
-  // hand, and this number bounds how fast the robots go.
-  if (!Number.isFinite(raw) || raw < MC_SPEED_LIMIT_MIN || raw > MC_SPEED_LIMIT_MAX) {
-    return MC_SPEED_LIMIT_MAX;
-  }
-  return raw;
+  // hand, and this number bounds how fast the robots go. store.getNumber is
+  // that exact contract — this function's original body, factored out.
+  return local.getNumber(SPEED_LIMIT_KEY, {
+    min: MC_SPEED_LIMIT_MIN,
+    max: MC_SPEED_LIMIT_MAX,
+    fallback: MC_SPEED_LIMIT_MAX,
+  });
 }
 
 /** Robots we've heard from: macKey -> { mac, id, lastSeen, battery, flags } */
@@ -104,30 +115,6 @@ let warnedProtocolMismatch = false;
 const BROADCAST_MAC = new Uint8Array(6).fill(0xff);
 const STALE_MS = 2500;
 const DROP_MS = 5000;
-const LOG_MAX = 200;
-
-const $ = (id) => document.getElementById(id);
-
-/* ── Activity log ─────────────────────────────────────────────────────────── */
-
-/** @param {string} msg @param {"info"|"go"|"warn"|"err"} kind */
-function log(msg, kind = "info") {
-  const list = $("log");
-  const li = document.createElement("li");
-  li.dataset.kind = kind;
-  const t = document.createElement("time");
-  const d = new Date();
-  t.textContent = [d.getHours(), d.getMinutes(), d.getSeconds()]
-    .map((n) => String(n).padStart(2, "0"))
-    .join(":");
-  const span = document.createElement("span");
-  span.textContent = msg;
-  li.append(t, span);
-  list.prepend(li);
-  while (list.children.length > LOG_MAX) {
-    list.lastElementChild.remove();
-  }
-}
 
 /* ── Formatting ───────────────────────────────────────────────────────────── */
 
@@ -160,9 +147,6 @@ function setDongleUi(connected) {
   refreshSlotControls();
 }
 
-const isDongle = (dev) =>
-  dev.vendorId === MINICORE_USB_VID && dev.productId === MINICORE_USB_PID;
-
 /**
  * Bring the link up on an already-chosen device. Shared by the picker and the
  * automatic paths, so an auto-connected dongle lands in exactly the same state
@@ -181,9 +165,7 @@ async function attachDongle(dev) {
   }
   attaching = true;
   try {
-    await dev.open();
-    device = dev;
-    device.addEventListener("inputreport", onInputReport);
+    device = await openDongle(dev, onInputReport);
   } finally {
     attaching = false;
   }
@@ -205,21 +187,19 @@ async function attachDongle(dev) {
 }
 
 async function connectDongle() {
-  if (!("hid" in navigator)) {
+  if (!hasWebHID()) {
     $("noHid").hidden = false;
     log("WebHID unavailable in this browser", "err");
     return;
   }
-  const devs = await navigator.hid.requestDevice({
-    filters: [{ vendorId: MINICORE_USB_VID, productId: MINICORE_USB_PID }],
-  });
-  if (!devs.length) {
+  const dev = await requestDongle();
+  if (!dev) {
     log("No dongle selected", "warn");
     return;
   }
   // Picking a dongle by hand is also how you undo an earlier Disconnect.
   autoReconnect = true;
-  await attachDongle(devs[0]);
+  await attachDongle(dev);
 }
 
 /**
@@ -234,17 +214,17 @@ async function connectDongle() {
  * @returns {Promise<"connected" | "none" | "failed">}
  */
 async function autoConnect() {
-  if (!("hid" in navigator) || !autoReconnect || (device && device.opened)) {
+  if (!hasWebHID() || !autoReconnect || (device && device.opened)) {
     return "none";
   }
-  let devs = [];
+  let devs;
   try {
-    devs = await navigator.hid.getDevices();
+    devs = await grantedDongles({ rethrow: true });
   } catch (err) {
     log(`Could not list remembered devices: ${err}`, "warn");
     return "failed";
   }
-  const dev = devs.find(isDongle);
+  const dev = devs[0];
   if (!dev) {
     return "none";
   }
@@ -268,10 +248,7 @@ async function disconnectDongle() {
   // robot may be latched enabled from an earlier session even when armed is
   // false here. Awaited, because device.close() would abort it in flight.
   await broadcastDisable("link closing");
-  if (device && device.opened) {
-    device.removeEventListener("inputreport", onInputReport);
-    await device.close();
-  }
+  await closeDongle(device, onInputReport);
   device = null;
   for (let i = 0; i < MC_MAX_ROBOTS; i++) {
     pairMac[i] = null;
@@ -281,11 +258,9 @@ async function disconnectDongle() {
   log("Dongle disconnected");
 }
 
+/** Bound to this page's single device slot; hid.js holds the wire logic. */
 async function sendReport(reportId, data) {
-  if (!device || !device.opened) {
-    return;
-  }
-  await device.sendReport(reportId, data);
+  await hidSendReport(device, reportId, data);
 }
 
 /**
@@ -362,12 +337,10 @@ function setSpeedLimit(next, { push = true } = {}) {
   // Two decimals: the slider steps in 0.05 and the wire carries thousandths, so
   // this only guards against float drift making 0.85 render as 0.8500000001.
   speedLimit = Math.round(clamped * 100) / 100;
-  try {
-    localStorage.setItem(SPEED_LIMIT_KEY, String(speedLimit));
-  } catch (err) {
+  if (!local.set(SPEED_LIMIT_KEY, String(speedLimit))) {
     // Private browsing or a full quota. The limit still applies to this
     // session; it just will not survive a reload.
-    log(`Could not save speed limit: ${err}`, "warn");
+    log("Could not save speed limit — it will not survive a reload", "warn");
   }
   renderSpeedLimit();
   if (push) {
@@ -985,7 +958,7 @@ $("speedLimit").addEventListener("change", () => {
   log(`Speed limit ${speedLimit.toFixed(2)}`, speedLimit < MC_SPEED_LIMIT_MAX ? "warn" : "go");
 });
 $("btnClearLog").addEventListener("click", () => {
-  $("log").innerHTML = "";
+  clearLog();
 });
 
 // Scan was specified and handled by the dongle, but never reachable from the UI.
