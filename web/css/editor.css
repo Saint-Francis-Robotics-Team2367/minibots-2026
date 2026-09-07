@@ -1,0 +1,319 @@
+/* ============================================================================
+   /code-robot — the Python editor. Loads after core.css.
+
+   The layout question here is that a code editor wants height while the mode
+   controls want to stay visible, so the editor and the side rail are a two-column
+   deck with the editor as the tall element, and the output panel drops in below
+   only once there is output to show.
+   ========================================================================= */
+
+.ed {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 21rem;
+  gap: 1px;
+  background: var(--line);
+}
+
+.ed__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--sp-3) 0.9rem var(--sp-4);
+  background: var(--s-card);
+}
+
+/* The editor is the tall element: it takes the leftover column height rather
+   than stopping at its min-height and leaving the card empty below. */
+.ed__main > .CodeMirror,
+.ed__main > .ed__area {
+  flex: 1;
+}
+
+.ed__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.ed__bar .hd {
+  margin-bottom: 0;
+}
+
+.ed__acts {
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+
+/* The fallback editor, and the element CodeMirror replaces. Sized the same either
+   way so the page does not jump when the CDN is slow. */
+.ed__area {
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  width: 100%;
+  min-height: 26rem;
+  margin-top: var(--sp-2);
+  padding: var(--sp-2);
+  resize: vertical;
+  color: var(--ink);
+  background: var(--s-void);
+  border: 1px solid var(--line-bright);
+  border-radius: var(--r);
+  tab-size: 4;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.ed__side {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  background: var(--line);
+}
+
+/* ── Mode panes ─────────────────────────────────────────────────────────── */
+.pane {
+  display: grid;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.pane__what {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--ink-dim);
+}
+
+.pane__what code,
+.pane code {
+  color: var(--ink);
+}
+
+/* The destructive pane is set apart by ground as well as by its tab marker and
+   its typed confirmation — three separate signals, because mode confusion here
+   costs a student their code. */
+.pane--danger {
+  padding: var(--sp-3);
+  margin-top: var(--sp-3);
+  background: color-mix(in srgb, var(--stop) 8%, var(--s-deck));
+  border: 1px solid color-mix(in srgb, var(--stop) 45%, var(--line));
+  border-radius: var(--r);
+}
+
+.pane--danger .alert {
+  font-size: 0.72rem;
+}
+
+/* ── Key/value readout ──────────────────────────────────────────────────── */
+/* For the saved calibration. .tele is a rail component and lays out label-above-
+   value; this is label-beside-value in a narrow card. */
+.kv {
+  margin: 0 0 var(--sp-2);
+  display: grid;
+  gap: 0.2rem;
+}
+
+.kv__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.kv dt {
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.kv dd {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.2rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Robot output ───────────────────────────────────────────────────────── */
+.out {
+  padding: var(--sp-3) 0.9rem var(--sp-4);
+  background: var(--s-card);
+  border-top: 1px solid var(--line);
+}
+
+.out__body {
+  margin-top: var(--sp-2);
+  max-height: 16rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: var(--ink-dim);
+  font-size: 0.72rem;
+}
+
+/* ── CodeMirror ─────────────────────────────────────────────────────────── */
+/* CodeMirror ships a light theme; retheme it onto this palette rather than
+   loading a second stylesheet from the CDN — one less thing to fail at a venue.
+   Kept to what the Python mode actually emits. */
+.CodeMirror {
+  height: auto;
+  min-height: 26rem;
+  margin-top: var(--sp-2);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--s-void);
+  border: 1px solid var(--line-bright);
+  border-radius: var(--r);
+}
+
+/* The visible surface is the scroller, not .CodeMirror — theming only the outer
+   element leaves cm-s-default's white showing through. */
+.CodeMirror-scroll,
+.CodeMirror-sizer,
+.CodeMirror-lines {
+  background: var(--s-void);
+}
+
+/* Text with no token class — names, brackets, commas — inherits from
+   cm-s-default, which is pure black. Measured at rgb(0,0,0) on this dark ground,
+   i.e. invisible. The theme class is on .CodeMirror itself, so match it there. */
+.CodeMirror.cm-s-default pre.CodeMirror-line,
+.CodeMirror.cm-s-default pre.CodeMirror-line-like,
+.CodeMirror.cm-s-default .CodeMirror-code {
+  color: var(--ink);
+}
+
+/* CodeMirror stacks several absolutely-positioned fillers next to the gutter,
+   each inheriting cm-s-default's white. Name them all, or a pale strip shows
+   between the line numbers and the code. */
+.CodeMirror-gutters,
+.CodeMirror-gutter,
+.CodeMirror-gutter-filler,
+.CodeMirror-scrollbar-filler {
+  background: var(--s-deck);
+  border-right: 0;
+}
+
+.CodeMirror-gutters {
+  border-right: 1px solid var(--line);
+}
+
+.CodeMirror-linenumber {
+  color: var(--ink-mute);
+  font-size: 0.72rem;
+}
+
+.CodeMirror-cursor {
+  border-left: 2px solid var(--info);
+}
+
+.CodeMirror-selected,
+.CodeMirror-focused .CodeMirror-selected {
+  background: color-mix(in srgb, var(--info) 26%, var(--s-rise)) !important;
+}
+
+.CodeMirror-activeline-background {
+  background: var(--s-deck);
+}
+
+.CodeMirror-matchingbracket {
+  color: var(--go-lift) !important;
+  font-weight: 700;
+  outline: 1px solid color-mix(in srgb, var(--go) 55%, transparent);
+}
+
+.CodeMirror-nonmatchingbracket {
+  color: var(--stop-lift) !important;
+}
+
+/* Syntax.
+   The theme class sits ON .CodeMirror (class="CodeMirror cm-s-default"), not on an
+   ancestor — so `.cm-s-default .cm-comment` matches nothing here and CodeMirror's
+   own identical rule from the CDN wins. Measured: comments came out rgb(170,85,0)
+   and unclassed spans pure black on the dark ground. `.CodeMirror.cm-s-default`
+   is one class more specific than the CDN's rule and reliably wins.
+
+   Comments stay legible rather than receding: the starter main.py is mostly
+   comments, and they are the documentation a student actually reads. */
+.CodeMirror.cm-s-default span.cm-comment {
+  color: #7d94a8;
+}
+
+.CodeMirror.cm-s-default span.cm-string,
+.CodeMirror.cm-s-default span.cm-string-2 {
+  color: #8fd6a8;
+}
+
+.CodeMirror.cm-s-default span.cm-keyword {
+  color: #6fb8de;
+}
+
+.CodeMirror.cm-s-default span.cm-builtin,
+.CodeMirror.cm-s-default span.cm-def {
+  color: #cfa8e0;
+}
+
+.CodeMirror.cm-s-default span.cm-number {
+  color: #e0b768;
+}
+
+.CodeMirror.cm-s-default span.cm-operator,
+.CodeMirror.cm-s-default span.cm-punctuation,
+.CodeMirror.cm-s-default span.cm-meta {
+  color: var(--ink-dim);
+}
+
+.CodeMirror.cm-s-default span.cm-variable,
+.CodeMirror.cm-s-default span.cm-variable-2,
+.CodeMirror.cm-s-default span.cm-variable-3,
+.CodeMirror.cm-s-default span.cm-property,
+.CodeMirror.cm-s-default span.cm-atom {
+  color: var(--ink);
+}
+
+.CodeMirror.cm-s-default span.cm-error {
+  color: var(--stop-text);
+  background: color-mix(in srgb, var(--stop) 30%, transparent);
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 62rem) {
+  .ed {
+    grid-template-columns: 1fr;
+  }
+
+  .ed__side {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .ed__side .card--util {
+    flex: 1 1 17rem;
+  }
+}
+
+@media (max-width: 40rem) {
+  .ed__main,
+  .out {
+    padding-left: 0.7rem;
+    padding-right: 0.7rem;
+  }
+
+  .ed__area,
+  .CodeMirror {
+    min-height: 18rem;
+  }
+}
+
+/* ── Forced colours ─────────────────────────────────────────────────────── */
+@media (forced-colors: active) {
+  .pane--danger {
+    border: 2px solid CanvasText;
+  }
+}

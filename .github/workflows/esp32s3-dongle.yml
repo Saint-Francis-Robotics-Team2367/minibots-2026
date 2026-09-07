@@ -1,15 +1,25 @@
 # Build MiniCore ESP32-S3 dongle firmware on every change; upload flashable artifacts.
 # Physical USB flash is local: firmware/esp32s3-dongle/scripts/deploy.sh
+#
+# On a push to a branch this ALSO commits the images to firmware/prebuilt/dongle/,
+# because that is the only copy the browser tool at /flash-dongle can reach:
+# raw.githubusercontent.com sends `access-control-allow-origin: *`, while the
+# actions/upload-artifact bundle below needs authentication and expires. Letting CI
+# own those files is what keeps them from going stale — a hand-committed dongle
+# image is a silent protocol downgrade (the local May 2026 build predated the
+# August speed-limit protocol and could not honour MC_MSG_SET_SPEED_LIMIT).
 name: esp32s3-dongle
 
 on:
   push:
     paths:
       - "firmware/esp32s3-dongle/**"
+      - "firmware/common/**"
       - ".github/workflows/esp32s3-dongle.yml"
   pull_request:
     paths:
       - "firmware/esp32s3-dongle/**"
+      - "firmware/common/**"
       - ".github/workflows/esp32s3-dongle.yml"
   workflow_dispatch:
 
@@ -17,6 +27,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container: espressif/idf:release-v5.3
+    # Needed by the commit step below. Read-only on pull_request, where the
+    # commit is skipped: a fork's token cannot push, and a PR must not be able
+    # to land binaries on a branch.
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,3 +56,90 @@ jobs:
             firmware/esp32s3-dongle/build/minicore_dongle.bin
             firmware/esp32s3-dongle/build/partition_table/partition-table.bin
           if-no-files-found: error
+
+      # --- browser-reachable copy -------------------------------------------
+      # Stage the three images plus their offsets/hashes into firmware/prebuilt/,
+      # then commit only if the bytes actually changed. An unconditional commit
+      # would push an empty change on every unrelated re-run.
+      - name: Stage prebuilt images for the browser flasher
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD=firmware/esp32s3-dongle/build
+          DEST=firmware/prebuilt/dongle
+          mkdir -p "$DEST"
+          cp "$BUILD/bootloader/bootloader.bin"               "$DEST/bootloader.bin"
+          cp "$BUILD/partition_table/partition-table.bin"     "$DEST/partition-table.bin"
+          cp "$BUILD/minicore_dongle.bin"                     "$DEST/minicore_dongle.bin"
+          # flash_args is the authority on offsets and flash settings; keep it
+          # next to the images rather than duplicating its numbers by hand.
+          cp "$BUILD/flash_args"                              "$DEST/flash_args"
+
+          python3 - "$DEST" "$GITHUB_SHA" <<'PY'
+          import hashlib, json, os, subprocess, sys
+          dest, sha = sys.argv[1], sys.argv[2]
+          manifest_path = "firmware/prebuilt/manifest.json"
+          with open(manifest_path) as f:
+              m = json.load(f)
+
+          # Offsets come from flash_args, not from a hardcoded list here, so a
+          # partition-table change cannot silently desync the browser flasher.
+          offsets = {}
+          settings = {}
+          with open(os.path.join(dest, "flash_args")) as f:
+              for line in f:
+                  parts = line.split()
+                  if not parts:
+                      continue
+                  if parts[0].startswith("--"):
+                      for k, v in zip(parts[0::2], parts[1::2]):
+                          settings[k.lstrip("-")] = v
+                  elif parts[0].startswith("0x"):
+                      offsets[os.path.basename(parts[1])] = parts[0]
+
+          images = []
+          for name in ("bootloader.bin", "partition-table.bin", "minicore_dongle.bin"):
+              blob = open(os.path.join(dest, name), "rb").read()
+              images.append({
+                  "offset": offsets[name],
+                  "path": f"{dest}/{name}",
+                  "sha256": hashlib.sha256(blob).hexdigest(),
+                  "bytes": len(blob),
+              })
+          images.sort(key=lambda i: int(i["offset"], 16))
+
+          d = m["dongle"]
+          d["flash_mode"] = settings.get("flash_mode", d.get("flash_mode"))
+          d["flash_freq"] = settings.get("flash_freq", d.get("flash_freq"))
+          d["flash_size"] = settings.get("flash_size", d.get("flash_size"))
+          d["built_from"] = sha
+          d["built_at"] = subprocess.run(
+              ["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"], capture_output=True, text=True
+          ).stdout.strip()
+          d["images"] = images
+
+          with open(manifest_path, "w") as f:
+              json.dump(m, f, indent=2)
+              f.write("\n")
+          print("staged:", json.dumps(images, indent=2))
+          PY
+
+      - name: Commit prebuilt images if they changed
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The idf container checks out as a different uid than it runs as.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add firmware/prebuilt/dongle firmware/prebuilt/manifest.json
+          if git diff --cached --quiet; then
+            echo "[info] prebuilt dongle images unchanged — nothing to commit"
+            exit 0
+          fi
+          # [skip ci] matters: this commit touches firmware/prebuilt/, which is
+          # not in the paths filter above, but a loop here would still be ugly.
+          git commit -m "ci: rebuild prebuilt dongle images from ${GITHUB_SHA:0:7} [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

@@ -1,235 +1,12 @@
 /* ============================================================================
-   MiniCore driver station — mission-control instrument panel.
+   MiniCore driver station — the /control page only.
 
-   Palette validated for dark surface #17202A (OKLCH lightness band 0.48–0.67,
-   chroma floor, normal-vision floor, 3:1 contrast). Green and red separate by
-   only ΔE 2.6 under tritanopia, so NO state in this UI is signalled by colour
-   alone — every one carries a word, and the arm band carries a full wordmark.
+   Split out of style.css; every rule here is byte-for-byte its original. Loads
+   after core.css, which owns the bezel, rail, buttons, notices and log.
    ========================================================================= */
 
-:root {
-  /* Surfaces — cool graphite, near-black but not black */
-  --s-void: #0c1116;
-  --s-deck: #11181f;
-  --s-card: #17202a;
-  --s-rise: #1e2935;
-  --line: #26333f;
-  --line-bright: #33475a;
-
-  /* Ink */
-  --ink: #e6edf3;
-  --ink-dim: #96a5b4;
-  --ink-mute: #6b7c8c;
-
-  /* Validated status set */
-  --go: #2fae6c;
-  --warn: #ad8a14;
-  --stop: #d0453e;
-  --info: #2e9bc4;
-
-  --go-lift: #43c47e;
-  --stop-lift: #e35c54;
-
-  /* Type: one monospace system, sized as an instrument face. No webfont —
-     a competition venue is where a font CDN fetch fails. */
-  --mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", "Segoe UI Mono",
-    "Roboto Mono", Menlo, Consolas, monospace;
-
-  --r: 3px;
-  --gut: 0.875rem;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html {
-  background: var(--s-void);
-}
-
-body {
-  margin: 0;
-  padding: var(--gut);
-  min-height: 100vh;
-  font-family: var(--mono);
-  font-size: 15px;
-  line-height: 1.45;
-  color: var(--ink);
-  background: var(--s-void);
-  font-variant-ligatures: none;
-  -webkit-font-smoothing: antialiased;
-}
-
-/* ── The bezel: signature element. Its ring is the field state, visible from
-   across the room in peripheral vision. ─────────────────────────────────── */
-.bezel {
-  max-width: 74rem;
-  margin: 0 auto;
-  padding: 3px;
-  border-radius: calc(var(--r) + 3px);
-  background: var(--line);
-  box-shadow: 0 0 0 1px #000 inset;
-  transition: background 140ms linear, box-shadow 140ms linear;
-}
-
-body[data-armed="true"] .bezel {
-  background: var(--go);
-  box-shadow: 0 0 0 1px #000 inset, 0 0 34px -6px color-mix(in srgb, var(--go) 62%, transparent);
-}
-
-/* ── Top rail ───────────────────────────────────────────────────────────── */
-.rail {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--gut);
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.7rem 0.9rem;
-  background: var(--s-card);
-  border-radius: var(--r) var(--r) 0 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.rail__mark {
-  display: block;
-  font-size: 1.15rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.rail__sub {
-  display: block;
-  font-size: 0.7rem;
-  color: var(--ink-mute);
-  letter-spacing: 0.06em;
-}
-
-/* Telemetry readouts — label above value, the way a panel is labelled */
-.rail__tele {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1.35rem;
-  margin: 0;
-}
-
-.tele dt {
-  font-size: 0.62rem;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
-  color: var(--ink-mute);
-}
-
-.tele dd {
-  margin: 0.1rem 0 0;
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.82rem;
-  color: var(--ink-dim);
-  font-variant-numeric: tabular-nums;
-}
-
-.num {
-  color: var(--ink);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.unit {
-  color: var(--ink-mute);
-  font-size: 0.7rem;
-}
-
-.dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--ink-mute);
-  flex: none;
-}
-
-/* Scoped to the rail's own indicator — a bare `.dot` rule would also repaint
-   every slot status dot, showing empty slots as live. */
-body[data-link="up"] #dongleDot {
-  background: var(--go);
-  box-shadow: 0 0 7px color-mix(in srgb, var(--go) 75%, transparent);
-}
-
-.rail__act {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  flex-wrap: wrap;
-}
-
-/* ── Buttons ────────────────────────────────────────────────────────────── */
-.btn {
-  font: inherit;
-  font-size: 0.78rem;
-  letter-spacing: 0.04em;
-  padding: 0.42rem 0.8rem;
-  color: var(--ink);
-  background: var(--s-rise);
-  border: 1px solid var(--line-bright);
-  border-radius: var(--r);
-  cursor: pointer;
-  transition: background 100ms linear, border-color 100ms linear;
-}
-
-.btn:hover:not(:disabled) {
-  background: #26333f;
-  border-color: #43596e;
-}
-
-.btn--primary {
-  border-color: var(--info);
-  color: #d6f0fa;
-  background: color-mix(in srgb, var(--info) 20%, var(--s-rise));
-}
-
-.btn--primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--info) 32%, var(--s-rise));
-}
-
-.btn--sm {
-  font-size: 0.68rem;
-  padding: 0.25rem 0.55rem;
-}
-
-.btn:disabled {
-  opacity: 0.38;
-  cursor: not-allowed;
-}
-
-/* Focus: always visible, never removed */
-:where(button, select, input, a, [tabindex]):focus-visible {
-  outline: 2px solid var(--info);
-  outline-offset: 2px;
-}
-
-/* ── Notices ────────────────────────────────────────────────────────────── */
-.notice {
-  margin: 0;
-  padding: 0.6rem 0.9rem;
-  font-size: 0.8rem;
-  color: #f4dcc8;
-  background: color-mix(in srgb, var(--warn) 22%, var(--s-card));
-  border-bottom: 1px solid var(--line);
-}
-
-.fault {
-  margin: 0;
-  padding: 0.28rem 0.55rem;
-  font-size: 0.7rem;
-  letter-spacing: 0.05em;
-  color: #ffd9d6;
-  background: color-mix(in srgb, var(--stop) 26%, var(--s-rise));
-  border: 1px solid var(--stop);
-  border-radius: var(--r);
-}
-
 /* ── Arm band: the one bold move ─────────────────────────────────────────── */
+
 .arm {
   position: relative;
   padding: 1.5rem 1rem 1.1rem;
@@ -285,7 +62,7 @@ body[data-armed="true"] .arm__state {
   min-width: min(23rem, 100%);
   padding: 0.85rem 1.6rem;
   cursor: pointer;
-  color: #eafff2;
+  color: var(--go-text);
   background: color-mix(in srgb, var(--go) 26%, var(--s-rise));
   border: 2px solid var(--go);
   border-radius: var(--r);
@@ -301,7 +78,7 @@ body[data-armed="true"] .arm__state {
 }
 
 body[data-armed="true"] .arm__switch {
-  color: #ffeceb;
+  color: var(--stop-text-solid);
   background: color-mix(in srgb, var(--stop) 28%, var(--s-rise));
   border-color: var(--stop);
 }
@@ -316,9 +93,11 @@ body[data-armed="true"] .arm__switch:hover:not(:disabled) {
   border-color: var(--line-bright);
   cursor: not-allowed;
 }
+
 /* Global speed limit. Lives in the arm band because it is field state, and
    because a cap the driver has forgotten about is worse than no cap: it belongs
    where they are already looking when a robot feels wrong. */
+
 .limit {
   display: flex;
   gap: 0.6rem;
@@ -355,6 +134,7 @@ body[data-armed="true"] .arm__switch:hover:not(:disabled) {
 
 /* Capped is a state worth seeing at a glance, so the readout stops being
    ordinary ink once it is. */
+
 .limit[data-capped="true"] .limit__read {
   color: var(--info);
 }
@@ -375,17 +155,8 @@ body[data-armed="true"] .arm__switch:hover:not(:disabled) {
   color: var(--ink-mute);
 }
 
-kbd {
-  font: inherit;
-  font-size: 0.66rem;
-  padding: 0.1rem 0.32rem;
-  color: var(--ink-dim);
-  background: var(--s-rise);
-  border: 1px solid var(--line-bright);
-  border-radius: 2px;
-}
-
 /* ── Deck ───────────────────────────────────────────────────────────────── */
+
 .deck {
   display: grid;
   grid-template-columns: 1fr 19rem;
@@ -407,6 +178,7 @@ kbd {
 }
 
 /* ── Slot cards: the primary work surface ───────────────────────────────── */
+
 .slot {
   display: flex;
   flex-direction: column;
@@ -456,6 +228,7 @@ kbd {
 }
 
 /* Status line — always a word, never colour alone */
+
 .slot__status {
   display: flex;
   align-items: center;
@@ -504,23 +277,6 @@ kbd {
   color: var(--ink-mute);
 }
 
-select {
-  font: inherit;
-  font-size: 0.78rem;
-  width: 100%;
-  padding: 0.4rem 0.45rem;
-  color: var(--ink);
-  background: var(--s-rise);
-  border: 1px solid var(--line-bright);
-  border-radius: var(--r);
-  cursor: pointer;
-}
-
-select:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
 .slot__mac {
   margin: 0;
   font-size: 0.66rem;
@@ -531,6 +287,7 @@ select:disabled {
 /* ESC neutral trim. Two boxes plus Apply on one row, with the robot's own
    reported values on the line below — the boxes are what you intend to send,
    the readout is what the robot says it is running. */
+
 .slot__calib {
   display: grid;
   grid-template-columns: auto auto 1fr;
@@ -584,11 +341,13 @@ select:disabled {
 
 /* Applied but not written to the robot's flash — a reset reverts it, so this
    is a warning, not a status. */
+
 .calib__read[data-unsaved="true"] {
-  color: var(--warn, #d9a441);
+  color: var(--warn);
 }
 
 /* Stick telemetry: two mirrored bars, centre-anchored. Real axis values. */
+
 .sticks {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -617,6 +376,7 @@ select:disabled {
 }
 
 /* centre tick */
+
 .stick__track::after {
   content: "";
   position: absolute;
@@ -638,51 +398,10 @@ select:disabled {
   transition: none;
 }
 
-/* ── Utility column ─────────────────────────────────────────────────────── */
-.util {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  background: var(--line);
-}
-
-.card--util {
-  padding: 0.75rem 0.8rem;
-  background: var(--s-card);
-}
-
-.card--log {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.card__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.card__head h2 {
-  margin: 0;
-  font-size: 0.66rem;
-  font-weight: 600;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-  color: var(--ink-dim);
-}
-
-.empty {
-  margin: 0;
-  font-size: 0.72rem;
-  color: var(--ink-mute);
-}
-
 /* Robot + gamepad lists */
+
 .rlist,
+
 .glist {
   list-style: none;
   margin: 0;
@@ -692,6 +411,7 @@ select:disabled {
 }
 
 .rlist li,
+
 .glist li {
   display: flex;
   align-items: center;
@@ -705,6 +425,7 @@ select:disabled {
 }
 
 .rlist .r-name,
+
 .glist .g-name {
   flex: 1;
   min-width: 0;
@@ -735,74 +456,15 @@ select:disabled {
   border-radius: 2px;
 }
 
-/* Activity log */
-.log {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  max-height: 15rem;
-  font-size: 0.68rem;
-  line-height: 1.6;
-  color: var(--ink-dim);
-}
-
-.log li {
-  display: flex;
-  gap: 0.45rem;
-  padding: 0.1rem 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
-}
-
-.log time {
-  flex: none;
-  color: var(--ink-mute);
-  font-variant-numeric: tabular-nums;
-}
-
-.log li[data-kind="warn"] {
-  color: color-mix(in srgb, var(--warn) 60%, var(--ink));
-}
-
-.log li[data-kind="err"] {
-  color: var(--stop-lift);
-}
-
-.log li[data-kind="go"] {
-  color: var(--go-lift);
-}
-
 /* ── Responsive ─────────────────────────────────────────────────────────── */
+/* The control half of the two breakpoint blocks in style.css. See core.css. */
 @media (max-width: 62rem) {
   .deck {
     grid-template-columns: 1fr;
   }
-
-  .util {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-
-  .card--util {
-    flex: 1 1 15rem;
-  }
 }
 
 @media (max-width: 40rem) {
-  body {
-    padding: 0.5rem;
-  }
-
-  .rail {
-    justify-content: flex-start;
-  }
-
-  .rail__tele {
-    gap: 0.9rem;
-    order: 3;
-    width: 100%;
-  }
-
   .slots__grid {
     grid-template-columns: 1fr;
   }
@@ -817,32 +479,17 @@ select:disabled {
   }
 }
 
-@media (hover: none) {
-  .arm__panic {
-    display: none;
-  }
-}
-
-/* ── Reduced motion ─────────────────────────────────────────────────────── */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-  }
-}
-
 /* ── Forced colours: state must survive with no palette at all ──────────── */
 @media (forced-colors: active) {
-  .bezel,
   .slot,
   .rlist li,
   .glist li {
     border: 1px solid CanvasText;
   }
+}
 
-  .dot {
-    border: 1px solid CanvasText;
+@media (hover: none) {
+  .arm__panic {
+    display: none;
   }
 }

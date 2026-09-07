@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>MiniCore — Dongle firmware</title>
+    <link rel="canonical" href="https://minibots.team2367.org/flash-dongle" />
+
+    <script>
+      (function () {
+        var h = location.hostname;
+        // Only the two DEFAULT domains, anchored to the project name. A preview
+        // channel is also *.web.app (minibots-2367--<channel>-<hash>.web.app), and
+        // matching it here made every channel bounce to production — which is
+        // exactly where a deploy must be checked BEFORE it goes live. Found when a
+        // preview showed "Page Not Found" for /control while curl saw HTTP 200: the
+        // browser was following this redirect to the not-yet-deployed live site.
+        if (h === "minibots-2367.web.app" || h === "minibots-2367.firebaseapp.com") {
+          location.replace(
+            "https://minibots.team2367.org" + location.pathname + location.search + location.hash,
+          );
+        }
+      })();
+    </script>
+
+    <link rel="stylesheet" href="css/core.css" />
+    <link rel="stylesheet" href="css/flash.css" />
+  </head>
+  <body data-armed="false" data-link="down">
+    <div class="bezel">
+      <header class="rail">
+        <div class="rail__id">
+          <span class="rail__mark">MiniCore</span>
+          <span class="rail__sub">Dongle firmware · Team 2367</span>
+        </div>
+
+        <ul class="nav">
+          <li><a href="/">Hub</a></li>
+          <li><a href="/control">Control</a></li>
+          <li><a href="/code-robot">Code</a></li>
+          <li><a href="/flash-dongle" aria-current="page">Dongle</a></li>
+        </ul>
+
+        <dl class="rail__tele">
+          <div class="tele">
+            <dt>Build</dt>
+            <dd><span id="buildRef" class="num">--</span></dd>
+          </div>
+        </dl>
+      </header>
+
+      <p class="notice" id="noSerial" hidden>
+        This browser can't open serial ports. Open this page in Chrome or Edge, over
+        HTTPS or on localhost.
+      </p>
+
+      <!-- Leads with the button press, because the HID-only firmware means no
+           serial port exists until the ROM bootloader is exposed. A page that let
+           someone reach the picker first would just fail with an empty list. -->
+      <section class="fl">
+        <h1 class="fl__title">Put the dongle in its bootloader first</h1>
+        <div class="prose">
+          <p>
+            The dongle's firmware is USB-HID only — it has no serial console — so while it
+            runs normally there is <strong>no port for this page to open</strong>. Holding
+            <kbd>BOOT</kbd> while you tap <kbd>RESET</kbd> starts the chip's ROM bootloader
+            instead, which does present a port. This is the same step the command-line
+            flasher needs.
+          </p>
+        </div>
+
+        <ol class="steps">
+          <li class="step">
+            <span class="step__n">1</span>
+            <span class="step__body">
+              <span class="step__do">Plug the dongle into USB.</span>
+              <span class="step__why">Directly, not through an unpowered hub.</span>
+            </span>
+          </li>
+          <li class="step">
+            <span class="step__n">2</span>
+            <span class="step__body">
+              <span class="step__do">Hold <kbd>BOOT</kbd> down.</span>
+              <span class="step__why">Keep holding it for the next step.</span>
+            </span>
+          </li>
+          <li class="step">
+            <span class="step__n">3</span>
+            <span class="step__body">
+              <span class="step__do">Tap <kbd>RESET</kbd>, then let go of <kbd>BOOT</kbd>.</span>
+              <span class="step__why">The dongle is now waiting, with its lights off.</span>
+            </span>
+          </li>
+          <li class="step">
+            <span class="step__n">4</span>
+            <span class="step__body">
+              <span class="step__do">Pick the port below and flash.</span>
+              <span class="step__why">
+                On macOS it looks like <code>cu.usbmodem…</code>; on Windows it is a
+                <code>COM</code> port.
+              </span>
+            </span>
+          </li>
+        </ol>
+      </section>
+
+      <main class="deck deck--flash">
+        <section class="card card--util">
+          <h2 class="hd">Flash</h2>
+          <p class="pane__what" id="imgSummary">
+            Loading the firmware manifest…
+          </p>
+          <ul class="imgs" id="imgList"></ul>
+
+          <p class="fl__acts">
+            <button type="button" id="btnFlash" class="btn btn--primary" disabled>
+              Select port and flash
+            </button>
+          </p>
+          <div class="prog" id="prog" hidden>
+            <div class="prog__fill" id="progFill"></div>
+          </div>
+          <p class="field__note" id="flashNote"></p>
+
+          <p class="alert" data-kind="info" id="doneNote" hidden>
+            Flashed. Unplug the dongle and plug it back in — it comes back as a HID device
+            with no serial port, which is how you know the firmware is running. The
+            <a href="/control">driver station</a> should reconnect to it.
+          </p>
+        </section>
+
+        <aside class="util">
+          <section class="card card--util card--log">
+            <header class="card__head">
+              <h2>Activity</h2>
+              <button type="button" id="btnClearLog" class="btn btn--sm">Clear</button>
+            </header>
+            <ol id="log" class="log" aria-live="polite" aria-relevant="additions"></ol>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <script type="module" src="js/flash-dongle.js"></script>
+  </body>
+</html>

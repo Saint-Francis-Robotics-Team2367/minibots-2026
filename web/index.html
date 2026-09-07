@@ -4,19 +4,32 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
-    <title>MiniCore — Driver Station</title>
+    <title>MiniCore — Team 2367</title>
+    <meta
+      name="description"
+      content="Drive the robots, edit their code, and flash the dongle — all from the browser."
+    />
     <link rel="canonical" href="https://minibots.team2367.org/" />
 
-    <!-- One address for the driver station. Firebase always keeps its default
+    <!-- One address for the site. Firebase always keeps its default
          *.web.app / *.firebaseapp.com domains alive and offers no way to turn
          them off, so bounce them to the real one before anything renders.
          Host-based redirects need a Cloud Function on Firebase Hosting; this
          does the same job with no backend and no extra plan. Runs before the
-         stylesheet so a stray link never flashes the panel. -->
+         stylesheet so a stray link never flashes the panel.
+
+         Copied per page rather than factored out: it must run before render,
+         and there is no backend to do it centrally. -->
     <script>
       (function () {
         var h = location.hostname;
-        if (/\.(web\.app|firebaseapp\.com)$/.test(h)) {
+        // Only the two DEFAULT domains, anchored to the project name. A preview
+        // channel is also *.web.app (minibots-2367--<channel>-<hash>.web.app), and
+        // matching it here made every channel bounce to production — which is
+        // exactly where a deploy must be checked BEFORE it goes live. Found when a
+        // preview showed "Page Not Found" for /control while curl saw HTTP 200: the
+        // browser was following this redirect to the not-yet-deployed live site.
+        if (h === "minibots-2367.web.app" || h === "minibots-2367.firebaseapp.com") {
           location.replace(
             "https://minibots.team2367.org" + location.pathname + location.search + location.hash,
           );
@@ -24,120 +37,137 @@
       })();
     </script>
 
-    <link rel="stylesheet" href="css/style.css" />
+    <link rel="stylesheet" href="css/core.css" />
+    <link rel="stylesheet" href="css/hub.css" />
   </head>
+  <!-- data-armed / data-link are load-bearing on every page: .bezel and
+       #dongleDot key off them, and a missing attribute pins the visual in the
+       wrong state with no error. The hub holds no link, so both stay down. -->
   <body data-armed="false" data-link="down">
     <div class="bezel">
-      <!-- ── Top rail: identity + link telemetry + dongle control ───────── -->
       <header class="rail">
         <div class="rail__id">
           <span class="rail__mark">MiniCore</span>
-          <span class="rail__sub">Driver station · Team 2367</span>
+          <span class="rail__sub">Team 2367 · Minibots</span>
         </div>
 
-        <dl class="rail__tele">
-          <div class="tele">
-            <dt>Dongle</dt>
-            <dd>
-              <span class="dot" id="dongleDot" aria-hidden="true"></span>
-              <span id="dongleState">Not connected</span>
-            </dd>
-          </div>
-          <div class="tele">
-            <dt>Channel</dt>
-            <dd><span id="chanDisp" class="num">--</span></dd>
-          </div>
-          <div class="tele">
-            <dt>Packets out</dt>
-            <dd><span id="txRate" class="num">0</span><span class="unit">/s</span></dd>
-          </div>
-          <div class="tele">
-            <dt>Robots seen</dt>
-            <dd><span id="seenCount" class="num">0</span></dd>
-          </div>
-        </dl>
-
-        <div class="rail__act">
-          <p class="fault" id="faultChip" hidden>
-            <span aria-hidden="true">!</span> Radio send failing
-          </p>
-          <button type="button" id="btnConnect" class="btn btn--primary">Connect dongle</button>
-          <button type="button" id="btnDisconnect" class="btn" disabled>Disconnect</button>
-        </div>
+        <ul class="nav">
+          <li><a href="/" aria-current="page">Hub</a></li>
+          <li><a href="/control">Control</a></li>
+          <li><a href="/code-robot">Code</a></li>
+          <li><a href="/flash-dongle">Dongle</a></li>
+        </ul>
       </header>
 
-      <!-- ── Unsupported-browser notice (shown only when WebHID is absent) ── -->
-      <p class="notice" id="noHid" hidden>
-        This browser can't reach USB devices. Open the driver station in Chrome or Edge,
-        over HTTPS or on localhost.
+      <p class="notice" id="noSupport" hidden>
+        This browser can't reach USB devices, so the tools below won't work. Open this
+        page in Chrome or Edge.
       </p>
 
-      <!-- ── The arm band: single source of truth for field state ───────── -->
-      <section class="arm" aria-labelledby="armState">
-        <p class="arm__state" id="armState" role="status">Disabled</p>
-        <p class="arm__read" id="armRead">Connect the dongle to enable robots.</p>
-        <button type="button" id="btnArm" class="arm__switch" disabled>
-          Enable all robots
-        </button>
-        <div class="limit">
-          <label class="limit__label" for="speedLimit">Speed limit</label>
-          <input
-            type="range"
-            id="speedLimit"
-            class="limit__range"
-            min="0.1"
-            max="1"
-            step="0.05"
-            value="1"
-          />
-          <output class="limit__read" id="speedLimitRead" for="speedLimit">1.00</output>
-          <p class="limit__note" id="speedLimitNote" hidden></p>
+      <!-- The signal chain. This is the hub's organising idea and its structure:
+           every tool acts on one link in it, so the chain is what tells a student
+           which tool they want. Not decoration — the labels are the four real
+           hops a joystick movement makes on its way to a wheel. -->
+      <section class="chain" aria-label="How a command reaches a robot">
+        <h1 class="chain__title">
+          Everything the robots need, from this browser.
+        </h1>
+        <ol class="chain__flow">
+          <li class="chain__node">
+            <span class="chain__hop">Browser</span>
+            <span class="chain__what">Gamepad, this site</span>
+          </li>
+          <li class="chain__node">
+            <span class="chain__hop">Dongle</span>
+            <span class="chain__what">USB · ESP32-S3</span>
+          </li>
+          <li class="chain__node">
+            <span class="chain__hop">Radio</span>
+            <span class="chain__what">ESP-NOW · ch 6</span>
+          </li>
+          <li class="chain__node">
+            <span class="chain__hop">Robot</span>
+            <span class="chain__what">ESP32 · MicroPython</span>
+          </li>
+        </ol>
+        <div class="prose">
+          <p>
+            No clone, no terminal, no Python install. Three tools, each acting on a
+            different part of that chain.
+          </p>
         </div>
-
-        <p class="arm__panic">
-          <kbd>Space</kbd> or <kbd>Esc</kbd> — emergency stop
-        </p>
       </section>
 
-      <!-- ── Main deck: slots + utilities ───────────────────────────────── -->
-      <main class="deck">
-        <section class="slots" aria-label="Controller slots">
-          <div class="slots__grid" id="slots"></div>
-        </section>
+      <main class="tools">
+        <!-- Dominant: the competition path. Deliberately not one of three equal
+             cards — this is the page a driver opens under time pressure. -->
+        <article class="tool tool--lead">
+          <p class="tool__span">Whole chain</p>
+          <h2 class="tool__name"><a href="/control">Driver station</a></h2>
+          <p class="tool__line">
+            Pair gamepads to robots, enable the field, cap the speed, and trim the ESC
+            neutrals. This is the page used at competition.
+          </p>
+          <ul class="tool__needs">
+            <li>Dongle plugged in over USB</li>
+            <li>A gamepad — press a button to wake it</li>
+            <li>Robots powered on</li>
+          </ul>
+          <p class="tool__go">
+            <a class="btn btn--primary" href="/control">Open driver station</a>
+          </p>
+        </article>
 
-        <aside class="util">
-          <section class="card card--util">
-            <header class="card__head">
-              <h2>Robots</h2>
-              <button type="button" id="btnScan" class="btn btn--sm" disabled>Scan</button>
-            </header>
-            <ul id="robotList" class="rlist"></ul>
-            <p class="empty" id="robotEmpty">
-              No robots yet. Power one on, or press Scan.
-            </p>
-          </section>
+        <article class="tool">
+          <p class="tool__span">Robot end</p>
+          <h2 class="tool__name"><a href="/code-robot">Robot code</a></h2>
+          <p class="tool__line">
+            Read <code>main.py</code> off a robot, edit it, and push it back. Also
+            shows the saved neutrals — which quietly override whatever
+            <code>main.py</code> says — and can put MicroPython on a brand-new board.
+          </p>
+          <ul class="tool__needs">
+            <li>Robot on USB, not the dongle</li>
+          </ul>
+          <p class="tool__go"><a class="btn" href="/code-robot">Open editor</a></p>
+        </article>
 
-          <section class="card card--util">
-            <header class="card__head">
-              <h2>Gamepads</h2>
-            </header>
-            <ul id="gamepadList" class="glist"></ul>
-            <p class="empty" id="gamepadEmpty">
-              No gamepads yet. Press a button on a controller.
-            </p>
-          </section>
-
-          <section class="card card--util card--log">
-            <header class="card__head">
-              <h2>Activity</h2>
-              <button type="button" id="btnClearLog" class="btn btn--sm">Clear</button>
-            </header>
-            <ol id="log" class="log" aria-live="polite" aria-relevant="additions"></ol>
-          </section>
-        </aside>
+        <article class="tool">
+          <p class="tool__span">Dongle end</p>
+          <h2 class="tool__name"><a href="/flash-dongle">Dongle firmware</a></h2>
+          <p class="tool__line">
+            Write the current dongle build over USB. Needed after a protocol change,
+            or on a dongle that has never been flashed.
+          </p>
+          <ul class="tool__needs">
+            <li>Dongle on USB</li>
+            <li>Hold <kbd>BOOT</kbd>, tap <kbd>RESET</kbd> first</li>
+          </ul>
+          <p class="tool__go"><a class="btn" href="/flash-dongle">Open flasher</a></p>
+        </article>
       </main>
+
+      <footer class="foot">
+        <div class="prose">
+          <p>
+            <strong>Chrome or Edge, over HTTPS.</strong> The tools reach USB through
+            WebHID and Web Serial, which Safari and Firefox do not implement. You grant
+            each device once, per browser — after that the driver station reconnects on
+            its own.
+          </p>
+          <p>
+            The command-line path still works and is the offline fallback:
+            <code>scripts/flash-robot.sh</code> and
+            <code>scripts/flash-dongle.sh</code> in the
+            <a href="https://github.com/Saint-Francis-Robotics-Team2367/minibots-2026"
+              >minibots-2026</a
+            >
+            repository.
+          </p>
+        </div>
+      </footer>
     </div>
 
-    <script type="module" src="js/app.js"></script>
+    <script type="module" src="js/hub.js"></script>
   </body>
 </html>

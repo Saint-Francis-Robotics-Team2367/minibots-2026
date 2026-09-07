@@ -64,3 +64,7 @@ pnpm-debug.log
 .env
 .env.local
 .env.*.local
+
+# Firebase emulator debug output (per-run, never useful committed).
+firebase-debug.log
+ui-debug.log

@@ -1,0 +1,52 @@
+{
+  "comment": [
+    "Flashable images for the browser tools at https://minibots.team2367.org.",
+    "Firebase Hosting only serves web/, so the pages fetch these over",
+    "raw.githubusercontent.com, which sends access-control-allow-origin: *.",
+    "Offsets and versions mirror scripts/flash-robot.sh and scripts/flash-dongle.sh \u2014",
+    "those scripts remain the source of truth. sha256 is checked before flashing,",
+    "the same gate flash-robot.sh:151 applies to its download."
+  ],
+  "robot": {
+    "chip": "esp32",
+    "micropython_version": "v1.28.0",
+    "erase_before_write": true,
+    "images": [
+      {
+        "offset": "0x1000",
+        "path": "firmware/prebuilt/ESP32_GENERIC-20260406-v1.28.0.bin",
+        "sha256": "cd7820d02c35d34dd403b44263129c6a511b350aea8446c229890753fe240784",
+        "bytes": 1760192
+      }
+    ]
+  },
+  "dongle": {
+    "comment": "Written by .github/workflows/esp32s3-dongle.yml \u2014 do not hand-edit.",
+    "chip": "esp32s3",
+    "flash_mode": "dio",
+    "flash_freq": "80m",
+    "flash_size": "2MB",
+    "built_from": "1c9e5dc9fadf070b373d9043f9f5dd7233cb23f1",
+    "built_at": "2026-09-07T06:09:36Z",
+    "images": [
+      {
+        "offset": "0x0",
+        "path": "firmware/prebuilt/dongle/bootloader.bin",
+        "sha256": "2dd3422371755d31dfc3ad67a4efe4ed480a68177e5acfe95c6f93dd535f5810",
+        "bytes": 21552
+      },
+      {
+        "offset": "0x8000",
+        "path": "firmware/prebuilt/dongle/partition-table.bin",
+        "sha256": "5295e8c42d6fb5f95e4e8a185932c6191d27cfc5078322475347e40e71af815a",
+        "bytes": 3072
+      },
+      {
+        "offset": "0x10000",
+        "path": "firmware/prebuilt/dongle/minicore_dongle.bin",
+        "sha256": "49251d275af66fdbf66307abf6126617dd8af2ebf9f7955003e0a47f627c428f",
+        "bytes": 1102688
+      }
+    ]
+  }
+}

@@ -6,10 +6,32 @@
       "**/.*",
       "**/node_modules/**"
     ],
+    "comment": "cleanUrls serves control.html at /control. Nothing emulates this locally except the Firebase emulator \u2014 `python3 -m http.server` returns 404 for the extensionless routes \u2014 so use `firebase emulators:start --only hosting` for local dev.",
+    "cleanUrls": true,
     "headers": [
       {
         "comment": "Filenames here are not content-hashed, so Firebase's default max-age=3600 serves a stale driver station for an hour after a deploy. Revalidate every time instead: these files are a few KB and the panel must never be a version behind the firmware.",
         "source": "/**/*.@(html|css|js)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
+        "comment": "The robot library and starter template are uploaded to hardware verbatim. A cached stale minibot.py would be written to a robot and then be very hard to explain, so these revalidate too.",
+        "source": "/**/*.py",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
+        "comment": "cleanUrls means the pages are actually served at extensionless paths, which the *.html glob above does NOT match \u2014 verified in the emulator: /control came back with no Cache-Control at all, so Firebase's default max-age=3600 would apply and serve a stale driver station for an hour after a deploy. Same argument as the glob, so the same treatment. One entry per route: Hosting globs match path segments, and there is no extension left to match on.",
+        "source": "/@(control|code-robot|flash-dongle)",
         "headers": [
           {
             "key": "Cache-Control",

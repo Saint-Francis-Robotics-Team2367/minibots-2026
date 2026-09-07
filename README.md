@@ -159,7 +159,8 @@ scripts remain the source of truth for the pinned versions.
 | [firmware/common/minicore_policy.h](firmware/common/minicore_policy.h) | **Behaviour**: timeouts, neutral-trim range. The dongle neither uses nor includes it, so changes here need only `flash-robot` + a web reload. Put new policy constants here, not in the protocol header. |
 | [firmware/esp32s3-dongle/](firmware/esp32s3-dongle/) | ESP-IDF project for the Waveshare ESP32-S3-LCD-1.47 class USB HID dongle. |
 | [firmware/esp32-robot/](firmware/esp32-robot/) | MicroPython robot code (classic ESP32) — students edit `main.py`. |
-| [web/](web/) | Static driver station (Chrome or Edge; HTTPS or localhost). Deployed to <https://minibots.team2367.org>. |
+| [web/](web/) | The four-page site (Chrome or Edge; HTTPS or localhost). Deployed to <https://minibots.team2367.org>. `js/` is dependency-free ES modules; `lib/` is the robot library served for upload — **CI fails if it drifts** from `firmware/esp32-robot/`; `test/` is plain `node` scripts. |
+| [firmware/prebuilt/](firmware/prebuilt/) | Flashable images the **browser** tools write. They live here because a page can only fetch from a CORS-enabled origin, and neither micropython.org nor a CI artifact qualifies. `dongle/` is written by CI — do not hand-edit it. |
 
 ## USB identity (WebHID filter)
 
@@ -217,9 +218,73 @@ PSRAM on for LVGL.
 CI builds the dongle firmware on every change and uploads flashable artifacts
 ([.github/workflows/esp32s3-dongle.yml](.github/workflows/esp32s3-dongle.yml)).
 
-## Web driver station
+## The website
 
-**Live: <https://minibots.team2367.org>** — the deployed driver station. Open it in Chrome or
+**Live: <https://minibots.team2367.org>** — four pages, and everything the robots need
+is reachable from a browser. **Chrome or Edge**, over HTTPS or `http://localhost`: the
+tools talk to USB through WebHID and Web Serial, which Safari and Firefox do not
+implement. Devices are granted once per browser, then reconnect on their own.
+
+| Page | What it does | Needs |
+| --- | --- | --- |
+| [`/`](https://minibots.team2367.org/) | Explains the system and routes you | — |
+| [`/control`](https://minibots.team2367.org/control) | Driver station — pair, enable, speed limit, neutral trim | Dongle + gamepad |
+| [`/code-robot`](https://minibots.team2367.org/code-robot) | Read, edit and push `main.py`; install MicroPython on a fresh board | Robot on USB |
+| [`/flash-dongle`](https://minibots.team2367.org/flash-dongle) | Write the current dongle firmware | Dongle in its bootloader |
+
+**No clone, no terminal, no Python install** for the everyday path. The flash scripts
+remain the CLI route, the offline fallback, and the source of truth for pinned
+versions.
+
+### Editing robot code in the browser
+
+`/code-robot` has three modes:
+
+- **Pull** — read `main.py` and the saved calibration off a robot into the editor. A
+  board with no `main.py` is offered the starter template instead of a blank page.
+- **Upload and run** — write `main.py` plus the four library files, restart the robot,
+  and stream its `print()` output. The library is served from the site, so what lands
+  on a robot always matches the deployed page.
+- **Reflash** — erase the board and install MicroPython, then write all six files
+  (including `boot.py`, which no flash script sends). This is the fresh-ESP32 path.
+  **It erases everything on the robot**, so it is separated from the other two, gated
+  behind a typed confirmation, and offers to pull first.
+
+The editor buffer lives in `sessionStorage`: it survives a reload but not closing the
+tab, because the robot is the source of truth for code. After an upload the robot holds
+the only copy — hence the close warning and the **Download main.py** button.
+
+Two things this retires from the command line:
+
+- **`calib.json` is visible.** A calibration applied from the driver station is saved on
+  the robot and loaded *over* whatever `main.py` sets (`minibot.py:305`), which is a
+  documented source of confusion. The page shows the saved neutrals and says so.
+- **`clear_calibration()` has a button.** It used to require
+  `flash-robot --repl`.
+
+> **No type checking on browser-authored code.**
+> [pyright](.github/workflows/pyright.yml) runs on pull requests to `main`, so a student
+> who edits in the browser and never opens a PR loses that gate. Raw-paste mode compiles
+> as it receives, so syntax errors still surface on upload — but the attribute and type
+> errors pyright exists to catch do not. This is a real regression from the git flow.
+
+### Flashing the dongle in the browser
+
+`/flash-dongle` writes the three images at the offsets the build itself declares. The
+dongle's firmware is **HID-only**, so while it runs there is no serial port at all — you
+must hold **BOOT** and tap **RESET** to expose the ROM bootloader first. That is the same
+step the CLI flasher needs, and the page leads with it.
+
+The images come from `firmware/prebuilt/dongle/`, which
+[esp32s3-dongle.yml](.github/workflows/esp32s3-dongle.yml) builds and commits on every
+push: `raw.githubusercontent.com` sends `access-control-allow-origin: *`, so a page can
+fetch them, while CI artifacts need authentication and expire. Each image's SHA256 is
+checked before it reaches flash. **This page needs internet access** — an accepted trade,
+recorded in [the migration plan](docs/WEB_MIGRATION_PLAN.md).
+
+### Driver station
+
+**Live: <https://minibots.team2367.org/control>** — the deployed driver station. Open it in Chrome or
 Edge and click **Connect dongle** once to grant this browser access to it. After that the page
 reconnects to that dongle by itself — on load, and when you plug it in with the page already
 open — and **Connect dongle** stays as the manual fallback. **Disconnect** stays disconnected
@@ -234,13 +299,21 @@ confirmed it), set the per-motor
 enable **Global enable**, and
 use gamepads at indices **0–3** matching each slot.
 
-To run it locally instead, serve [web/](web/) over **HTTPS** or **http://localhost** (WebHID
-requirement) and open `http://localhost:8080`:
+### Local development
+
+Use the **Firebase emulator**, not `python3 -m http.server`. The site relies on
+`cleanUrls`, which nothing else emulates — under `http.server`, `/control` returns
+**404** because only `control.html` exists on disk.
 
 ```bash
-cd web
-python3 -m http.server 8080
+firebase emulators:start --only hosting   # http://127.0.0.1:5000
 ```
+
+WebHID and Web Serial both accept `http://localhost`, so no local TLS is needed.
+
+There are no dependencies to install: the browser code is plain ES modules, and the
+only third-party asset is CodeMirror, loaded from a CDN with SRI. Tests are plain
+`node` scripts — see [web/test/README.md](web/test/README.md).
 
 ### Deploying
 

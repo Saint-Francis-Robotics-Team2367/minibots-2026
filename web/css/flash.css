@@ -1,0 +1,167 @@
+/* ============================================================================
+   /flash-dongle — dongle firmware. Loads after core.css.
+
+   The page leads with a physical procedure, so the numbered steps are the
+   dominant element rather than the flash button. The numbering is legitimate
+   here: this genuinely is a sequence, and doing step 3 before step 2 produces a
+   dongle that never appears in the port picker.
+   ========================================================================= */
+
+.fl {
+  padding: var(--sp-5) 0.9rem var(--sp-4);
+  background: var(--s-card);
+  border-bottom: 1px solid var(--line);
+}
+
+.fl__title {
+  max-width: 34ch;
+  margin: 0 0 var(--sp-3);
+  font-size: clamp(1.2rem, 3.4vw, 1.7rem);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}
+
+/* ── Steps ──────────────────────────────────────────────────────────────── */
+.steps {
+  margin: var(--sp-4) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+
+.step {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--s-deck);
+}
+
+.step__n {
+  flex: none;
+  width: 1.5rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--info);
+  font-variant-numeric: tabular-nums;
+}
+
+.step__body {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.step__do {
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+
+/* Why, not just what. Half of getting this wrong is not knowing what the button
+   press is for, so each step says what it accomplishes. */
+.step__why {
+  font-size: 0.72rem;
+  color: var(--ink-mute);
+}
+
+.step__why code {
+  color: var(--ink-dim);
+}
+
+/* ── Deck ───────────────────────────────────────────────────────────────── */
+/* .deck is the control page's two-column grid; this page wants the same shape
+   with the action column wider than the log. */
+.deck--flash {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 21rem;
+  gap: 1px;
+  background: var(--line);
+}
+
+.fl__acts {
+  margin: var(--sp-3) 0 var(--sp-2);
+}
+
+/* ── Image list ─────────────────────────────────────────────────────────── */
+/* What is about to be written, at which offset. Shown because the offsets are
+   the thing that would be wrong if the manifest ever desynced from the build. */
+.imgs {
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.imgs li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: 0.3rem 0.45rem;
+  font-size: 0.72rem;
+  background: var(--s-rise);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  min-width: 0;
+}
+
+.imgs__off {
+  flex: none;
+  width: 4.5rem;
+  color: var(--info);
+  font-variant-numeric: tabular-nums;
+}
+
+.imgs__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.imgs__size {
+  flex: none;
+  color: var(--ink-mute);
+  font-variant-numeric: tabular-nums;
+}
+
+.pane__what {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--ink-dim);
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 62rem) {
+  .deck--flash {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 40rem) {
+  .fl {
+    padding: var(--sp-4) 0.7rem var(--sp-3);
+  }
+
+  .step {
+    padding: var(--sp-2);
+    gap: var(--sp-2);
+  }
+}
+
+/* ── Forced colours ─────────────────────────────────────────────────────── */
+@media (forced-colors: active) {
+  .step,
+  .imgs li {
+    border: 1px solid CanvasText;
+  }
+}
