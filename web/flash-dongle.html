@@ -10,7 +10,13 @@
     <script>
       (function () {
         var h = location.hostname;
-        if (/\.(web\.app|firebaseapp\.com)$/.test(h)) {
+        // Only the two DEFAULT domains, anchored to the project name. A preview
+        // channel is also *.web.app (minibots-2367--<channel>-<hash>.web.app), and
+        // matching it here made every channel bounce to production — which is
+        // exactly where a deploy must be checked BEFORE it goes live. Found when a
+        // preview showed "Page Not Found" for /control while curl saw HTTP 200: the
+        // browser was following this redirect to the not-yet-deployed live site.
+        if (h === "minibots-2367.web.app" || h === "minibots-2367.firebaseapp.com") {
           location.replace(
             "https://minibots.team2367.org" + location.pathname + location.search + location.hash,
           );
