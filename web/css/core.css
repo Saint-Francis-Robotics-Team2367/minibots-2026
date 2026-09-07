@@ -76,6 +76,14 @@
   box-sizing: border-box;
 }
 
+/* `hidden` has to win against a component that sets its own display. The panel
+   only ever hid default-display elements, so this never came up; the tool pages
+   toggle grid and flex containers, where [hidden] would otherwise lose on
+   specificity and render the hidden pane anyway. */
+[hidden] {
+  display: none !important;
+}
+
 html {
   background: var(--s-void);
 }

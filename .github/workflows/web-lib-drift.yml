@@ -1,0 +1,78 @@
+# web/lib/ holds a second copy of the robot library, because Firebase Hosting can
+# only serve files under web/ and /code-robot uploads the library to robots from
+# there. Two copies that must never diverge: a stale web/lib/minibot.py would be
+# written onto a robot while the student's main.py expects the new one.
+#
+# Not a symlink (Firebase Hosting does not follow them) and not a build step (the
+# repo has no build tooling, which is also why the browser code is dependency-free
+# ES modules). So: a check that fails the build on mismatch.
+name: web-lib-drift
+
+on:
+  push:
+    paths:
+      - "firmware/esp32-robot/*.py"
+      - "web/lib/**"
+      - "web/templates/**"
+      - ".github/workflows/web-lib-drift.yml"
+  pull_request:
+    paths:
+      - "firmware/esp32-robot/*.py"
+      - "web/lib/**"
+      - "web/templates/**"
+      - ".github/workflows/web-lib-drift.yml"
+  workflow_dispatch:
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: web/lib must match firmware/esp32-robot
+        shell: bash
+        run: |
+          set -uo pipefail
+          # The five files flash-robot.sh:193 uploads, plus boot.py — which no
+          # script sends, but which /code-robot's full-reflash path writes and is
+          # the only reason later uploads can interrupt the board at all.
+          FILES=(minibot.py minibot_config.py display.py ssd1306.py boot.py)
+          fail=0
+          for f in "${FILES[@]}"; do
+            if [[ ! -f "web/lib/$f" ]]; then
+              echo "::error file=web/lib/$f::missing — /code-robot uploads this to robots"
+              fail=1; continue
+            fi
+            if ! diff -q "firmware/esp32-robot/$f" "web/lib/$f" >/dev/null; then
+              echo "::error file=web/lib/$f::differs from firmware/esp32-robot/$f"
+              diff -u "firmware/esp32-robot/$f" "web/lib/$f" || true
+              fail=1
+            else
+              echo "ok: $f"
+            fi
+          done
+
+          # main.py is deliberately NOT byte-identical: web/templates/main.py is a
+          # starter for a fresh board, so it must not carry the checked-in robot's
+          # own calibration. Assert only that it stays importable and in sync with
+          # the library API it documents.
+          if [[ ! -f web/templates/main.py ]]; then
+            echo "::error file=web/templates/main.py::missing — offered when a robot has no main.py"
+            fail=1
+          elif grep -q "with_neutral" web/templates/main.py; then
+            echo "::error file=web/templates/main.py::carries a specific robot's neutral trim; a starter template must not"
+            fail=1
+          else
+            echo "ok: templates/main.py has no robot-specific calibration"
+          fi
+
+          exit $fail
+
+      - name: Starter template must be valid Python
+        shell: bash
+        run: |
+          # Catches a template that would fail to compile on the robot. Not a type
+          # check: pyright never sees browser-authored code, which is a real gap
+          # the migration plan records rather than solves.
+          python3 -m py_compile web/templates/main.py
+          echo "ok: templates/main.py compiles"

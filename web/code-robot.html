@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>MiniCore — Robot code</title>
+    <link rel="canonical" href="https://minibots.team2367.org/code-robot" />
+
+    <!-- Same host redirect as every page: it must run before render, and there
+         is no backend to do it centrally. -->
+    <script>
+      (function () {
+        var h = location.hostname;
+        if (/\.(web\.app|firebaseapp\.com)$/.test(h)) {
+          location.replace(
+            "https://minibots.team2367.org" + location.pathname + location.search + location.hash,
+          );
+        }
+      })();
+    </script>
+
+    <link rel="stylesheet" href="css/core.css" />
+    <link rel="stylesheet" href="css/editor.css" />
+    <!-- CodeMirror 5.65.19 from cdnjs, pinned with SRI. No CSP exists in this
+         project, so a compromised CDN could otherwise inject script into a page
+         that writes files to hardware. CM5 is UMD and defines a global, so there
+         is no build step; CM6 is ESM-only and would have forced bundling. -->
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.19/codemirror.min.css"
+      integrity="sha512-uf06llspW44/LZpHzHT6qBOIVODjWtv4MxCricRxkzvopAlSWnTf6hpZTFxuuZcuNE9CBQhqE0Seu1CoRk84nQ=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    />
+  </head>
+  <body data-armed="false" data-link="down">
+    <div class="bezel">
+      <header class="rail">
+        <div class="rail__id">
+          <span class="rail__mark">MiniCore</span>
+          <span class="rail__sub">Robot code · Team 2367</span>
+        </div>
+
+        <ul class="nav">
+          <li><a href="/">Hub</a></li>
+          <li><a href="/control">Control</a></li>
+          <li><a href="/code-robot" aria-current="page">Code</a></li>
+          <li><a href="/flash-dongle">Dongle</a></li>
+        </ul>
+
+        <dl class="rail__tele">
+          <div class="tele">
+            <dt>Robot</dt>
+            <dd>
+              <span class="dot" id="portDot" aria-hidden="true"></span>
+              <span id="portState">Not connected</span>
+            </dd>
+          </div>
+          <div class="tele">
+            <dt>Buffer</dt>
+            <dd><span id="bufState" class="num">empty</span></dd>
+          </div>
+        </dl>
+
+        <div class="rail__act">
+          <button type="button" id="btnConnect" class="btn btn--primary">Connect robot</button>
+          <button type="button" id="btnDisconnect" class="btn" disabled>Disconnect</button>
+        </div>
+      </header>
+
+      <p class="notice" id="noSerial" hidden>
+        This browser can't open serial ports. Open this page in Chrome or Edge, over
+        HTTPS or on localhost.
+      </p>
+
+      <p class="notice" id="noEditor" hidden>
+        The code editor couldn't load — it comes from a CDN, so this page needs internet
+        access. Everything else on the site still works offline.
+      </p>
+
+      <main class="ed">
+        <section class="ed__main">
+          <div class="ed__bar">
+            <h2 class="hd" id="fileLabel">main.py</h2>
+            <div class="ed__acts">
+              <button type="button" id="btnDownload" class="btn btn--sm" disabled>
+                Download main.py
+              </button>
+              <button type="button" id="btnTemplate" class="btn btn--sm">
+                Load starter template
+              </button>
+            </div>
+          </div>
+          <!-- Plain textarea until CodeMirror attaches. This is what makes the
+               offline failure legible: the buffer is still editable, and pull and
+               upload still work, just without highlighting. -->
+          <textarea
+            id="editor"
+            class="ed__area"
+            spellcheck="false"
+            aria-label="main.py source"
+          ></textarea>
+        </section>
+
+        <aside class="ed__side">
+          <section class="card card--util">
+            <h2 class="hd">Mode</h2>
+            <!-- Three modes, one destructive. Tabs so all three stay visible —
+                 nobody should reach a full erase by scrolling a collapsed list. -->
+            <div class="tabs" role="tablist" aria-label="What to do">
+              <button type="button" role="tab" id="tabPull" aria-selected="true"
+                      aria-controls="panePull">Pull</button>
+              <button type="button" role="tab" id="tabPush" aria-selected="false"
+                      aria-controls="panePush">Upload</button>
+              <button type="button" role="tab" id="tabFlash" aria-selected="false"
+                      aria-controls="paneFlash" data-danger="true">Reflash</button>
+            </div>
+
+            <div class="pane" id="panePull" role="tabpanel" aria-labelledby="tabPull">
+              <p class="pane__what">
+                Read <code>main.py</code> and the saved calibration off the robot.
+              </p>
+              <button type="button" id="btnPull" class="btn btn--primary" disabled>
+                Pull from robot
+              </button>
+              <p class="field__note" id="pullNote"></p>
+            </div>
+
+            <div class="pane" id="panePush" role="tabpanel" aria-labelledby="tabPush" hidden>
+              <p class="pane__what">
+                Write the editor's <code>main.py</code> plus the library, then restart the
+                robot and show what it prints.
+              </p>
+              <button type="button" id="btnPush" class="btn btn--primary" disabled>
+                Upload and run
+              </button>
+              <div class="prog" id="pushProg" hidden>
+                <div class="prog__fill" id="pushFill"></div>
+              </div>
+              <p class="field__note" id="pushNote"></p>
+            </div>
+
+            <div class="pane pane--danger" id="paneFlash" role="tabpanel"
+                 aria-labelledby="tabFlash" hidden>
+              <p class="alert" data-kind="err">
+                <strong>This erases the whole robot.</strong> Everything on the board goes:
+                its <code>main.py</code>, the library, and the saved calibration. Only for a
+                brand-new ESP32, or one that will not boot.
+              </p>
+              <p class="pane__what">
+                Pull first if the robot has code you want to keep — once this starts there is
+                nothing left to read.
+              </p>
+              <p class="field">
+                <label for="flashConfirm">Type ERASE to continue</label>
+                <input type="text" id="flashConfirm" autocomplete="off" spellcheck="false" />
+              </p>
+              <button type="button" id="btnFlash" class="btn btn--danger" disabled>
+                Erase and install MicroPython
+              </button>
+              <div class="prog" id="flashProg" hidden>
+                <div class="prog__fill" id="flashFill"></div>
+              </div>
+              <p class="field__note" id="flashNote"></p>
+            </div>
+          </section>
+
+          <!-- The point of showing this: calib.json silently overrides main.py,
+               and the robot README already calls that a confusion point. -->
+          <section class="card card--util">
+            <h2 class="hd">Saved calibration</h2>
+            <p class="empty" id="calibEmpty">
+              Nothing pulled yet.
+            </p>
+            <dl class="kv" id="calibBox" hidden>
+              <div class="kv__row">
+                <dt>Left neutral</dt>
+                <dd><span id="calibL" class="num">--</span><span class="unit">µs</span></dd>
+              </div>
+              <div class="kv__row">
+                <dt>Right neutral</dt>
+                <dd><span id="calibR" class="num">--</span><span class="unit">µs</span></dd>
+              </div>
+            </dl>
+            <p class="alert" data-kind="warn" id="calibWarn" hidden>
+              These come from <code>calib.json</code> and are loaded <em>over</em> whatever
+              <code>main.py</code> sets, so editing the constructor alone will not change
+              them.
+            </p>
+            <button type="button" id="btnClearCalib" class="btn btn--sm" disabled>
+              Clear saved calibration
+            </button>
+            <p class="field__note" id="calibNote"></p>
+          </section>
+
+          <section class="card card--util card--log">
+            <header class="card__head">
+              <h2>Activity</h2>
+              <button type="button" id="btnClearLog" class="btn btn--sm">Clear</button>
+            </header>
+            <ol id="log" class="log" aria-live="polite" aria-relevant="additions"></ol>
+          </section>
+        </aside>
+      </main>
+
+      <!-- Read-only: there is no input path, so nothing here can answer input(). -->
+      <section class="out" id="outBox" hidden>
+        <div class="ed__bar">
+          <h2 class="hd">Robot output</h2>
+          <div class="ed__acts">
+            <button type="button" id="btnStopOut" class="btn btn--sm">Stop watching</button>
+          </div>
+        </div>
+        <pre class="code out__body" id="outBody" aria-live="polite"></pre>
+      </section>
+    </div>
+
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.19/codemirror.min.js"
+      integrity="sha512-tXHFLFVaasTvIEFYN8K6UlGvb6Sh1ealAA8YxjpezWMio6u0vU9KfGFzKVth49xh2affuBfmLGY8t2G5pZH+zg=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.19/mode/python/python.min.js"
+      integrity="sha512-Vs2GKxnxnTQBRW7o2xXZ9A28njjmu5RToS42efiKNEWmikov0inZY522EtGVK5CcVo0M/FQwmXsTfl9skgRnvw=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.19/addon/edit/matchbrackets.min.js"
+      integrity="sha512-GSYCbN/le5gNmfAWVEjg1tKnOH7ilK6xCLgA7c48IReoIR2g2vldxTM6kZlN6o3VtWIe6fHu/qhwxIt11J8EBA=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+    <script type="module" src="js/code-robot.js"></script>
+  </body>
+</html>
