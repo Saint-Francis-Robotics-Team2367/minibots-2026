@@ -121,16 +121,57 @@ body[data-armed="true"] .bezel {
 
 /* ── Top rail ───────────────────────────────────────────────────────────── */
 
+/* Three explicit tracks rather than a flex row: identity, nav, then everything
+   else. The nav has to land in the same place on all four pages, and with flex it
+   could not — justify-content: space-between spends each line's slack on the gaps
+   between items, so the nav's left edge depended on what followed it. It sat 669px
+   further right on the hub (which has nothing after it to push against) than on
+   /control, and moved again at the width where the rail wraps to two lines.
+
+   A named grid column is the thing that actually holds: the nav is in the same
+   track whether the page has telemetry, actions, both or neither, and the third
+   track collapses to nothing when it is empty.
+
+   The identity column is fixed rather than auto because the subtitle differs per
+   page ("Driver station" vs "Robot code"), which would otherwise move the nav too. */
 .rail {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--gut);
+  display: grid;
+  grid-template-columns: 13.5rem auto 1fr;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--gut);
   padding: 0.7rem 0.9rem;
   background: var(--s-card);
   border-radius: var(--r) var(--r) 0 0;
   border-bottom: 1px solid var(--line);
+}
+
+/* Row 1, top-aligned. The identity and the nav are the two things that must be in
+   the same position on every page, so neither may be pushed to a second row by a
+   page carrying more telemetry — and neither may be re-centred by one either:
+   /control's four readouts make row 1 twice as tall as /code-robot's two, and
+   centring inside that taller row put its nav 24px lower than everywhere else. */
+.rail__id,
+.rail > .nav {
+  grid-row: 1;
+  align-self: start;
+}
+
+/* Telemetry and the rail action share the third track, right-aligned, keeping the
+   arrangement the flex rail had at these widths. */
+.rail__tele,
+.rail__act {
+  grid-column: 3;
+}
+
+.rail__tele {
+  justify-self: end;
+}
+
+/* When a page has both, they stack in that track: the readouts above the buttons,
+   which is the order the flex rail wrapped into anyway. */
+.rail:has(.rail__tele) .rail__act {
+  grid-row: 2;
+  justify-self: end;
 }
 
 .rail__mark {
@@ -668,13 +709,35 @@ a:hover {
     padding: 0.5rem;
   }
 
+  /* One column. The three-track grid is what keeps the nav in place on a wide
+     rail; at this width there is no room to align anything to, so the tracks
+     collapse and each part of the rail takes a full row of its own. */
   .rail {
-    justify-content: flex-start;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* The row-1 pin above is what holds the nav in place on a wide rail; here it
+     has to be released, or identity and nav share one row on a 390px screen. */
+  .rail__id,
+  .rail > .nav,
+  .rail__tele,
+  .rail__act {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+  }
+
+  .rail__id {
+    width: auto;
+  }
+
+  .rail:has(.rail__tele) .rail__act {
+    grid-row: auto;
+    justify-self: start;
   }
 
   .rail__tele {
     gap: 0.9rem;
-    order: 3;
     width: 100%;
   }
 }

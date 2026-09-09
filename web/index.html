@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
-    <title>MiniCore — Team 2367</title>
+    <title>MiniCore — Minibots documentation</title>
     <meta
       name="description"
-      content="Drive the robots, edit their code, and flash the dongle — all from the browser."
+      content="How Minibots works, and how to build, wire and program one. Team 2367."
     />
     <link rel="canonical" href="https://minibots.team2367.org/" />
 
@@ -38,11 +38,11 @@
     </script>
 
     <link rel="stylesheet" href="css/core.css" />
-    <link rel="stylesheet" href="css/hub.css" />
+    <link rel="stylesheet" href="css/docs.css" />
   </head>
   <!-- data-armed / data-link are load-bearing on every page: .bezel and
        #dongleDot key off them, and a missing attribute pins the visual in the
-       wrong state with no error. The hub holds no link, so both stay down. -->
+       wrong state with no error. Documentation holds no link, so both stay down. -->
   <body data-armed="false" data-link="down">
     <div class="bezel">
       <header class="rail">
@@ -51,109 +51,198 @@
           <span class="rail__sub">Team 2367 · Minibots</span>
         </div>
 
+        <!-- Four entries, and it stays four. The rail's grid (core.css) exists so
+             this nav lands in the same pixel on every page regardless of the
+             telemetry beside it; the documentation tree lives in the sidebar
+             below instead, because adding it here would wrap the driver
+             station's four readouts onto a second line. -->
         <ul class="nav">
-          <li><a href="/" aria-current="page">Hub</a></li>
+          <li><a href="/" aria-current="page">Home</a></li>
           <li><a href="/control">Control</a></li>
           <li><a href="/code-robot">Code</a></li>
           <li><a href="/flash-dongle">Dongle</a></li>
         </ul>
+
+        <!-- Nothing to show here: documentation holds no link and drives no
+             hardware. It exists so the rail has an element after the nav to
+             absorb the row's free space, which is what keeps the nav in the same
+             place as on the tool pages, where telemetry occupies this end. -->
+        <div aria-hidden="true"></div>
       </header>
 
       <p class="notice" id="noSupport" hidden>
-        This browser can't reach USB devices, so the tools below won't work. Open this
-        page in Chrome or Edge.
+        This browser can't reach USB devices, so none of the three tools will work.
+        Reading these pages is fine anywhere — to use the tools, open the site in Chrome
+        or Edge.
       </p>
 
-      <!-- The signal chain. This is the hub's organising idea and its structure:
-           every tool acts on one link in it, so the chain is what tells a student
-           which tool they want. Not decoration — the labels are the four real
-           hops a joystick movement makes on its way to a wheel. -->
-      <section class="chain" aria-label="How a command reaches a robot">
-        <h1 class="chain__title">
-          Everything the robots need, from this browser.
-        </h1>
-        <ol class="chain__flow">
-          <li class="chain__node">
-            <span class="chain__hop">Browser</span>
-            <span class="chain__what">Gamepad, this site</span>
-          </li>
-          <li class="chain__node">
-            <span class="chain__hop">Dongle</span>
-            <span class="chain__what">USB · ESP32-S3</span>
-          </li>
-          <li class="chain__node">
-            <span class="chain__hop">Radio</span>
-            <span class="chain__what">ESP-NOW · ch 6</span>
-          </li>
-          <li class="chain__node">
-            <span class="chain__hop">Robot</span>
-            <span class="chain__what">ESP32 · MicroPython</span>
-          </li>
-        </ol>
-        <div class="prose">
+      <div class="doc">
+        <!-- The documentation tree. Copied verbatim into every page that shows it
+             rather than rendered from a shared module, for two reasons: the rail
+             nav and the host redirect above are already duplicated the same way
+             (no backend, no build step), and a documentation page's navigation
+             has to exist with JavaScript off. -->
+        <nav class="doc__side" aria-label="Documentation">
+          <div class="doc__nav">
+            <div class="doc__group">
+              <p class="hd" id="dgGuide">Guide</p>
+              <ul class="doc__list" aria-labelledby="dgGuide">
+                <li><a href="/" aria-current="page">Overview</a></li>
+                <li><a href="/docs/build">Building the robot</a></li>
+                <li><a href="/docs/wiring">Wiring the robot</a></li>
+                <li><a href="/docs/programming">Programming the robot</a></li>
+              </ul>
+            </div>
+
+            <!-- The three tools. This group is what replaced the tool cards that
+                 used to be this page's body. -->
+            <div class="doc__group">
+              <p class="hd" id="dgTools">Tools</p>
+              <ul class="doc__list" aria-labelledby="dgTools">
+                <li><a href="/control">Driver station</a></li>
+                <li><a href="/code-robot">Robot code</a></li>
+                <li><a href="/flash-dongle">Dongle firmware</a></li>
+              </ul>
+            </div>
+
+            <div class="doc__group">
+              <p class="hd" id="dgRef">Reference</p>
+              <ul class="doc__list" aria-labelledby="dgRef">
+                <li>
+                  <a href="https://github.com/Saint-Francis-Robotics-Team2367/minibots-2026"
+                    >Source on GitHub</a
+                  >
+                </li>
+              </ul>
+            </div>
+          </div>
+        </nav>
+
+        <main class="doc__body">
+          <h1>Minibots</h1>
+          <p class="doc__lead">
+            Minibots are small two-wheeled robots that Team 2367 students build, wire and
+            program from scratch. You write their behaviour in Python, drive them with a
+            gamepad, and do all of it from this browser — no clone, no terminal, no Python
+            install.
+          </p>
+
+          <h2>What a Minibot is made of</h2>
           <p>
-            No clone, no terminal, no Python install. Three tools, each acting on a
-            different part of that chain.
+            Three pieces, and it helps to know which one you are working on before you
+            open a tool.
           </p>
-        </div>
-      </section>
-
-      <main class="tools">
-        <!-- Dominant: the competition path. Deliberately not one of three equal
-             cards — this is the page a driver opens under time pressure. -->
-        <article class="tool tool--lead">
-          <p class="tool__span">Whole chain</p>
-          <h2 class="tool__name"><a href="/control">Driver station</a></h2>
-          <p class="tool__line">
-            Pair gamepads to robots, enable the field, cap the speed, and trim the ESC
-            neutrals. This is the page used at competition.
-          </p>
-          <ul class="tool__needs">
-            <li>Dongle plugged in over USB</li>
-            <li>A gamepad — press a button to wake it</li>
-            <li>Robots powered on</li>
+          <ul>
+            <li>
+              <strong>The robot.</strong> A classic ESP32 running
+              <a href="https://micropython.org">MicroPython</a>, two motors driven through
+              ESCs, a battery, and an optional small OLED. Its behaviour lives in one file
+              you write: <code>main.py</code>.
+            </li>
+            <li>
+              <strong>The dongle.</strong> An ESP32-S3 on a USB stick. It plugs into the
+              driver's laptop and appears as a gamepad-style USB device, which is what
+              lets a web page talk to it at all.
+            </li>
+            <li>
+              <strong>The driver station.</strong> A page on this site. It reads your
+              gamepad, and sends what you do with it to the dongle.
+            </li>
           </ul>
-          <p class="tool__go">
-            <a class="btn btn--primary" href="/control">Open driver station</a>
+          <p>
+            The dongle and the robots talk over <strong>ESP-NOW</strong>, a
+            connectionless Wi-Fi radio mode. Both ends must be on the same Wi-Fi channel —
+            <strong>6</strong> unless someone changed it — and getting that wrong is the
+            single most common reason a robot never shows up. So the path from your thumb
+            to a wheel is: gamepad → this browser → dongle over USB → radio → robot.
           </p>
-        </article>
+          <p>
+            The robot stops its motors on its own if that radio link goes quiet for more
+            than a quarter second. Nothing you write in <code>main.py</code> can switch
+            that off.
+          </p>
 
-        <article class="tool">
-          <p class="tool__span">Robot end</p>
-          <h2 class="tool__name"><a href="/code-robot">Robot code</a></h2>
-          <p class="tool__line">
-            Read <code>main.py</code> off a robot, edit it, and push it back. Also
-            shows the saved neutrals — which quietly override whatever
-            <code>main.py</code> says — and can put MicroPython on a brand-new board.
-          </p>
-          <ul class="tool__needs">
-            <li>Robot on USB, not the dongle</li>
+          <h2>Start here</h2>
+          <ul class="idx">
+            <li>
+              <a class="idx__name" href="/docs/build"
+                >Building the robot <span class="idx__soon">Coming soon</span></a
+              >
+              <span class="idx__what"
+                >The chassis, the drivetrain, and what goes where.</span
+              >
+            </li>
+            <li>
+              <a class="idx__name" href="/docs/wiring"
+                >Wiring the robot <span class="idx__soon">Coming soon</span></a
+              >
+              <span class="idx__what"
+                >Battery, ESCs, motors and the ESP32 — which pin goes to what, and the
+                mistakes that cost a board.</span
+              >
+            </li>
+            <li>
+              <a class="idx__name" href="/docs/programming">Programming the robot</a>
+              <span class="idx__what"
+                >Write <code>main.py</code>: the loop, the full list of things you can ask
+                the robot for, and the traps.</span
+              >
+            </li>
           </ul>
-          <p class="tool__go"><a class="btn" href="/code-robot">Open editor</a></p>
-        </article>
 
-        <article class="tool">
-          <p class="tool__span">Dongle end</p>
-          <h2 class="tool__name"><a href="/flash-dongle">Dongle firmware</a></h2>
-          <p class="tool__line">
-            Write the current dongle build over USB. Needed after a protocol change,
-            or on a dongle that has never been flashed.
+          <h2>The three tools</h2>
+          <p>
+            All three are pages on this site, and all three are in the sidebar. Each one
+            needs different hardware plugged in.
           </p>
-          <ul class="tool__needs">
-            <li>Dongle on USB</li>
-            <li>Hold <kbd>BOOT</kbd>, tap <kbd>RESET</kbd> first</li>
-          </ul>
-          <p class="tool__go"><a class="btn" href="/flash-dongle">Open flasher</a></p>
-        </article>
-      </main>
+
+          <div class="doc__scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Tool</th>
+                  <th scope="col">What it does</th>
+                  <th scope="col">What you need plugged in</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><a href="/control">Driver station</a></td>
+                  <td>
+                    Pair gamepads to robots, enable the field, cap the speed, trim the
+                    motor neutrals. This is the page used at competition.
+                  </td>
+                  <td>Dongle on USB, a gamepad, robots powered on</td>
+                </tr>
+                <tr>
+                  <td><a href="/code-robot">Robot code</a></td>
+                  <td>
+                    Read <code>main.py</code> off a robot, edit it, push it back. Also
+                    installs MicroPython on a brand-new board.
+                  </td>
+                  <td>The robot on USB — not the dongle</td>
+                </tr>
+                <tr>
+                  <td><a href="/flash-dongle">Dongle firmware</a></td>
+                  <td>
+                    Write the current dongle build. Needed after a protocol change, or on
+                    a dongle that has never been flashed.
+                  </td>
+                  <td>Dongle on USB, held in its bootloader</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </main>
+      </div>
 
       <footer class="foot">
         <div class="prose">
           <p>
-            <strong>Chrome or Edge, over HTTPS.</strong> The tools reach USB through
-            WebHID and Web Serial, which Safari and Firefox do not implement. You grant
-            each device once, per browser — after that the driver station reconnects on
-            its own.
+            <strong>The tools need Chrome or Edge, over HTTPS.</strong> They reach USB
+            through WebHID and Web Serial, which Safari and Firefox do not implement.
+            These documentation pages read fine in any browser. You grant each device
+            once, per browser — after that the driver station reconnects on its own.
           </p>
           <p>
             The command-line path still works and is the offline fallback:
@@ -168,6 +257,6 @@
       </footer>
     </div>
 
-    <script type="module" src="js/hub.js"></script>
+    <script type="module" src="js/docs.js"></script>
   </body>
 </html>

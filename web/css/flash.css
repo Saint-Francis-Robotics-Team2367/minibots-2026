@@ -23,58 +23,6 @@
   color: var(--ink);
 }
 
-/* ── Steps ──────────────────────────────────────────────────────────────── */
-.steps {
-  margin: var(--sp-4) 0 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 1px;
-  background: var(--line);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  overflow: hidden;
-}
-
-.step {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-3);
-  padding: var(--sp-3);
-  background: var(--s-deck);
-}
-
-.step__n {
-  flex: none;
-  width: 1.5rem;
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: var(--info);
-  font-variant-numeric: tabular-nums;
-}
-
-.step__body {
-  display: grid;
-  gap: 0.15rem;
-  min-width: 0;
-}
-
-.step__do {
-  font-size: 0.85rem;
-  color: var(--ink);
-}
-
-/* Why, not just what. Half of getting this wrong is not knowing what the button
-   press is for, so each step says what it accomplishes. */
-.step__why {
-  font-size: 0.72rem;
-  color: var(--ink-mute);
-}
-
-.step__why code {
-  color: var(--ink-dim);
-}
-
 /* ── Deck ───────────────────────────────────────────────────────────────── */
 /* .deck is the control page's two-column grid; this page wants the same shape
    with the action column wider than the log. */
@@ -151,16 +99,12 @@
   .fl {
     padding: var(--sp-4) 0.7rem var(--sp-3);
   }
-
-  .step {
-    padding: var(--sp-2);
-    gap: var(--sp-2);
-  }
 }
 
 /* ── Forced colours ─────────────────────────────────────────────────────── */
+/* .step's border moved to help.css with the component; .imgs is still a
+   /flash-dongle thing, so its half stays here. */
 @media (forced-colors: active) {
-  .step,
   .imgs li {
     border: 1px solid CanvasText;
   }

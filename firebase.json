@@ -40,6 +40,16 @@
         ]
       },
       {
+        "comment": "The documentation pages, extensionless for the same reason as the routes above. A glob rather than an enumeration \u2014 unlike the tool routes, which are a fixed set of three, /docs is expected to grow, and a new guide should not need a Hosting config change to stop being served stale.",
+        "source": "/docs/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
         "source": "/",
         "headers": [
           {

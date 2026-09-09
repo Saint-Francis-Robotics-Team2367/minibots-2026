@@ -26,12 +26,18 @@
       })();
     </script>
 
-    <link rel="stylesheet" href="css/core.css" />
-    <link rel="stylesheet" href="css/editor.css" />
     <!-- CodeMirror 5.65.19 from cdnjs, pinned with SRI. No CSP exists in this
          project, so a compromised CDN could otherwise inject script into a page
          that writes files to hardware. CM5 is UMD and defines a global, so there
-         is no build step; CM6 is ESM-only and would have forced bundling. -->
+         is no build step; CM6 is ESM-only and would have forced bundling.
+
+         ORDER MATTERS, and it must stay above editor.css. CodeMirror ships a
+         light theme as single-class rules — .CodeMirror-cursor, .CodeMirror-gutters,
+         .CodeMirror-linenumber, .CodeMirror-activeline-background — which
+         editor.css overrides with rules of exactly the same specificity. Load the
+         CDN last and it wins every one of those ties on order alone: the caret
+         renders #000 on the #0c1116 ground, i.e. invisible, and a pale strip
+         returns beside the gutter. Vendor first, local overrides after. -->
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.19/codemirror.min.css"
@@ -39,6 +45,9 @@
       crossorigin="anonymous"
       referrerpolicy="no-referrer"
     />
+    <link rel="stylesheet" href="css/core.css" />
+    <link rel="stylesheet" href="css/editor.css" />
+    <link rel="stylesheet" href="css/help.css" />
   </head>
   <body data-armed="false" data-link="down">
     <div class="bezel">
@@ -49,7 +58,7 @@
         </div>
 
         <ul class="nav">
-          <li><a href="/">Hub</a></li>
+          <li><a href="/">Home</a></li>
           <li><a href="/control">Control</a></li>
           <li><a href="/code-robot" aria-current="page">Code</a></li>
           <li><a href="/flash-dongle">Dongle</a></li>
@@ -84,6 +93,12 @@
         The code editor couldn't load — it comes from a CDN, so this page needs internet
         access. Everything else on the site still works offline.
       </p>
+
+      <!-- Driver help, built by drivers.js. Sits in the same strip as the two
+           notices above because that is where this page already says "something
+           isn't working" — and it must be here before a student clicks Connect,
+           not only after the picker comes up empty. -->
+      <div id="drvHelp"></div>
 
       <main class="ed">
         <section class="ed__main">

@@ -209,8 +209,24 @@
   font-size: 0.72rem;
 }
 
-.CodeMirror-cursor {
+/* The caret. CodeMirror's own `.CodeMirror-cursor { border-left: 1px solid #000 }`
+   is an exact specificity tie with a bare `.CodeMirror-cursor` here, so whichever
+   stylesheet loads last wins — and #000 on this ground is an invisible caret in a
+   text editor. code-robot.html now loads the CDN first for that reason; the extra
+   `.CodeMirror` here means this no longer depends on that ordering holding.
+   2px because 1px of a mid accent is easy to lose against dark syntax. */
+.CodeMirror .CodeMirror-cursor {
   border-left: 2px solid var(--info);
+}
+
+/* Drop-cursor while dragging text, and the secondary carets of a multi-selection:
+   both also default to a dark stroke from the vendor sheet. */
+.CodeMirror div.CodeMirror-secondarycursor {
+  border-left: 2px solid color-mix(in srgb, var(--info) 60%, var(--ink-mute));
+}
+
+.CodeMirror-dragcursor {
+  border-left: 2px solid var(--go-lift);
 }
 
 .CodeMirror-selected,

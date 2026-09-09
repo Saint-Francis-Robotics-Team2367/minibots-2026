@@ -32,6 +32,87 @@ const ESPTOOL_URL = "https://cdn.jsdelivr.net/npm/esptool-js@0.6.1/bundle.js";
 /** Chip flash offsets. The dongle's come from its build/flash_args. */
 export const ROBOT_MICROPYTHON_OFFSET = 0x1000;
 
+/* ── Reset sequences ────────────────────────────────────────────────────── */
+
+/**
+ * Why this module supplies its own reset instead of using the library's.
+ *
+ * On these boards DTR and RTS do not reach the chip directly: they drive the
+ * two-transistor auto-reset circuit, where DTR→IO0 and RTS→EN. What matters is
+ * IO0's level AT THE INSTANT EN is released — that is when the ROM samples the
+ * boot strap.
+ *
+ * esptool-js's ClassicReset (`class Fe` in the 0.6.1 bundle) drives the lines
+ * one at a time, and `Transport.setRTS()` additionally re-sends DTR after every
+ * RTS change. So going from "in reset" (DTR=0,RTS=1) to "IO0 low, out of reset"
+ * (DTR=1,RTS=0) cannot happen atomically — it passes through DTR=1,RTS=1. In
+ * that transient BOTH transistors conduct, EN goes high while IO0 has not
+ * settled low, and the chip boots its application instead of the ROM loader.
+ *
+ * Measured on the bench, ESP32-D0WD-V3 behind a CP2102 (VID 0x10c4 PID 0xEA60):
+ *
+ *   ClassicReset,   50 ms and 550 ms → boot:0x13 (SPI_FAST_FLASH_BOOT)
+ *   tight, atomic (0,1)→(1,0)        → boot:0x03, "waiting for download"
+ *   tight + a deliberate (1,1) step  → boot:0x13   ← reproduces the bug exactly
+ *
+ * So esptool-js's seven connect attempts all reset the board into its own
+ * firmware and every sync times out: "Failed to connect with the device".
+ * esptool.py does not hit this because on Unix it defaults to UnixTightReset,
+ * which sets both lines in a single TIOCMSET ioctl (esptool/reset.py:75).
+ *
+ * Web Serial can express that: `setSignals({dataTerminalReady, requestToSend})`
+ * carries both flags in one call, and for a CP210x/CH34x bridge Chrome sends
+ * them as one control transfer. That is the browser equivalent of the tight
+ * reset, so this is the sequence to use — for the dongle too, since a dongle
+ * already sitting in its ROM bootloader is unaffected by a reset that lands in
+ * the same place.
+ */
+class TightReset {
+  /** @param {{device: SerialPort}} transport @param {number} resetDelay */
+  constructor(transport, resetDelay) {
+    this.transport = transport;
+    this.resetDelay = resetDelay;
+  }
+
+  /** Both signals in ONE call — the whole point. Never setDTR/setRTS here. */
+  async #both(dataTerminalReady, requestToSend) {
+    await this.transport.device.setSignals({ dataTerminalReady, requestToSend });
+  }
+
+  async reset() {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    await this.#both(false, false);
+    await this.#both(true, true);
+    await this.#both(false, true); // IO0 high, EN low — chip held in reset
+    await sleep(100);
+    await this.#both(true, false); // IO0 LOW as EN releases — enters ROM loader
+    await sleep(this.resetDelay);
+    await this.#both(false, false); // release IO0
+  }
+}
+
+/**
+ * A hard reset that actually resets.
+ *
+ * esptool-js's HardReset (`class Te`) is `await sleep(100); await setRTS(false)`
+ * — it only ever DEASSERTS. Called after a flash, when the tight sequence has
+ * already left RTS low, it is a no-op: measured on the bench it produced 0 bytes
+ * and no boot banner, and the board stayed in the ROM loader. That is why the
+ * reconnect after a reflash found no REPL. A reset needs EN pulled low and then
+ * released, which is RTS true → false; that produced boot:0x13 and a full boot
+ * log on the same board.
+ *
+ * @param {{device: SerialPort}} transport
+ */
+async function hardReset(transport) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // IO0 must stay high or the pulse drops it straight back into the ROM loader.
+  await transport.device.setSignals({ dataTerminalReady: false, requestToSend: true });
+  await sleep(100);
+  await transport.device.setSignals({ dataTerminalReady: false, requestToSend: false });
+  await sleep(50);
+}
+
 let modulePromise = null;
 
 /**
@@ -138,25 +219,24 @@ export async function flash({
   const transport = new Transport(port, /* tracing */ false);
   let loader = null;
   try {
-    // No resetConstructors override.
+    // classicReset is overridden with the tight sequence — see TightReset above
+    // for the measurements. Note the shape: ESPLoader stores FACTORIES, not
+    // classes, and calls them as `resetConstructors.classicReset(transport,
+    // delay)`, so passing the class itself throws "Class constructor cannot be
+    // invoked without 'new'". An arrow that news it up is what the field wants.
     //
-    // An earlier version passed `{ classicReset: ClassicReset }` for the robot,
-    // which threw "Class constructor Fe cannot be invoked without 'new'" on the
-    // first real board: ESPLoader stores FACTORIES, not classes, and calls them
-    // as `resetConstructors.classicReset(transport, delay)`. Read from the pinned
-    // bundle, its defaults are already
-    //     classicReset: (t, d) => new ClassicReset(t, d)
-    //     usbJTAGSerialReset: (t) => new UsbJtagSerialReset(t)
-    // and constructResetSequence() picks between them by PID: a board whose
-    // transport PID is USB_JTAG_SERIAL_PID (0x1001) gets the JTAG reset, anything
-    // else — a CH340 or CP210x UART bridge, which is what the robot boards use —
-    // gets Classic DTR/RTS with the 50 ms / 550 ms pair. That is exactly the
-    // behaviour the override was reaching for, so the correct fix is to pass
-    // nothing and let the library dispatch on the hardware it actually found.
+    // usbJTAGSerialReset is deliberately left alone: constructResetSequence()
+    // dispatches on PID, and a board reporting USB_JTAG_SERIAL_PID (0x1001) —
+    // the dongle in its ROM bootloader — has no auto-reset circuit to get wrong,
+    // so the library's own JTAG sequence is correct there. Only the UART-bridge
+    // path (CP2102 here, CH340 on other boards) needed changing.
     loader = new ESPLoader({
       transport,
       baudrate: baudRate,
       terminal,
+      resetConstructors: {
+        classicReset: (t, d) => new TightReset(t, d),
+      },
     });
 
     const chip = await loader.main();
@@ -187,19 +267,20 @@ export async function flash({
     onProgress?.(100, "done");
     say("Flash written.");
   } finally {
-    // Reset BEFORE disconnecting, and with the library's own sequence.
+    // Reset BEFORE disconnecting, while the transport still holds the port.
     //
-    // The previous version called transport.setDTR(false) AFTER disconnect(),
-    // which is a no-op twice over: the port is already closed by then, and
-    // dropping DTR is not a reset. On real hardware the board stayed in the ROM
-    // bootloader after a successful write, so the reconnect that follows found no
-    // REPL and the six-file upload failed with "Not in raw REPL" — while the
-    // flash itself was perfect. `after("hard_reset")` pulses RTS through the
-    // still-open transport, which is exactly what esptool's own --after
-    // hard_reset does and what made the board come up at the REPL from the CLI.
+    // Two earlier versions of this got it wrong. The first called
+    // transport.setDTR(false) AFTER disconnect() — a no-op twice over, since the
+    // port was closed and dropping DTR is not a reset. The second called
+    // loader.after("hard_reset"), which routes to the library's HardReset: that
+    // one only DEASSERTS RTS, so after the tight sequence (which already leaves
+    // RTS low) it did nothing at all — 0 bytes, no boot banner, board still in
+    // the ROM loader. Either way the reconnect that follows a reflash found no
+    // REPL and the six-file upload failed with "Not in raw REPL", while the flash
+    // itself was perfect. hardReset() above pulses EN properly.
     if (loader) {
       try {
-        await loader.after("hard_reset");
+        await hardReset(transport);
       } catch (err) {
         say(`Could not reset the board: ${err.message} — power-cycle it by hand`);
       }

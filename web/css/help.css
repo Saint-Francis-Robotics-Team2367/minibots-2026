@@ -1,0 +1,224 @@
+/* ============================================================================
+   Driver help — the "your board isn't showing up" panel.
+
+   Loads on /code-robot and /flash-dongle, after each page's own stylesheet.
+   Those two pages are the only ones that open a serial port, so they are the
+   only ones that can strand a student at an empty port picker.
+
+   Why this file exists at all, rather than rules in core.css or a second copy
+   in each page's sheet: the panel appears on two pages whose page-level sheets
+   differ (editor.css vs flash.css), so its rules need a home both can load.
+   core.css declares itself "byte-for-byte the originals" and is deliberately
+   not extended. And the .steps family below is too large to duplicate without
+   the two copies drifting — .pane__what is duplicated across editor.css and
+   flash.css, but that is four lines, not fifty.
+   ========================================================================= */
+
+/* ── Steps ──────────────────────────────────────────────────────────────────
+   Moved here verbatim from flash.css, where it was written for /flash-dongle's
+   BOOT/RESET procedure. /code-robot's Windows driver install is the same shape
+   of thing — an ordered sequence where doing step 3 before step 2 leaves you
+   with a board that never appears — so it earns the same component.
+
+   The numbering is load-bearing, which is why the macOS pane does NOT use this:
+   "your Mac already has the driver" is one fact, not a sequence, and numbering
+   a list of alternatives would misrepresent it as an order of operations. */
+.steps {
+  margin: var(--sp-4) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+
+.step {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--s-deck);
+}
+
+.step__n {
+  flex: none;
+  width: 1.5rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--info);
+  font-variant-numeric: tabular-nums;
+}
+
+.step__body {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.step__do {
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+
+/* Why, not just what. Half of getting this wrong is not knowing what the button
+   press is for, so each step says what it accomplishes. */
+.step__why {
+  font-size: 0.72rem;
+  color: var(--ink-mute);
+}
+
+.step__why code {
+  color: var(--ink-dim);
+}
+
+/* ── The panel ──────────────────────────────────────────────────────────────
+   Sits in the same full-width strip as #noSerial and #noEditor — the established
+   "this isn't working, read this" position, directly under the rail. Not the
+   editor's side rail: that column is 21rem, which would wrap every step.
+
+   A button plus a [hidden] panel, not <details>. Every disclosure in this
+   codebase is .hidden = true/false (fifteen of them); none uses .open. And the
+   usual argument for <details> — that it works with JavaScript off — buys
+   nothing here, because this panel is built by drivers.js, so there is no
+   no-JS case to serve. */
+.drv {
+  border-bottom: 1px solid var(--line);
+  background: var(--s-card);
+}
+
+.drv__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0.45rem 0.9rem;
+}
+
+/* Reads as a question, because that is how a stuck student thinks about it. */
+.drv__ask {
+  min-width: 0;
+  font-size: 0.76rem;
+  color: var(--ink-dim);
+}
+
+/* One measure for everything inside, rather than a 62ch paragraph beside a
+   full-bleed step list — that mismatch leaves a ragged right edge and stretches
+   each step's "why" line past comfortable reading length on a wide screen.
+   78ch matches the long-form measure docs.css:156 already uses for body copy. */
+.drv__body {
+  max-width: 78ch;
+  padding: 0 0.9rem var(--sp-4);
+}
+
+/* The OS switcher's own row. .tabs itself comes from core.css unchanged — this
+   only bounds its width so three tabs do not stretch across the whole panel.
+   Wide enough that "Linux / other" stays on one line: core.css sets these tabs
+   uppercase with letter-spacing, and at 22rem that label wrapped and left one
+   tab taller than its neighbours. */
+.drv__os {
+  max-width: 27rem;
+  margin: 0 0 var(--sp-3);
+}
+
+.drv__lead {
+  margin: 0 0 var(--sp-2);
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+}
+
+.drv__lead strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* No global inline-<code> rule exists — docs.css, editor.css and flash.css each
+   scope their own — so this panel has to bring its own or the many code spans in
+   its copy (COM, silabser.inf, cu.usbserial-…, dialout) would render as body
+   text. */
+.drv__body :not(pre) > code {
+  padding: 0.05rem 0.25rem;
+  color: var(--ink);
+  background: var(--s-rise);
+  border-radius: 2px;
+}
+
+/* The download is the one thing on the Windows pane a student must actually go
+   and do, so it is a button rather than a link in a sentence. */
+.drv__get {
+  display: inline-block;
+  margin: var(--sp-3) 0 0;
+  text-decoration: none;
+}
+
+.drv__size {
+  margin: var(--sp-2) 0 0;
+  font-size: 0.7rem;
+  color: var(--ink-mute);
+}
+
+/* The "it still didn't work" tail, and the CH340 escape hatch. Set below the
+   steps rather than inside them: these are branches, not the next thing to do. */
+.drv__tail {
+  margin: var(--sp-3) 0 0;
+  font-size: 0.74rem;
+  color: var(--ink-mute);
+}
+
+.drv__tail strong {
+  color: var(--ink-dim);
+  font-weight: 600;
+}
+
+.drv__tail + .drv__tail {
+  margin-top: var(--sp-2);
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────────
+   The .step override moved with the component. .fl's half of the original
+   40rem block stays in flash.css, which still owns .fl. */
+@media (max-width: 40rem) {
+  .step {
+    padding: var(--sp-2);
+    gap: var(--sp-2);
+  }
+
+  .drv__bar,
+  .drv__body {
+    padding-left: 0.7rem;
+    padding-right: 0.7rem;
+  }
+
+  .drv__os {
+    max-width: none;
+  }
+}
+
+/* ── Forced colours ─────────────────────────────────────────────────────────
+   .step's half of flash.css's original rule; .imgs li keeps the other half over
+   there, since .imgs is still a /flash-dongle component. Splitting the selector
+   list is the cost of moving one of the two, and it is a smaller cost than
+   dragging .imgs into a file that has nothing to do with firmware images. */
+@media (forced-colors: active) {
+  .step,
+  .drv {
+    border: 1px solid CanvasText;
+  }
+
+  /* Which OS am I looking at, when the palette is gone.
+     core.css marks a selected tab with an inset box-shadow over a raised
+     background, and forced-colors discards the shadow and repaints every
+     background the same — so selected and unselected compute identically and the
+     switcher loses its state. docs.css:430 fixes the same class of problem for
+     "which page am I on"; this is that fix for these tabs.
+
+     Scoped to .drv__os deliberately: /code-robot's Mode tablist has the same
+     underlying gap, but it lives in core.css, which this feature does not touch. */
+  .drv__os button[aria-selected="true"] {
+    border-bottom: 3px solid Highlight;
+    forced-color-adjust: none;
+    color: HighlightText;
+    background: Highlight;
+  }
+}

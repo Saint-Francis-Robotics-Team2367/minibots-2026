@@ -26,6 +26,7 @@
 
     <link rel="stylesheet" href="css/core.css" />
     <link rel="stylesheet" href="css/flash.css" />
+    <link rel="stylesheet" href="css/help.css" />
   </head>
   <body data-armed="false" data-link="down">
     <div class="bezel">
@@ -36,7 +37,7 @@
         </div>
 
         <ul class="nav">
-          <li><a href="/">Hub</a></li>
+          <li><a href="/">Home</a></li>
           <li><a href="/control">Control</a></li>
           <li><a href="/code-robot">Code</a></li>
           <li><a href="/flash-dongle" aria-current="page">Dongle</a></li>
@@ -54,6 +55,11 @@
         This browser can't open serial ports. Open this page in Chrome or Edge, over
         HTTPS or on localhost.
       </p>
+
+      <!-- Built by drivers.js. On this page it exists to RULE the driver out:
+           the dongle has no bridge chip, so an empty picker is always the
+           BOOT/RESET sequence below and never a missing driver. -->
+      <div id="drvHelp"></div>
 
       <!-- Leads with the button press, because the HID-only firmware means no
            serial port exists until the ROM bootloader is exposed. A page that let
