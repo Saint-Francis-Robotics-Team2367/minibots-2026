@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>MiniCore — Wiring the robot</title>
+    <meta
+      name="description"
+      content="How to wire a Minibot: battery, ESCs, motors and the ESP32. Not yet written."
+    />
+    <link rel="canonical" href="https://minibots.team2367.org/docs/wiring" />
+
+    <!-- Same host redirect as every page: it must run before render, and there
+         is no backend to do it centrally. -->
+    <script>
+      (function () {
+        var h = location.hostname;
+        // Only the two DEFAULT domains, anchored to the project name. A preview
+        // channel is also *.web.app (minibots-2367--<channel>-<hash>.web.app), and
+        // matching it here made every channel bounce to production — which is
+        // exactly where a deploy must be checked BEFORE it goes live. Found when a
+        // preview showed "Page Not Found" for /control while curl saw HTTP 200: the
+        // browser was following this redirect to the not-yet-deployed live site.
+        if (h === "minibots-2367.web.app" || h === "minibots-2367.firebaseapp.com") {
+          location.replace(
+            "https://minibots.team2367.org" + location.pathname + location.search + location.hash,
+          );
+        }
+      })();
+    </script>
+
+    <!-- ../ because this page lives in web/docs/. Links to other pages stay
+         absolute, so they do not care how deep this file sits. -->
+    <link rel="stylesheet" href="../css/core.css" />
+    <link rel="stylesheet" href="../css/docs.css" />
+  </head>
+  <body data-armed="false" data-link="down">
+    <div class="bezel">
+      <header class="rail">
+        <div class="rail__id">
+          <span class="rail__mark">MiniCore</span>
+          <span class="rail__sub">Wiring · Team 2367</span>
+        </div>
+
+        <ul class="nav">
+          <li><a href="/">Home</a></li>
+          <li><a href="/control">Control</a></li>
+          <li><a href="/code-robot">Code</a></li>
+          <li><a href="/flash-dongle">Dongle</a></li>
+        </ul>
+
+        <div aria-hidden="true"></div>
+      </header>
+
+      <p class="notice" id="noSupport" hidden>
+        This browser can't reach USB devices, so none of the three tools will work.
+        Reading these pages is fine anywhere — to use the tools, open the site in Chrome
+        or Edge.
+      </p>
+
+      <div class="doc">
+        <!-- Copied verbatim from every other documentation page: the rail nav and
+             the host redirect above are duplicated the same way (no backend, no
+             build step), and this nav has to exist with JavaScript off. -->
+        <nav class="doc__side" aria-label="Documentation">
+          <div class="doc__nav">
+            <div class="doc__group">
+              <p class="hd" id="dgGuide">Guide</p>
+              <ul class="doc__list" aria-labelledby="dgGuide">
+                <li><a href="/">Overview</a></li>
+                <li><a href="/docs/build">Building the robot</a></li>
+                <li><a href="/docs/wiring" aria-current="page">Wiring the robot</a></li>
+                <li><a href="/docs/programming">Programming the robot</a></li>
+              </ul>
+            </div>
+
+            <div class="doc__group">
+              <p class="hd" id="dgTools">Tools</p>
+              <ul class="doc__list" aria-labelledby="dgTools">
+                <li><a href="/control">Driver station</a></li>
+                <li><a href="/code-robot">Robot code</a></li>
+                <li><a href="/flash-dongle">Dongle firmware</a></li>
+              </ul>
+            </div>
+
+            <div class="doc__group">
+              <p class="hd" id="dgRef">Reference</p>
+              <ul class="doc__list" aria-labelledby="dgRef">
+                <li>
+                  <a href="https://github.com/Saint-Francis-Robotics-Team2367/minibots-2026"
+                    >Source on GitHub</a
+                  >
+                </li>
+              </ul>
+            </div>
+          </div>
+        </nav>
+
+        <main class="doc__body">
+          <h1>Wiring the robot</h1>
+          <p class="doc__lead">
+            Connecting it all up: the battery, the ESCs, the motors and the ESP32 — and
+            which GPIO pin ends up driving which wheel.
+          </p>
+
+          <!-- Deliberately empty, and it has to read that way rather than as thin
+               content. Explicitly NO pin numbers here: a guessed pinout on a
+               wiring page is the one kind of wrong that destroys a board. The
+               numbers in the template are that robot's config, not a spec. -->
+          <div class="alert" data-kind="info">
+            <strong>This guide isn't written yet,</strong> and wiring is the wrong place to
+            guess. A pinout invented here could cost you a board, so there are no pin
+            numbers on this page until the real ones are confirmed. Ask a mentor for the
+            current wiring diagram. <a href="/docs/programming">Programming the robot</a> is
+            complete and explains how pins are named in code once yours are wired.
+          </div>
+
+          <h2>What this page will cover</h2>
+          <p>The outline below is what the finished guide will walk through.</p>
+
+          <ul class="plan">
+            <li>
+              <span class="plan__name">How power flows</span>
+              <span class="plan__what"
+                >Battery to ESCs to motors, and where the ESP32 gets its supply — the map
+                to have in your head before you connect anything.</span
+              >
+            </li>
+            <li>
+              <span class="plan__name">Battery and connectors</span>
+              <span class="plan__what"
+                >Which connector goes where, polarity, and the switch.</span
+              >
+            </li>
+            <li>
+              <span class="plan__name">ESCs to motors</span>
+              <span class="plan__what"
+                >The three-wire motor connections, and what to do when a wheel turns the
+                wrong way.</span
+              >
+            </li>
+            <li>
+              <span class="plan__name">ESC signal wires to the ESP32</span>
+              <span class="plan__what"
+                >Which GPIO pins carry the signal, and how they line up with the
+                <code>left_motor_pin</code> and <code>right_motor_pin</code> settings in
+                your code.</span
+              >
+            </li>
+            <li>
+              <span class="plan__name">Grounds</span>
+              <span class="plan__what"
+                >Where they tie together, and why a missing one gives you a robot that
+                twitches for no visible reason.</span
+              >
+            </li>
+            <li>
+              <span class="plan__name">The optional OLED</span>
+              <span class="plan__what"
+                >Its two I²C wires, and how to turn it off in code if you aren't fitting
+                one.</span
+              >
+            </li>
+            <li>
+              <span class="plan__name">Check before first power-on</span>
+              <span class="plan__what"
+                >What to inspect and measure before the battery goes in — the step that
+                catches the mistakes that let smoke out.</span
+              >
+            </li>
+            <li>
+              <span class="plan__name">When it browns out</span>
+              <span class="plan__what"
+                >Bulk capacitance across the ESC supply and battery connector checks. The
+                library already ramps the motors to bound current draw, but that cannot fix
+                wiring that couldn't supply it.</span
+              >
+            </li>
+          </ul>
+
+          <h2>Next</h2>
+          <p>
+            With the robot wired, <a href="/docs/programming">Programming the robot</a>
+            covers writing <code>main.py</code>, and
+            <a href="/code-robot">Robot code</a> puts it on the board.
+          </p>
+        </main>
+      </div>
+    </div>
+
+    <script type="module" src="../js/docs.js"></script>
+  </body>
+</html>

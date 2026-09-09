@@ -43,11 +43,19 @@
         </div>
 
         <!-- Nav, not a back button: a student who arrives here from a shared
-             link has no history entry to go back to. -->
+             link has no history entry to go back to. Home plus all three tools, in
+             the same order on every page: this one shipped without the Dongle link,
+             which left the driver station with no route to the flasher at all.
+
+             Four entries, and it stays four — the rail's grid (core.css) keeps this
+             nav in the same pixel on every page, and a fifth would wrap the
+             telemetry below onto another line. The documentation tree lives in a
+             sidebar on the /docs pages instead. -->
         <ul class="nav">
-          <li><a href="/">Hub</a></li>
+          <li><a href="/">Home</a></li>
           <li><a href="/control" aria-current="page">Control</a></li>
           <li><a href="/code-robot">Code</a></li>
+          <li><a href="/flash-dongle">Dongle</a></li>
         </ul>
 
         <dl class="rail__tele">

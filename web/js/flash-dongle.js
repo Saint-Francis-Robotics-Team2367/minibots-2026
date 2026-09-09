@@ -14,6 +14,7 @@
 
 import { $, log, clearLog } from "./dom.js";
 import { flash, fetchImage } from "./esptool.js";
+import { mountDriverHelp } from "./drivers.js";
 
 const RAW_BASE =
   "https://raw.githubusercontent.com/Saint-Francis-Robotics-Team2367/minibots-2026/main/";
@@ -102,6 +103,10 @@ async function run() {
     // An empty picker is the ordinary symptom of a dongle that is not in its
     // bootloader, so name that cause rather than reporting a cancelled dialog.
     log("No port selected — is the dongle in its bootloader? See the steps above.", "warn");
+    // Left broader than /code-robot's NotFoundError check on purpose: that
+    // asymmetry predates this panel, and narrowing it here could hide an
+    // unrelated failure.
+    driverHelp.reveal();
     return;
   }
 
@@ -129,7 +134,9 @@ async function run() {
       // Nothing to pass: the dongle is already sitting in its ROM bootloader from
       // the manual BOOT/RESET. In that state it enumerates as PID 0x1001, which is
       // esptool-js's USB_JTAG_SERIAL_PID, so it selects the JTAG reset by itself.
-      // Verified on a real dongle.
+      // Verified on a real dongle. esptool.js's classicReset override does not
+      // reach this path — constructResetSequence() dispatches on that PID — which
+      // is why it was left alone; see the note there.
       onProgress: (pct, label) => {
         fill.style.width = `${pct}%`;
         note(`Writing ${label} — ${pct}%`);
@@ -162,10 +169,14 @@ function note(msg, kind = "") {
 
 /* ── Wiring ─────────────────────────────────────────────────────────────── */
 
+/** Here to rule the driver out, not to install one — see drivers.js. */
+let driverHelp = { reveal() {} };
+
 if (!("serial" in navigator)) {
   $("noSerial").hidden = false;
   log("Web Serial unavailable in this browser", "err");
 } else {
+  driverHelp = mountDriverHelp({ mount: $("drvHelp"), device: "dongle" });
   loadManifest();
 }
 

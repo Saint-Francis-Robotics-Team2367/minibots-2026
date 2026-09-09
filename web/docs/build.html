@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>MiniCore — Building the robot</title>
+    <meta
+      name="description"
+      content="How to assemble a Minibot: chassis, drivetrain and mounting. Not yet written."
+    />
+    <link rel="canonical" href="https://minibots.team2367.org/docs/build" />
+
+    <!-- Same host redirect as every page: it must run before render, and there
+         is no backend to do it centrally. -->
+    <script>
+      (function () {
+        var h = location.hostname;
+        // Only the two DEFAULT domains, anchored to the project name. A preview
+        // channel is also *.web.app (minibots-2367--<channel>-<hash>.web.app), and
+        // matching it here made every channel bounce to production — which is
+        // exactly where a deploy must be checked BEFORE it goes live. Found when a
+        // preview showed "Page Not Found" for /control while curl saw HTTP 200: the
+        // browser was following this redirect to the not-yet-deployed live site.
+        if (h === "minibots-2367.web.app" || h === "minibots-2367.firebaseapp.com") {
+          location.replace(
+            "https://minibots.team2367.org" + location.pathname + location.search + location.hash,
+          );
+        }
+      })();
+    </script>
+
+    <!-- ../ because this page lives in web/docs/. Links to other pages stay
+         absolute, so they do not care how deep this file sits. -->
+    <link rel="stylesheet" href="../css/core.css" />
+    <link rel="stylesheet" href="../css/docs.css" />
+  </head>
+  <body data-armed="false" data-link="down">
+    <div class="bezel">
+      <header class="rail">
+        <div class="rail__id">
+          <span class="rail__mark">MiniCore</span>
+          <span class="rail__sub">Building · Team 2367</span>
+        </div>
+
+        <ul class="nav">
+          <li><a href="/">Home</a></li>
+          <li><a href="/control">Control</a></li>
+          <li><a href="/code-robot">Code</a></li>
+          <li><a href="/flash-dongle">Dongle</a></li>
+        </ul>
+
+        <div aria-hidden="true"></div>
+      </header>
+
+      <p class="notice" id="noSupport" hidden>
+        This browser can't reach USB devices, so none of the three tools will work.
+        Reading these pages is fine anywhere — to use the tools, open the site in Chrome
+        or Edge.
+      </p>
+
+      <div class="doc">
+        <!-- Copied verbatim from every other documentation page: the rail nav and
+             the host redirect above are duplicated the same way (no backend, no
+             build step), and this nav has to exist with JavaScript off. -->
+        <nav class="doc__side" aria-label="Documentation">
+          <div class="doc__nav">
+            <div class="doc__group">
+              <p class="hd" id="dgGuide">Guide</p>
+              <ul class="doc__list" aria-labelledby="dgGuide">
+                <li><a href="/">Overview</a></li>
+                <li><a href="/docs/build" aria-current="page">Building the robot</a></li>
+                <li><a href="/docs/wiring">Wiring the robot</a></li>
+                <li><a href="/docs/programming">Programming the robot</a></li>
+              </ul>
+            </div>
+
+            <div class="doc__group">
+              <p class="hd" id="dgTools">Tools</p>
+              <ul class="doc__list" aria-labelledby="dgTools">
+                <li><a href="/control">Driver station</a></li>
+                <li><a href="/code-robot">Robot code</a></li>
+                <li><a href="/flash-dongle">Dongle firmware</a></li>
+              </ul>
+            </div>
+
+            <div class="doc__group">
+              <p class="hd" id="dgRef">Reference</p>
+              <ul class="doc__list" aria-labelledby="dgRef">
+                <li>
+                  <a href="https://github.com/Saint-Francis-Robotics-Team2367/minibots-2026"
+                    >Source on GitHub</a
+                  >
+                </li>
+              </ul>
+            </div>
+          </div>
+        </nav>
+
+        <main class="doc__body">
+          <h1>Building the robot</h1>
+          <p class="doc__lead">
+            Putting the physical robot together: the chassis, the drivetrain, and where
+            each part mounts.
+          </p>
+
+          <!-- Deliberately empty, and it has to read that way rather than as thin
+               content. No parts list, no dimensions, no fasteners invented here —
+               a student who follows a guessed build guide wastes an afternoon and
+               a set of parts. -->
+          <div class="alert" data-kind="info">
+            <strong>This guide isn't written yet.</strong> Nothing here has been left out
+            on purpose — the content is still being put together, and inventing a parts
+            list would waste your afternoon. In the meantime,
+            <a href="/docs/programming">Programming the robot</a> is complete, and the
+            three tools all work. Ask a mentor for the current build instructions.
+          </div>
+
+          <h2>What this page will cover</h2>
+          <p>The outline below is what the finished guide will walk through.</p>
+
+          <ul class="plan">
+            <li>
+              <span class="plan__name">What's in the kit</span>
+              <span class="plan__what"
+                >Every part, what it looks like, and what it's for — so you can check
+                nothing is missing before you start.</span
+              >
+            </li>
+            <li>
+              <span class="plan__name">Tools you'll need</span>
+              <span class="plan__what"
+                >What to have on the table, and what to borrow rather than buy.</span
+              >
+            </li>
+            <li>
+              <span class="plan__name">The chassis</span>
+              <span class="plan__what"
+                >Assembling the frame, and the order to do it in so nothing has to come
+                back apart.</span
+              >
+            </li>
+            <li>
+              <span class="plan__name">Motors and drivetrain</span>
+              <span class="plan__what"
+                >Mounting the motors, fitting the wheels, and getting both sides
+                square.</span
+              >
+            </li>
+            <li>
+              <span class="plan__name">Mounting the electronics</span>
+              <span class="plan__what"
+                >Where the ESP32, the ESCs and the battery go — and leaving the USB port
+                reachable, because you will plug into it constantly.</span
+              >
+            </li>
+            <li>
+              <span class="plan__name">Before you power it on</span>
+              <span class="plan__what"
+                >The checks worth doing while it is still easy to fix anything.</span
+              >
+            </li>
+          </ul>
+
+          <h2>Next</h2>
+          <p>
+            Once the robot is built, <a href="/docs/wiring">Wiring the robot</a> connects
+            it up, and <a href="/docs/programming">Programming the robot</a> makes it move.
+          </p>
+        </main>
+      </div>
+    </div>
+
+    <script type="module" src="../js/docs.js"></script>
+  </body>
+</html>

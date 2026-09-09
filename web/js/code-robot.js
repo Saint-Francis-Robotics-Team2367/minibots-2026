@@ -14,6 +14,7 @@
 import { $, log, clearLog } from "./dom.js";
 import { session } from "./store.js";
 import { MicroPythonSerial, SerialError } from "./serial.js";
+import { mountDriverHelp } from "./drivers.js";
 import { PortOwner, flash, fetchImage, ROBOT_MICROPYTHON_OFFSET } from "./esptool.js";
 
 /** The five files flash-robot.sh:193 uploads, in its order. */
@@ -473,11 +474,13 @@ async function fullReflash() {
         port,
         images: [{ address: ROBOT_MICROPYTHON_OFFSET, data: image }],
         eraseAll: true,
-        // No reset option: esptool-js picks the sequence from the transport's PID.
-        // The robot boards use a UART bridge (CH340 here, CP210x on others), which
-        // is not USB_JTAG_SERIAL_PID, so it uses Classic DTR/RTS — the bootloader
-        // is entered with no button press. Confirmed on an ESP32-D0WD-V3 behind a
-        // CH340 (VID 0x1a86 PID 0x7523).
+        // No reset option to pass: esptool.js overrides the library's sequence
+        // itself, because esptool-js's ClassicReset cannot enter the bootloader on
+        // these boards at all — it moves DTR and RTS one at a time and the (1,1)
+        // transient lets the chip boot its own firmware. See the TightReset note
+        // in esptool.js for the bench measurements. Either way no button press is
+        // needed. Confirmed on an ESP32-D0WD-V3 behind a CP2102 (VID 0x10c4
+        // PID 0xEA60); other boards use a CH340 (0x1a86/0x7523), same path.
         onProgress: (pct) => {
           fill.style.width = `${pct}%`;
         },
@@ -585,10 +588,19 @@ restoreBuffer();
 renderBuf();
 renderConn();
 
+/**
+ * Driver help. Only mounted when the browser could actually open a port —
+ * offering install steps to a browser that has no Web Serial at all would point
+ * at the wrong problem, and #noSerial already names that one.
+ */
+let driverHelp = { reveal() {} };
+
 if (!MicroPythonSerial.supported) {
   $("noSerial").hidden = false;
   $("btnConnect").disabled = true;
   log("Web Serial unavailable in this browser", "err");
+} else {
+  driverHelp = mountDriverHelp({ mount: $("drvHelp"), device: "robot" });
 }
 
 $("btnConnect").addEventListener("click", async () => {
@@ -597,7 +609,11 @@ $("btnConnect").addEventListener("click", async () => {
     await connect(port);
   } catch (err) {
     if (err && err.name === "NotFoundError") {
-      log("No port selected", "warn");
+      // Covers both "cancelled the dialog" and "the dialog was empty", which the
+      // API does not distinguish. An empty list is the case worth helping with,
+      // so open the panel and say why rather than only logging a dead end.
+      log("No port selected — if the list was empty, the board needs a driver", "warn");
+      driverHelp.reveal();
       return;
     }
     log(`Connect failed: ${err.message}`, "err");

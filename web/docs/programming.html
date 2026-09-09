@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>MiniCore — Programming the robot</title>
+    <meta
+      name="description"
+      content="Write main.py for a Minibot: the loop, the full Minibot API, and the traps."
+    />
+    <link rel="canonical" href="https://minibots.team2367.org/docs/programming" />
+
+    <!-- Same host redirect as every page: it must run before render, and there
+         is no backend to do it centrally. -->
+    <script>
+      (function () {
+        var h = location.hostname;
+        // Only the two DEFAULT domains, anchored to the project name. A preview
+        // channel is also *.web.app (minibots-2367--<channel>-<hash>.web.app), and
+        // matching it here made every channel bounce to production — which is
+        // exactly where a deploy must be checked BEFORE it goes live. Found when a
+        // preview showed "Page Not Found" for /control while curl saw HTTP 200: the
+        // browser was following this redirect to the not-yet-deployed live site.
+        if (h === "minibots-2367.web.app" || h === "minibots-2367.firebaseapp.com") {
+          location.replace(
+            "https://minibots.team2367.org" + location.pathname + location.search + location.hash,
+          );
+        }
+      })();
+    </script>
+
+    <!-- ../ because this page lives in web/docs/. Links to other pages stay
+         absolute, so they do not care how deep this file sits. -->
+    <link rel="stylesheet" href="../css/core.css" />
+    <link rel="stylesheet" href="../css/docs.css" />
+  </head>
+  <body data-armed="false" data-link="down">
+    <div class="bezel">
+      <header class="rail">
+        <div class="rail__id">
+          <span class="rail__mark">MiniCore</span>
+          <span class="rail__sub">Programming · Team 2367</span>
+        </div>
+
+        <ul class="nav">
+          <li><a href="/">Home</a></li>
+          <li><a href="/control">Control</a></li>
+          <li><a href="/code-robot">Code</a></li>
+          <li><a href="/flash-dongle">Dongle</a></li>
+        </ul>
+
+        <div aria-hidden="true"></div>
+      </header>
+
+      <p class="notice" id="noSupport" hidden>
+        This browser can't reach USB devices, so none of the three tools will work.
+        Reading these pages is fine anywhere — to use the tools, open the site in Chrome
+        or Edge.
+      </p>
+
+      <div class="doc">
+        <!-- Copied verbatim from every other documentation page: the rail nav and
+             the host redirect above are duplicated the same way (no backend, no
+             build step), and this nav has to exist with JavaScript off. -->
+        <nav class="doc__side" aria-label="Documentation">
+          <div class="doc__nav">
+            <div class="doc__group">
+              <p class="hd" id="dgGuide">Guide</p>
+              <ul class="doc__list" aria-labelledby="dgGuide">
+                <li><a href="/">Overview</a></li>
+                <li><a href="/docs/build">Building the robot</a></li>
+                <li><a href="/docs/wiring">Wiring the robot</a></li>
+                <li><a href="/docs/programming" aria-current="page">Programming the robot</a></li>
+              </ul>
+            </div>
+
+            <div class="doc__group">
+              <p class="hd" id="dgTools">Tools</p>
+              <ul class="doc__list" aria-labelledby="dgTools">
+                <li><a href="/control">Driver station</a></li>
+                <li><a href="/code-robot">Robot code</a></li>
+                <li><a href="/flash-dongle">Dongle firmware</a></li>
+              </ul>
+            </div>
+
+            <div class="doc__group">
+              <p class="hd" id="dgRef">Reference</p>
+              <ul class="doc__list" aria-labelledby="dgRef">
+                <li>
+                  <a href="https://github.com/Saint-Francis-Robotics-Team2367/minibots-2026"
+                    >Source on GitHub</a
+                  >
+                </li>
+              </ul>
+            </div>
+          </div>
+        </nav>
+
+        <main class="doc__body">
+          <h1>Programming the robot</h1>
+          <p class="doc__lead">
+            Your robot runs MicroPython, and its behaviour lives in one file:
+            <code>main.py</code>. You do not compile anything. You edit that file, push it
+            to the robot, and it runs.
+          </p>
+
+          <h2>Where your code goes</h2>
+          <p>
+            A robot holds a handful of files. You only ever write <strong>one</strong> of
+            them.
+          </p>
+
+          <div class="doc__scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">File</th>
+                  <th scope="col">What it is</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>main.py</code></td>
+                  <td><strong>Yours.</strong> This is the file you edit.</td>
+                </tr>
+                <tr>
+                  <td><code>minibot.py</code></td>
+                  <td>
+                    The library. Handles the radio, the enable switch, the joystick and the
+                    safety stop. Don't edit it.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>minibot_config.py</code></td>
+                  <td>Holds your robot's settings — name, pins, channel. Don't edit it.</td>
+                </tr>
+                <tr>
+                  <td><code>boot.py</code></td>
+                  <td>Runs at power-up, before your code. Don't edit it.</td>
+                </tr>
+                <tr>
+                  <td><code>display.py</code>, <code>ssd1306.py</code></td>
+                  <td>Drives the optional OLED. Don't edit them.</td>
+                </tr>
+                <tr>
+                  <td><code>calib.json</code></td>
+                  <td>
+                    Appears on its own if anyone has trimmed the motors from the driver
+                    station. Read the warning about this below — it catches people out.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2>How to edit and upload it</h2>
+          <p>
+            <strong>In your browser</strong> — open <a href="/code-robot">Robot code</a>,
+            plug the robot into USB, and click <strong>Connect robot</strong>. Then
+            <strong>Pull from robot</strong> reads its current <code>main.py</code> into
+            the editor, and <strong>Upload and run</strong> writes your version back,
+            restarts the robot, and shows you what it prints. Chrome or Edge only.
+          </p>
+          <p>
+            <strong>On your machine</strong> — edit
+            <code>firmware/esp32-robot/main.py</code> in the repository and run
+            <code>./scripts/flash-robot.sh</code>. This is the offline route.
+          </p>
+
+          <div class="alert" data-kind="warn">
+            <strong>The browser editor does not type-check your code.</strong> The
+            repository runs <code>pyright</code> on pull requests, which catches misspelled
+            method names and wrong argument types before they reach a robot. Edit in the
+            browser and you skip that check — a syntax error still surfaces when you
+            upload, but <code>bot.drive_left_moter(0.5)</code> will not. Read your
+            spelling carefully, or use the command-line route for anything substantial.
+          </div>
+
+          <h2>What runs when you power the robot on</h2>
+          <ol>
+            <li>
+              <code>boot.py</code> waits about <strong>1.5 seconds</strong> and prints
+              <code>[boot] Starting in 1500 ms…</code>. That pause is the window the upload
+              tools use to interrupt the board, which is why an upload works even though
+              your code runs a loop that never ends. You don't have to do anything with it.
+            </li>
+            <li>Your <code>main.py</code> starts.</li>
+            <li>
+              <code>bot.begin()</code> brings up the radio and the motors, and the robot
+              starts answering the driver station.
+            </li>
+            <li>Your <code>while True:</code> loop runs until the power goes off.</li>
+          </ol>
+
+          <h2>The shape of every main.py</h2>
+          <p>
+            This is the starter template, and it is a complete working tank drive. Read it
+            top to bottom before you change anything.
+          </p>
+
+          <pre class="code"><code>from minibot import Minibot
+from minibot_config import MinibotConfig
+
+# Your robot's name, its motor pins, and the radio channel.
+config = MinibotConfig("MiniBot1", left_motor_pin=16, right_motor_pin=17, channel=6)
+
+bot = Minibot(config)
+bot.begin()
+
+while True:
+    bot.update()  # ALWAYS FIRST — handles comms, enable and the safety stop.
+
+    if bot.get_game_status() == Minibot.STANDBY:
+        # Not enabled by the driver station — stay still.
+        bot.stop_all_motors()
+    else:
+        # Tank drive: left stick drives the left tread, right stick the right.
+        # Pushing a stick up gives a NEGATIVE value, so flip the sign.
+        bot.drive_left_motor(-bot.get_left_y())
+        bot.drive_right_motor(-bot.get_right_y())</code></pre>
+
+          <p>Three rules come out of that, and they hold for anything you write:</p>
+          <ul>
+            <li>
+              <strong><code>bot.update()</code> is the first line in the loop.</strong> It
+              is what receives radio packets, notices the enable switch, and runs the
+              safety stop. Skip it and the robot goes deaf; put it at the bottom and
+              everything you read is one loop stale.
+            </li>
+            <li>
+              <strong>Check <code>get_game_status()</code> before you drive.</strong> The
+              library will stop the motors for you when the robot is disabled, but code
+              that drives regardless is code that fights it.
+            </li>
+            <li>
+              <strong>Pushing a stick forward gives you a negative number.</strong> That is
+              how gamepads report their Y axes, so tank drive needs the minus signs.
+            </li>
+          </ul>
+
+          <h2>Setting up your robot: MinibotConfig</h2>
+          <p>
+            The name is positional; everything else must be passed
+            <strong>by keyword</strong>, as in the template above.
+            <code>MinibotConfig("Bot1", 16, 17, 6)</code> is an error.
+          </p>
+
+          <div class="doc__scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Setting</th>
+                  <th scope="col">Default</th>
+                  <th scope="col">What it does</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>robot_id</code></td>
+                  <td>required</td>
+                  <td>
+                    The name shown in the driver station. Give every robot a different one.
+                    <strong>16 characters maximum.</strong>
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>left_motor_pin</code></td>
+                  <td>required</td>
+                  <td>GPIO pin the left motor's ESC signal wire is on.</td>
+                </tr>
+                <tr>
+                  <td><code>right_motor_pin</code></td>
+                  <td>required</td>
+                  <td>GPIO pin the right motor's ESC signal wire is on.</td>
+                </tr>
+                <tr>
+                  <td><code>channel</code></td>
+                  <td>required</td>
+                  <td>
+                    Wi-Fi channel for the radio. <strong>Must match the dongle</strong> —
+                    normally <code>6</code>. Get this wrong and the robot never appears in
+                    the driver station at all, with no error anywhere.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>neutral_left_us</code></td>
+                  <td><code>1500</code></td>
+                  <td>
+                    The pulse width that means "stop" for the left motor. 1500 µs is the RC
+                    standard. Raise or lower it by 20–30 at a time if the wheel creeps
+                    while the sticks are centred.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>neutral_right_us</code></td>
+                  <td><code>1500</code></td>
+                  <td>The same, for the right motor.</td>
+                </tr>
+                <tr>
+                  <td><code>display_enabled</code></td>
+                  <td><code>True</code></td>
+                  <td>Show status on the OLED. Set <code>False</code> if there isn't one.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p>
+            Motors always swing <strong>±300 µs around their neutral</strong>, so a default
+            robot drives between 1200 µs and 1800 µs.
+          </p>
+
+          <h2>Everything you can ask the robot</h2>
+          <p>Call all of these on <code>bot</code>.</p>
+
+          <h3>Setup and the loop</h3>
+          <div class="doc__scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Call</th>
+                  <th scope="col">What it does</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>bot.begin()</code></td>
+                  <td>Start the radio and the motors. Once, before the loop.</td>
+                </tr>
+                <tr>
+                  <td><code>bot.update()</code></td>
+                  <td>
+                    Handle comms, the enable switch and the safety stop.
+                    <strong>First line of every loop.</strong>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>Reading the gamepad</h3>
+          <div class="doc__scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Call</th>
+                  <th scope="col">Gives you</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <code>bot.get_left_x()</code><br /><code>bot.get_left_y()</code>
+                  </td>
+                  <td>
+                    Left stick, <code>-1.0</code> to <code>1.0</code>. Exactly
+                    <code>0.0</code> when centred — small resting wobble is swallowed for
+                    you, so you don't need your own deadzone.
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <code>bot.get_right_x()</code><br /><code>bot.get_right_y()</code>
+                  </td>
+                  <td>Right stick, the same.</td>
+                </tr>
+                <tr>
+                  <td>
+                    <code>bot.get_left_trigger()</code><br /><code
+                      >bot.get_right_trigger()</code
+                    >
+                  </td>
+                  <td>
+                    Triggers, <code>-1.0</code> to <code>1.0</code>. These are
+                    <strong>not</strong> deadzoned, so a trigger at rest may read a hair off
+                    zero — compare against a small threshold rather than
+                    <code>== 0</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <code>bot.get_cross()</code><br /><code>bot.get_circle()</code
+                    ><br /><code>bot.get_square()</code><br /><code>bot.get_triangle()</code>
+                  </td>
+                  <td>
+                    <code>True</code> while the button is held. These are the PlayStation
+                    names; on an Xbox pad they are A, B, X and Y in that order.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>bot.get_game_status()</code></td>
+                  <td>
+                    <code>Minibot.TELEOP</code> if the driver station has enabled this
+                    robot, else <code>Minibot.STANDBY</code>.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>Driving the motors</h3>
+          <div class="doc__scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Call</th>
+                  <th scope="col">What it does</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>bot.drive_left_motor(v)</code></td>
+                  <td>
+                    Drive the left motor. <code>v</code> runs <code>-1.0</code> (full
+                    reverse) through <code>0.0</code> (stop) to <code>1.0</code> (full
+                    forward).
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>bot.drive_right_motor(v)</code></td>
+                  <td>The same, right motor.</td>
+                </tr>
+                <tr>
+                  <td><code>bot.stop_all_motors()</code></td>
+                  <td>Cut both motors to neutral, immediately.</td>
+                </tr>
+                <tr>
+                  <td><code>bot.clear_calibration()</code></td>
+                  <td>
+                    Delete a saved motor trim, handing control back to your
+                    <code>main.py</code>. There is a button for this at
+                    <a href="/code-robot">Robot code</a>, which is easier.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2>Three things the library does whether you like it or not</h2>
+          <p>
+            These are safety and fairness features, and robot code cannot switch any of
+            them off. Knowing they exist saves you hunting for bugs that aren't there.
+          </p>
+
+          <h3>Motor commands ramp</h3>
+          <p>
+            <code>drive_left_motor()</code> and <code>drive_right_motor()</code> move
+            <em>toward</em> the number you pass rather than jumping to it — a full
+            forward-to-reverse reversal takes about half a second. So if you print the
+            value you asked for and watch the wheel, they will disagree for a moment. That
+            is correct.
+          </p>
+          <p>
+            The reason is electrical. Slamming a stick through neutral puts the battery
+            voltage and the motor's back-EMF in series, drawing roughly
+            <strong>twice stall current</strong>. The rail sags, the ESP32's brownout
+            detector resets the board, and from the driver station it looks exactly like
+            the robot dropping its radio link. The ramp bounds that current.
+          </p>
+          <p>
+            <code>stop_all_motors()</code> is <strong>never</strong> ramped, so real stops
+            are still instant.
+          </p>
+
+          <h3>The link-loss failsafe</h3>
+          <p>
+            If the robot hears nothing from the driver station for more than
+            <strong>250 ms</strong>, it stops the motors itself. This is what makes a robot
+            with a dead battery in the dongle, or one carried out of range, stop instead of
+            driving away. It is checked inside <code>bot.update()</code> — another reason
+            that call belongs at the top of your loop.
+          </p>
+
+          <h3>The driver station can cap your speed</h3>
+          <p>
+            There is a <strong>Speed limit</strong> slider on the
+            <a href="/control">driver station</a> that applies to every robot at once, and
+            it caps the same number you pass to <code>drive_left_motor()</code>. With the
+            limit at <code>0.60</code>, asking for <code>1.0</code> gets you
+            <code>0.60</code>; anything already below that is untouched.
+          </p>
+          <p>
+            Robot code cannot raise it — a coach who has slowed the field down for a demo
+            should not be undone by an edit to <code>main.py</code>. <strong
+              >If your robot feels slower than your numbers suggest, check the slider
+              before you go looking for a bug.</strong
+            >
+            Robots start unrestricted at every power-up, and the limit is not saved on the
+            robot.
+          </p>
+
+          <h2>The trap that catches everyone</h2>
+
+          <div class="alert" data-kind="warn">
+            <strong>A motor trim set from the driver station overrides your
+              <code>main.py</code>.</strong>
+            When someone uses the <strong>Neutral µs</strong> boxes on the driver station,
+            the value is saved on the robot in <code>calib.json</code> and loaded
+            <em>over</em> whatever your <code>MinibotConfig</code> says. That is deliberate
+            — it means a trim survives a brownout mid-match — but it also means
+            <strong>editing <code>neutral_left_us=</code> in your code will appear to do
+              absolutely nothing</strong>
+            while a saved trim exists. To hand control back to your code, use
+            <strong>Clear saved calibration</strong> at
+            <a href="/code-robot">Robot code</a>, which also shows you the saved values so
+            you can see whether one is there at all.
+          </div>
+
+          <p>
+            The same page shows a robot's saved trim whenever you pull from it, so when a
+            robot behaves in a way your code does not explain, that is the first place to
+            look.
+          </p>
+
+          <h2>Trimming a robot that creeps</h2>
+          <p>
+            A wheel that turns slowly while the sticks are centred needs its neutral
+            adjusted. You can do it from either end:
+          </p>
+          <ul>
+            <li>
+              <strong>From the driver station,</strong> with the
+              <strong>Neutral µs</strong> boxes and <strong>Apply</strong>. Values are sent
+              only when you click Apply, never streamed, and only to that slot's robot. The
+              line under the boxes shows what the robot reports it is
+              <em>actually</em> running, so you can watch a value land or see it clamped.
+              Fastest way to find the right number — but remember it then overrides your
+              code.
+            </li>
+            <li>
+              <strong>In your code,</strong> with <code>neutral_left_us=</code> and
+              <code>neutral_right_us=</code> in <code>MinibotConfig</code>. This is where
+              the value belongs once you know it. Clear any saved trim first or you won't
+              see your change.
+            </li>
+          </ul>
+          <p>Either way, values are clamped to the RC window, <strong>1000–2000 µs</strong>.</p>
+
+          <div class="alert" data-kind="warn">
+            <strong>Neutral is the pulse driven on every stop</strong> — including the
+            250 ms failsafe. A neutral near either end of that 1000–2000 range therefore
+            makes "motors stopped" mean near-full throttle in that direction. Keep the
+            robot on blocks the first time you apply an unfamiliar value, and watch the
+            readout to confirm what actually landed.
+          </div>
+
+          <h2>Seeing what your robot is doing</h2>
+          <p>
+            <code>print()</code> works, and its output has somewhere to go.
+            <a href="/code-robot">Robot code</a> streams it after an
+            <strong>Upload and run</strong>, so printing a value is the normal way to find
+            out why the robot is doing something odd. On the command line,
+            <code>./scripts/flash-robot.sh --repl</code> gives you the same thing plus a
+            live Python prompt.
+          </p>
+          <p>
+            Print sparingly inside the loop, though — it runs thousands of times a second,
+            and a print on every pass will bury anything useful.
+          </p>
+        </main>
+      </div>
+
+      <footer class="foot">
+        <div class="prose">
+          <p>
+            The library this page documents is <code>minibot.py</code>, served from this
+            site and uploaded to robots verbatim. Its source, and the full protocol the
+            robot speaks to the dongle, are in the
+            <a href="https://github.com/Saint-Francis-Robotics-Team2367/minibots-2026"
+              >minibots-2026</a
+            >
+            repository.
+          </p>
+        </div>
+      </footer>
+    </div>
+
+    <script type="module" src="../js/docs.js"></script>
+  </body>
+</html>

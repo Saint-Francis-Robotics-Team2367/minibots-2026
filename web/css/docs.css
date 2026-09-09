@@ -1,0 +1,452 @@
+/* ============================================================================
+   MiniCore documentation — Home and everything under /docs.
+
+   Loads after core.css. Replaces hub.css, which dressed a tool router: the
+   signal-chain diagram and three cards that sent you to /control, /code-robot or
+   /flash-dongle. Those answered "which tool do I want?" and nothing else, so a
+   student who had never seen a Minibot had nowhere to learn what one is. These
+   pages explain instead, and the shell is the one a wiki has: a nav tree beside a
+   column of prose.
+
+   The tools are still reachable from the rail, and from this sidebar's TOOLS
+   group — that group is what replaces the cards.
+   ========================================================================= */
+
+/* ── The two-pane shell ─────────────────────────────────────────────────── */
+/* 1px gaps over a --line ground, so the seams are hairlines rather than
+   borders. Same idiom as .util (core.css) and the old .tools grid — the site
+   draws every pane boundary this way. */
+.doc {
+  display: grid;
+  grid-template-columns: 14rem minmax(0, 1fr);
+  gap: 1px;
+  background: var(--line);
+}
+
+/* ── Sidebar ────────────────────────────────────────────────────────────── */
+.doc__side {
+  padding: var(--sp-4) 0.9rem var(--sp-5);
+  background: var(--s-deck);
+}
+
+/* Sticky inside its own pane: the programming page runs several screens, and a
+   nav tree you have to scroll back up to reach is a nav tree nobody uses. The
+   pane itself stays full height because the grid stretches it. */
+.doc__nav {
+  position: sticky;
+  top: var(--sp-4);
+}
+
+/* A group of links under one .hd label. */
+.doc__group {
+  margin: 0 0 var(--sp-4);
+}
+
+.doc__group:last-child {
+  margin-bottom: 0;
+}
+
+.doc__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 1px;
+}
+
+.doc__list a {
+  display: block;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  color: var(--ink-dim);
+  border-radius: var(--r);
+  /* Reserves the width the current-page marker occupies, so landing on a page
+     does not shift its own label two pixels right. */
+  border-left: 2px solid transparent;
+}
+
+.doc__list a:hover {
+  color: var(--ink);
+  background: var(--s-rise);
+}
+
+/* The page you are on. Carries aria-current, and is marked by surface plus an
+   edge rule — never by hue. Green and red separate by only ΔE 2.6 under
+   tritanopia (see core.css), so nothing in this UI is signalled by colour alone,
+   and "which page am I on" is no exception. Same treatment as the rail nav. */
+.doc__list a[aria-current="page"] {
+  color: var(--ink);
+  background: var(--s-rise);
+  border-left-color: var(--info);
+  font-weight: 600;
+}
+
+/* ── Body ───────────────────────────────────────────────────────────────── */
+.doc__body {
+  padding: var(--sp-5) 1.1rem var(--sp-6);
+  background: var(--s-card);
+  /* min-width: 0 lets a wide table's scroll container actually clamp. Without
+     it the grid track resolves to the table's intrinsic width and the whole
+     bezel scrolls sideways instead. */
+  min-width: 0;
+}
+
+/* Everything below is scoped under .doc__body deliberately. core.css styles
+   `.card__head h2` and `.hd` for instrument labels; a bare `h2` rule here would
+   repaint those on the driver station. Prose type lives inside the prose. */
+
+.doc__body h1 {
+  max-width: 30ch;
+  margin: 0 0 var(--sp-4);
+  font-size: clamp(1.3rem, 3.6vw, 1.9rem);
+  font-weight: 700;
+  line-height: 1.18;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+/* The lead paragraph under an h1 — one step up in size, so the page opens with
+   a sentence rather than dropping straight into body copy. */
+.doc__lead {
+  max-width: 68ch;
+  margin: 0 0 var(--sp-5);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--ink-dim);
+}
+
+.doc__body h2 {
+  margin: var(--sp-6) 0 var(--sp-3);
+  padding-top: var(--sp-3);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  /* Full column width, deliberately not capped to the text measure: this rule is
+     a section break, and one that stopped at 46ch would read as a stray divider
+     hanging in the middle of the page. */
+  border-top: 1px solid var(--line);
+}
+
+/* A section rule above the first h2 would draw a line immediately under the
+   lead, which reads as a stray divider rather than as a section break. */
+.doc__body > h2:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: var(--sp-5);
+}
+
+.doc__body h3 {
+  margin: var(--sp-5) 0 var(--sp-2);
+  font-size: 0.84rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* Measure capped near 78ch: monospace runs wide, and a line spanning the full
+   74rem bezel is unreadable. core.css's .prose caps at 62ch for dense
+   instrument copy; documentation is read in longer runs, so it gets a little
+   more room without going the whole width. */
+.doc__body p,
+.doc__body li {
+  max-width: 78ch;
+  font-size: 0.84rem;
+  line-height: 1.65;
+  color: var(--ink-dim);
+}
+
+.doc__body p {
+  margin: 0 0 var(--sp-3);
+}
+
+.doc__body strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.doc__body ul,
+.doc__body ol {
+  margin: 0 0 var(--sp-3);
+  padding-left: 1.3rem;
+}
+
+.doc__body li {
+  margin-bottom: 0.3rem;
+}
+
+.doc__body li > ul,
+.doc__body li > ol {
+  margin-top: 0.3rem;
+  margin-bottom: 0;
+}
+
+/* Inline code inside prose. Everything on this site is already monospace, so a
+   code span earns its keep through surface, not through face. */
+.doc__body :not(pre) > code {
+  padding: 0.06rem 0.26rem;
+  font-size: 0.94em;
+  color: var(--ink);
+  background: var(--s-rise);
+  border-radius: 2px;
+}
+
+.doc__body .code {
+  margin-bottom: var(--sp-4);
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────────── */
+/* API references are tables, and monospace tables run wide. Every one is
+   wrapped in this scroller so the table scrolls inside its own box and the page
+   body never does. */
+.doc__scroll {
+  overflow-x: auto;
+  margin: 0 0 var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+.doc__body table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.76rem;
+}
+
+.doc__body th {
+  padding: 0.42rem 0.6rem;
+  text-align: left;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  background: var(--s-deck);
+  border-bottom: 1px solid var(--line);
+}
+
+.doc__body td {
+  padding: 0.42rem 0.6rem;
+  color: var(--ink-dim);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  vertical-align: top;
+}
+
+.doc__body tr:last-child td {
+  border-bottom: 0;
+}
+
+/* The call/name column. Wrapping a method signature mid-identifier makes it
+   unreadable and unsearchable. */
+.doc__body td:first-child {
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.doc__body td:first-child code {
+  background: none;
+  padding: 0;
+}
+
+/* ── Index cards ────────────────────────────────────────────────────────── */
+/* Home restates the sidebar tree as a scannable index: it is a landing page,
+   and a landing page whose only navigation is a 14rem rail of small links is a
+   landing page that has not landed anyone. */
+/* .doc__body ul sets a list indent and wins on specificity, so both of these
+   card lists reset padding explicitly. Without it the indent survives as a strip
+   of the --line ground down the left edge, which reads as a rendering fault. */
+.doc__body .idx,
+.doc__body .plan {
+  padding-left: 0;
+}
+
+.idx {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1px;
+  margin: 0 0 var(--sp-5);
+  padding: 0;
+  list-style: none;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+
+.idx > li {
+  max-width: none;
+  margin: 0;
+  padding: var(--sp-3) 0.8rem;
+  background: var(--s-deck);
+}
+
+.idx__name {
+  display: block;
+  margin-bottom: 0.2rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.idx__name:hover {
+  color: var(--info);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+/* --ink-dim, not --ink-mute: this is a sentence a student reads to choose where
+   to go, and --ink-mute measures 4.16:1 on the card ground — under the 4.5:1
+   floor for body text at this size. The .idx__name above it carries the
+   hierarchy through weight and size instead. */
+.idx__what {
+  display: block;
+  max-width: 42ch;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+/* An entry whose page is still a placeholder. Says so in a word, because a
+   student who clicks three empty guides in a row stops trusting the index. */
+/* Small, but it is real text carrying real information — that this link goes
+   somewhere unfinished — so it clears 4.5:1 like any other sentence. --ink-mute
+   on --s-rise measured 3.43:1. It reads as secondary through size, tracking and
+   the enclosing chip, not through being hard to see. */
+.idx__soon {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.02rem 0.3rem;
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  background: var(--s-rise);
+  border: 1px solid var(--line-bright);
+  border-radius: 2px;
+  vertical-align: 0.1em;
+}
+
+/* ── Planned outline ────────────────────────────────────────────────────── */
+/* The build and wiring pages are deliberately empty, and have to read that way
+   rather than as thin content. This is the outline the real guide will fill:
+   dimmed, non-interactive, and obviously not written yet. */
+.plan {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.plan > li {
+  max-width: none;
+  margin: 0;
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.plan__name {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+/* --ink-mute on the card surface is 3.83:1 — fine for a label, under the 4.5:1
+   body-text floor. This is a sentence, so it gets --ink-dim (6.53:1) instead. An
+   earlier opacity: 0.8 on top of --ink-mute measured 2.95:1: dimming to signal
+   "not written yet" is not worth trading legibility for, and the alert above plus
+   the non-interactive, unlinked rows already carry that message. */
+.plan__what {
+  display: block;
+  max-width: 72ch;
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  color: var(--ink-dim);
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────────── */
+.foot {
+  padding: var(--sp-4) 1.1rem var(--sp-5);
+  background: var(--s-card);
+  border-top: 1px solid var(--line);
+}
+
+.foot code {
+  color: var(--ink-dim);
+  font-size: 0.78rem;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 52rem) {
+  /* Sidebar above the body. Unsticks it too: pinned to the top of a stacked
+     layout it would cover the prose it is meant to navigate.
+
+     Groups go side by side rather than stacking, and the minimum is 8rem rather
+     than a comfortable 11rem for one reason: at 390px a single stacked column of
+     eight links is ~370px tall, which puts the page's own <h1> below the fold. A
+     reader arriving at a documentation page should see the documentation. 8rem
+     still fits two columns inside a 390px viewport once the bezel and gutters are
+     paid for, which roughly halves that height. */
+  .doc {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .doc__nav {
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+    gap: var(--sp-3) var(--sp-4);
+    align-items: start;
+  }
+
+  .doc__group {
+    margin-bottom: 0;
+  }
+}
+
+@media (max-width: 40rem) {
+  .doc__side,
+  .doc__body,
+  .foot {
+    padding-left: 0.7rem;
+    padding-right: 0.7rem;
+  }
+
+  .doc__body {
+    padding-top: var(--sp-4);
+  }
+}
+
+/* ── Forced colours ─────────────────────────────────────────────────────── */
+/* The current-page marker is a background plus a coloured edge, and
+   forced-colors discards both — so without this block "which page am I on"
+   disappears entirely for the readers who most need it. CanvasText is the OS
+   foreground keyword; there is no author palette in this mode.
+
+   Every sibling link reserves a left edge that is transparent in normal
+   rendering, but forced-colors repaints it as the link colour — so here ALL
+   items show a visible tick, and a merely thicker one would be a weak signal.
+   What carries the state is the closed box on the other three sides; the left
+   edge is widened only so the emphasis stays where it is in normal rendering.
+   Measured: current 3/1/1/1, siblings 2/0/0/0.
+
+   core.css carries an equivalent block for the same reason. */
+@media (forced-colors: active) {
+  .doc__list a[aria-current="page"] {
+    border: 1px solid CanvasText;
+    border-left-width: 3px;
+  }
+
+  .idx,
+  .idx > li {
+    border: 1px solid CanvasText;
+  }
+}
