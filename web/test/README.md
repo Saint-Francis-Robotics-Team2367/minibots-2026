@@ -24,6 +24,28 @@ Both negotiation outcomes are exercised: `R\x01` (raw-paste) and `R\x00`
 (fall back to plain raw REPL, 256 bytes at a time). The window size is set to 64
 so a multi-KB file crosses many flow-control windows rather than fitting in one.
 
+### Handshake cancellation
+
+`silentPort()` is the other half: a port that opens and then says nothing, which
+`FakeBoard` cannot be because it always answers. That is a board with no
+MicroPython on it — the board /code-robot's Erase button exists for — and against
+it every one of the five attempts fails, so the loop is ~30 s of dead time. Erase
+aborts it instead of waiting, and these assertions pin that it actually stops.
+
+A click can land in any of the handshake's **three** waits, and they are not one
+mechanism: `enterRaw`'s 120 ms settle and the 1 s inter-attempt delay are
+`sleepOr`, while the long one is a poll inside `#readUntil`. All three are covered
+separately, and the reason is a real escape: an earlier version aborted only at
+50 ms, landed in the settle sleep, and still passed with `#readUntil`'s abort check
+deleted outright. Each also asserts the cancelled attempt is **not** reported as
+`REPL attempt N of 5 failed` — that line blames the board for the user's decision.
+
+Two things are deliberately absent. The full five-attempt exhaustion is ~30 s of
+wall clock and would turn an instant suite into one nobody runs. And the file has
+one slow assertion by necessity: landing inside the inter-attempt delay means
+waiting out one 5 s read timeout first, so it prints a line saying so rather than
+looking hung.
+
 ## `drivers.test.mjs`
 
 `detectOS()` takes its navigator as a parameter, so this hands it plain objects
