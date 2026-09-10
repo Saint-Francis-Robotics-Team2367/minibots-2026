@@ -13,7 +13,7 @@
 
 import { $, log, clearLog } from "./dom.js";
 import { session } from "./store.js";
-import { MicroPythonSerial, SerialError } from "./serial.js";
+import { MicroPythonSerial, CancelledError } from "./serial.js";
 import { mountDriverHelp } from "./drivers.js";
 import { PortOwner, flash, fetchImage, ROBOT_MICROPYTHON_OFFSET } from "./esptool.js";
 
@@ -54,13 +54,28 @@ let stopStream = null;
 let portOpen = false;
 let atRepl = false;
 /**
- * True while a device operation owns the port.
+ * The in-flight REPL handshake, or null.
  *
- * connect() is awaited inside an async click handler, so its 5-attempt REPL loop
- * runs for ~30 s WITHOUT blocking anything. renderFlashGate() would open the gate
- * as soon as portOpen flipped, so a reflash could start while those retries were
- * still writing Ctrl-C to the same port. PortOwner does not catch this: connect()
- * claims "repl" and fullReflash() releases "repl", so the claim looks satisfied.
+ * The handshake is 5 attempts spaced 1 s apart and every one of them fails on a
+ * board with no MicroPython — ~30 s during which the only useful action is the
+ * full reflash. So it is preemptable rather than blocking: Erase and Disconnect
+ * both abort it (cancelHandshake) instead of waiting it out.
+ *
+ * Two fields, because aborting is not enough. enterRaw unwinds asynchronously, so
+ * a preemptor that closed the port the instant it aborted would release the writer
+ * out from under an abandoned #write and surface as an unhandled rejection.
+ * `done` is what makes the unwind awaitable; it is stored pre-caught, so awaiting
+ * it can never itself reject.
+ *
+ * @type {{ abort: AbortController, done: Promise<void> } | null}
+ */
+let handshake = null;
+/**
+ * True while a device operation owns the port and must NOT be preempted.
+ *
+ * Deliberately false during the handshake: that is the whole point above. It
+ * covers pull, push and reflash, each of which either holds the port through
+ * esptool or is mid-write to a filesystem.
  */
 let busy = false;
 
@@ -151,16 +166,26 @@ function renderBuf() {
 
 function renderConn() {
   document.body.dataset.link = atRepl ? "up" : "down";
+  // Three states for an open port, not two: "reaching" says the retries are still
+  // running, which is what makes the enabled Erase button below make sense.
   $("portState").textContent = atRepl
     ? "Connected"
-    : portOpen
-      ? "Port open — no REPL"
-      : "Not connected";
+    : !portOpen
+      ? "Not connected"
+      : handshake
+        ? "Port open — reaching the REPL…"
+        : "Port open — no REPL";
   $("btnConnect").disabled = portOpen;
-  $("btnDisconnect").disabled = !portOpen;
-  // These three all execute Python on the board, so they need a live REPL.
+  // Live during the handshake (busy is false there) so it can cancel it. Disabled
+  // during a real operation — including the reconnect inside fullReflash, which
+  // calls through here mid-write.
+  $("btnDisconnect").disabled = !portOpen || busy;
+  // These three all execute Python on the board, so they need a live REPL — and
+  // `busy` as well, because fullReflash reconnects to write its six files and so
+  // reaches here with atRepl true mid-write. Without that term a click on Pull
+  // there would interleave commands into an in-flight reflash.
   for (const id of ["btnPull", "btnPush", "btnClearCalib"]) {
-    $(id).disabled = !atRepl;
+    $(id).disabled = !atRepl || busy;
   }
   renderFlashGate();
 }
@@ -173,12 +198,14 @@ function renderConn() {
  * held so full reflash can take it. Only a port that will not open at all is
  * fatal here.
  *
+ * The handshake does not set `busy`, so Erase and Disconnect stay live while it
+ * runs — see the note on `handshake`.
+ *
  * @param {SerialPort} port
  * @returns {Promise<boolean>} true when the REPL was reached
  */
 async function connect(port) {
   owner.claim("repl");
-  busy = true;
   renderConn();
   try {
     await mp.connect(port);
@@ -192,17 +219,28 @@ async function connect(port) {
     owner.release("repl");
     portOpen = false;
     atRepl = false;
-    busy = false;
     renderConn();
     throw err;
   }
+  const abort = new AbortController();
+  const done = mp.enterRawWithRetry((m) => log(m, "warn"), { signal: abort.signal });
+  // Pre-caught, so a preemptor awaiting it never has to handle the rejection that
+  // is its own doing. The real promise is still what this function awaits.
+  handshake = { abort, done: done.then(() => {}).catch(() => {}) };
+  renderConn();
   try {
-    await mp.enterRawWithRetry((m) => log(m, "warn"));
+    await done;
     atRepl = true;
     log("At the robot's REPL", "go");
     return true;
   } catch (err) {
     atRepl = false;
+    // A cancellation is not a diagnosis, so it says nothing here: the remediation
+    // below would be actively misleading (nothing is wrong with the board — we
+    // stopped asking), and whoever cancelled has the reason and logs it.
+    if (err instanceof CancelledError) {
+      return false;
+    }
     log(`No REPL on this board: ${err.message}`, "warn");
     log(
       "If this board has never had MicroPython on it, use Reflash — that is what " +
@@ -211,19 +249,40 @@ async function connect(port) {
     );
     return false;
   } finally {
-    // Only now is the port genuinely idle, so only now may reflash have it.
-    busy = false;
+    handshake = null;
     renderConn();
   }
 }
 
+/**
+ * Abort an in-flight handshake and wait for it to let go of the port.
+ *
+ * Both halves matter. Without the abort the caller waits out the retries; without
+ * the await it races an unwinding enterRaw for the writer. Safe to call when there
+ * is no handshake, which is the common case.
+ *
+ * @returns {Promise<boolean>} true when there was one to cancel
+ */
+async function cancelHandshake() {
+  const h = handshake;
+  if (!h) {
+    return false;
+  }
+  h.abort.abort();
+  await h.done;
+  return true;
+}
+
 async function disconnect() {
   stopWatching();
+  // Before mp.close(): closing first releases the writer under an in-flight
+  // #write, which surfaces as an unhandled rejection rather than an error.
+  await cancelHandshake();
   await mp.close();
   owner.release("repl");
   portOpen = false;
   atRepl = false;
-  renderConn();
+  setBusy(false);
   log("Disconnected");
 }
 
@@ -369,6 +428,24 @@ async function push() {
   }
 }
 
+/**
+ * Load the starter template into the editor.
+ *
+ * Shared by the Template button and by fullReflash's empty-editor case, so the
+ * two cannot drift on which path is fetched or what gets logged.
+ *
+ * @throws on a failed fetch — both callers need to know, and reflash must not
+ *   erase a board it has nothing to write to.
+ */
+async function loadTemplate() {
+  const res = await fetch("templates/main.py");
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  setCode(await res.text());
+  log("Loaded the starter template");
+}
+
 /** @param {string} name @returns {Promise<Uint8Array>} */
 async function fetchLib(name) {
   const res = await fetch(`lib/${name}`);
@@ -409,8 +486,10 @@ function stopWatching() {
 
 function renderFlashGate() {
   const typed = $("flashConfirm").value.trim().toUpperCase() === "ERASE";
-  // portOpen, not atRepl: this is the tool for a board that has no REPL.
-  // `!busy` matters as much: see the note on `busy`.
+  // portOpen, not atRepl: this is the tool for a board that has no REPL. And an
+  // unfinished handshake is no reason to wait — clicking Erase cancels it (see
+  // `handshake`), so the gate opens as soon as the port is ours. `!busy` still
+  // holds the gate shut during an operation that cannot be preempted.
   $("btnFlash").disabled = !(portOpen && typed && !busy);
   // Say WHICH precondition is missing. A disabled button next to a correctly
   // typed confirmation reads as a broken page, and the one thing a student
@@ -420,7 +499,14 @@ function renderFlashGate() {
   } else if (!typed) {
     note("flashNote", 'Type ERASE above to unlock the button.');
   } else if (!$("flashNote").dataset.kind) {
-    note("flashNote", "Ready. This erases everything on the board.");
+    // Naming the interruption is the point: the log is still printing REPL
+    // attempts, so a bare "Ready" would look like it meant to wait for them.
+    note(
+      "flashNote",
+      handshake
+        ? "Ready. This stops the REPL attempts and erases the board."
+        : "Ready. This erases everything on the board.",
+    );
   }
 }
 
@@ -430,13 +516,23 @@ function renderFlashGate() {
  * without it there is no interruptible window, so no later upload can get in.
  */
 async function fullReflash() {
-  // Checked BEFORE the confirmation: asking someone to approve an irreversible
-  // erase and only then telling them to load code is the wrong order.
-  const code = getCode();
-  if (!code.trim()) {
-    note("flashNote", "Load a main.py first — the robot will have no code otherwise.", "err");
-    return;
+  // Resolved BEFORE the confirmation, both of these: asking someone to approve an
+  // irreversible erase and only then discovering we have nothing to write is the
+  // wrong order.
+  //
+  // An empty editor is the ordinary state of a fresh tab, and a fresh tab is what
+  // a fresh board arrives with — so it loads the starter template rather than
+  // refusing. A template that will not load still stops the erase.
+  if (!getCode().trim()) {
+    try {
+      await loadTemplate();
+    } catch (err) {
+      note("flashNote", `Could not load the starter template: ${err.message}`, "err");
+      log(`Could not load the template: ${err.message}`, "err");
+      return;
+    }
   }
+  const code = getCode();
   if (
     !confirm(
       "Erase the entire robot and install MicroPython? Its code and saved " +
@@ -452,6 +548,11 @@ async function fullReflash() {
   setBusy(true);
   note("flashNote", "");
   try {
+    // setBusy first, so the gate is already shut while this unwinds — otherwise a
+    // second click could start a second reflash during the await.
+    if (await cancelHandshake()) {
+      log("Stopped trying for a REPL — erasing instead", "warn");
+    }
     log("Fetching MicroPython image");
     const image = await fetchImage(MICROPYTHON_URL, MICROPYTHON_SHA256);
     log(`Image verified (${image.length} bytes, SHA256 matches)`, "go");
@@ -645,12 +746,7 @@ $("btnTemplate").addEventListener("click", async () => {
     return;
   }
   try {
-    const res = await fetch("templates/main.py");
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-    setCode(await res.text());
-    log("Loaded the starter template");
+    await loadTemplate();
   } catch (err) {
     log(`Could not load the template: ${err.message}`, "err");
   }

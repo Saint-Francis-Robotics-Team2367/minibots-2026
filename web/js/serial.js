@@ -51,7 +51,52 @@ export const REMEDIATION =
 
 export class SerialError extends Error {}
 
+/**
+ * The handshake was cancelled by the caller, not refused by the board.
+ *
+ * Named for the concept rather than after the DOM's AbortError DOMException, so
+ * nobody has to work out which of the two they caught. It extends SerialError
+ * because every existing catch site treats a failed handshake as a SerialError,
+ * and a cancellation is still one of those — just one with no remediation to
+ * offer, since the board was never the problem.
+ */
+export class CancelledError extends SerialError {}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * sleep, but a cancellation does not have to wait the delay out.
+ *
+ * The waits in the handshake path are 1000 ms between attempts and 120 ms for the
+ * Ctrl-C to settle. A plain sleep() there swallows an abort for as long as it
+ * runs, which is exactly the latency /code-robot's Erase button exists to avoid.
+ *
+ * @param {number} ms
+ * @param {AbortSignal} [signal]
+ */
+function sleepOr(ms, signal) {
+  if (!signal) {
+    return sleep(ms);
+  }
+  if (signal.aborted) {
+    return Promise.reject(new CancelledError("Cancelled"));
+  }
+  return new Promise((resolve, reject) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      done();
+      reject(new CancelledError("Cancelled"));
+    };
+    const timer = setTimeout(() => {
+      done();
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 export class MicroPythonSerial {
   constructor() {
@@ -221,11 +266,16 @@ export class MicroPythonSerial {
    *
    * @param {string} needle
    * @param {number} [timeoutMs]
+   * @param {AbortSignal} [signal] Abort mid-wait. The loop already polls every
+   *   10 ms, so that is the whole cancellation latency.
    * @returns {Promise<string>} everything before the needle
    */
-  async #readUntil(needle, timeoutMs = 5000) {
+  async #readUntil(needle, timeoutMs = 5000, signal) {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
+      if (signal?.aborted) {
+        throw new CancelledError("Cancelled while waiting for the board");
+      }
       const at = this.buf.indexOf(needle);
       if (at !== -1) {
         const head = this.buf.slice(0, at);
@@ -263,25 +313,25 @@ export class MicroPythonSerial {
    * Enter the raw REPL. Sequence and the reason for its shape are mpremote's
    * (transport_serial.py:162).
    *
-   * @param {{ softReset?: boolean, timeoutMs?: number }} [opts]
+   * @param {{ softReset?: boolean, timeoutMs?: number, signal?: AbortSignal }} [opts]
    */
-  async enterRaw({ softReset = true, timeoutMs = 5000 } = {}) {
+  async enterRaw({ softReset = true, timeoutMs = 5000, signal } = {}) {
     // Note the leading \r: a bare \x03 can be swallowed when the board is
     // mid-line, and main.py's tight loop leaves very little else to land in.
     await this.#write("\r" + CTRL_C);
-    await sleep(120);
+    await sleepOr(120, signal);
     this.buf = ""; // mpremote flushes input here too
     await this.#write("\r" + CTRL_A);
 
     if (softReset) {
-      await this.#readUntil(RAW_PROMPT, timeoutMs);
+      await this.#readUntil(RAW_PROMPT, timeoutMs, signal);
       await this.#write(CTRL_D);
       // Awaited separately from the banner, deliberately: that is what lets
       // boot.py's own output through between the two, instead of it landing
       // inside the sentinel we are matching.
-      await this.#readUntil(SOFT_REBOOT, timeoutMs);
+      await this.#readUntil(SOFT_REBOOT, timeoutMs, signal);
     }
-    await this.#readUntil(RAW_BANNER, timeoutMs);
+    await this.#readUntil(RAW_BANNER, timeoutMs, signal);
     this.inRaw = true;
   }
 
@@ -289,19 +339,31 @@ export class MicroPythonSerial {
    * enterRaw with the retry policy the shell script uses, because the window
    * boot.py opens is 1500 ms and the first Ctrl-C often misses it.
    *
+   * Cancellable, because on a board with no MicroPython every attempt is certain
+   * to fail and the whole loop is ~30 s of dead time. /code-robot's Erase button
+   * is for exactly that board, so it aborts this rather than waiting it out.
+   *
    * @param {(msg: string) => void} [onAttempt]
+   * @param {{ signal?: AbortSignal }} [opts]
+   * @throws {CancelledError} on abort — distinguishable from a board that refused
    */
-  async enterRawWithRetry(onAttempt) {
+  async enterRawWithRetry(onAttempt, { signal } = {}) {
     let last;
     for (let i = 1; i <= RETRY_ATTEMPTS; i++) {
       try {
-        await this.enterRaw();
+        await this.enterRaw({ signal });
         return;
       } catch (err) {
+        // A cancelled attempt is not a failed attempt: reporting it would log
+        // "attempt 3 of 5 failed" about the board when the user simply moved on,
+        // and counting it would keep retrying after they asked us to stop.
+        if (err instanceof CancelledError) {
+          throw err;
+        }
         last = err;
         onAttempt?.(`REPL attempt ${i} of ${RETRY_ATTEMPTS} failed`);
         if (i < RETRY_ATTEMPTS) {
-          await sleep(RETRY_DELAY_MS);
+          await sleepOr(RETRY_DELAY_MS, signal);
         }
       }
     }
