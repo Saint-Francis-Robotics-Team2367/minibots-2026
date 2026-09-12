@@ -104,11 +104,13 @@ assert struct.calcsize(_FMT_SPEED_LIMIT_ACK) == 9
 # If your ESCs need a different center, pass neutral_left_us= / neutral_right_us=
 # (see Minibot.__init__), or set them live from the driver station -- see the
 # remote trim block below.
+# fmt: off
 _PWM_FREQ_HZ = 50
 _PWM_CENTER_US = 1500  # neutral pulse width (motors stopped)
-_PWM_RANGE_US = 300  # +/- swing at full stick
-_PWM_MIN_US = 500  # safety minimum (per controller specs)
-_PWM_MAX_US = 2500  # safety maximum (per controller specs)
+_PWM_RANGE_US = 300    # +/- swing at full stick
+_PWM_MIN_US = 500      # safety minimum (per controller specs)
+_PWM_MAX_US = 2500     # safety maximum (per controller specs)
+# fmt: on
 
 # --- Remote neutral trim (driver station "Apply") ---
 # Clamp for a neutral pulse arriving over the air: the full 1-2 ms RC window, so
