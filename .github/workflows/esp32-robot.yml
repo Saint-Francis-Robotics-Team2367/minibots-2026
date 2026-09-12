@@ -1,0 +1,39 @@
+# Sanity Check for Robot
+name: Firmware Robot
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'firmware/esp32-robot/**/*.py'
+      - '.github/workflows/pyright.yml'
+
+jobs:
+  type-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dev dependencies
+        working-directory: firmware/esp32-robot
+        run: uv venv && uv pip install -e ".[dev]"
+
+      - name: Run pyright
+        working-directory: firmware/esp32-robot
+        run: uv run pyright .
+
+      - name: Check formatting with ruff
+        working-directory: firmware/esp32-robot
+        run: uv run ruff check .
+
+      - name: Check code format with ruff
+        working-directory: firmware/esp32-robot
+        run: uv run ruff format --check .

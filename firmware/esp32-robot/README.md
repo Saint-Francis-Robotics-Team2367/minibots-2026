@@ -60,6 +60,29 @@ On power-up the robot waits ~1.5 s before running your `main.py` (you'll see a
 tool uses to interrupt the board, so uploads work even though `main.py` runs a
 tight loop. It's handled in `boot.py` — you don't need to do anything.
 
+## Local development setup
+
+Install dev dependencies once:
+
+```bash
+# from firmware/esp32-robot/
+pip install uv
+uv pip install -e ".[dev]"
+```
+
+**Run linters** before you push:
+
+```bash
+# type check with pyright (catches MicroPython API mistakes)
+uv run pyright .
+
+# format and lint with ruff (line length: 120)
+uv run ruff check --fix .
+uv run ruff format .
+```
+
+Both checks run automatically on pull requests to `main`.
+
 ## Writing robot code
 
 Open `main.py`. The `Minibot` object gives you everything:
