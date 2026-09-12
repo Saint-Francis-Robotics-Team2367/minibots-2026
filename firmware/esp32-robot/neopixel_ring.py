@@ -1,10 +1,11 @@
 import time
+from typing import Sequence
 
 import machine
 import neopixel
 
 # Color constants
-RAINBOW_COLORS = [(255, 0, 0), (255, 0, 255), (0, 0, 255), (0, 255, 255), (0, 255, 0), (255, 255, 0)]
+RAINBOW_COLORS: list[tuple[int, int, int]] = [(255, 0, 0), (255, 0, 255), (0, 0, 255), (0, 255, 255), (0, 255, 0), (255, 255, 0)]
 
 
 class NeoPixelRing:
@@ -49,7 +50,7 @@ class NeoPixelRing:
         for i in range(self.num_leds):
             self.set_color(i, r_step * i, g_step * i, b_step * i)
 
-    def set_colors(self, colors: list) -> None:
+    def set_colors(self, colors: Sequence[tuple[int, int, int]]) -> None:
         """Set colors across the ring, cycling through the color array as needed.
 
         Args:
@@ -97,7 +98,7 @@ class RingConnectionStatus:
             self.blink_state = not self.blink_state
             self.blink_ticks = 0
 
-    def get_color(self) -> tuple:
+    def get_color(self) -> tuple[int, int, int]:
         """Get the color for the current status.
 
         Returns:
@@ -113,7 +114,7 @@ class RingConnectionStatus:
         else:  # STATUS_CONNECTED_ASSIGNED
             return (0, 255, 0)  # Green
 
-    def get_colors(self) -> list:
+    def get_colors(self) -> list[tuple[int, int, int]]:
         """Get color list for all LEDs.
 
         Returns:
@@ -126,14 +127,14 @@ class RingConnectionStatus:
 class RingRotation:
     """Handles color rotation logic for the NeoPixel ring."""
 
-    def __init__(self, colors: list, rotate_delay_ms: int = 1000):
+    def __init__(self, colors: Sequence[tuple[int, int, int]], rotate_delay_ms: int = 1000):
         """Initialize ring rotation.
 
         Args:
             colors: List of (r, g, b) tuples to rotate through
             rotate_delay_ms: Delay between rotations in milliseconds (default: 1000)
         """
-        self.colors = colors
+        self.colors: list[tuple[int, int, int]] = list(colors)
         self.rotate_delay_ms = rotate_delay_ms
         self.offset = 0
         self.direction = 1
@@ -156,7 +157,7 @@ class RingRotation:
             return True
         return False
 
-    def get_colors(self) -> list:
+    def get_colors(self) -> list[tuple[int, int, int]]:
         """Get the current rotated color pattern.
 
         Returns:
