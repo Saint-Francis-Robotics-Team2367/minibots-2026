@@ -20,7 +20,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install uv
-        run: pip install uv
+        run: uv venv && pip install uv
 
       - name: Install dev dependencies
         working-directory: firmware/esp32-robot
