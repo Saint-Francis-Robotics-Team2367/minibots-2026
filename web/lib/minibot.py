@@ -19,14 +19,18 @@ this file -- they are not independently versioned.
 """
 
 import json
-import network
-import espnow
 import os
 import struct
 import time
-from machine import Pin, PWM
-from minibot_config import MinibotConfig
+
+import espnow
+import network
+from machine import PWM, Pin
+
+from button import Button
 from display import Display
+from minibot_config import MinibotConfig
+from neopixel_ring import RAINBOW_COLORS, NeoPixelRing, RingConnectionStatus, RingRotation
 
 # --- Protocol constants (keep in sync with firmware/common/minicore_protocol.h) ---
 MC_MSG_JOYSTICK = 0x01
@@ -54,15 +58,15 @@ MC_ENABLE_TIMEOUT_MS = 3000
 _BROADCAST = b"\xff\xff\xff\xff\xff\xff"
 
 # struct formats (little-endian, packed). Sizes are asserted below.
-_FMT_JOYSTICK = "<BBhhhhhhH8s"   # 24 bytes
-_FMT_ENABLE = "<BB6s"            # 8 bytes
-_FMT_HEARTBEAT = "<B6sB16sBB"    # 26 bytes
-_FMT_DISCOVERY_REQ = "<BB"       # 2 bytes
-_FMT_DISCOVERY_RESP = "<B6sB16s" # 24 bytes
-_FMT_SET_NEUTRAL = "<B6sHH"      # 11 bytes
-_FMT_NEUTRAL_ACK = "<B6sHHB"     # 12 bytes
-_FMT_SET_SPEED_LIMIT = "<BH"     # 3 bytes
-_FMT_SPEED_LIMIT_ACK = "<B6sH"   # 9 bytes
+_FMT_JOYSTICK = "<BBhhhhhhH8s"  # 24 bytes
+_FMT_ENABLE = "<BB6s"  # 8 bytes
+_FMT_HEARTBEAT = "<B6sB16sBB"  # 26 bytes
+_FMT_DISCOVERY_REQ = "<BB"  # 2 bytes
+_FMT_DISCOVERY_RESP = "<B6sB16s"  # 24 bytes
+_FMT_SET_NEUTRAL = "<B6sHH"  # 11 bytes
+_FMT_NEUTRAL_ACK = "<B6sHHB"  # 12 bytes
+_FMT_SET_SPEED_LIMIT = "<BH"  # 3 bytes
+_FMT_SPEED_LIMIT_ACK = "<B6sH"  # 9 bytes
 
 assert struct.calcsize(_FMT_JOYSTICK) == 24
 assert struct.calcsize(_FMT_ENABLE) == 8
@@ -99,10 +103,10 @@ assert struct.calcsize(_FMT_SPEED_LIMIT_ACK) == 9
 # (see Minibot.__init__), or set them live from the driver station -- see the
 # remote trim block below.
 _PWM_FREQ_HZ = 50
-_PWM_CENTER_US = 1500   # neutral pulse width (motors stopped)
-_PWM_RANGE_US = 300     # +/- swing at full stick
-_PWM_MIN_US = 500       # safety minimum (per controller specs)
-_PWM_MAX_US = 2500      # safety maximum (per controller specs)
+_PWM_CENTER_US = 1500  # neutral pulse width (motors stopped)
+_PWM_RANGE_US = 300  # +/- swing at full stick
+_PWM_MIN_US = 500  # safety minimum (per controller specs)
+_PWM_MAX_US = 2500  # safety maximum (per controller specs)
 
 # --- Remote neutral trim (driver station "Apply") ---
 # Clamp for a neutral pulse arriving over the air: the full 1-2 ms RC window, so
@@ -226,6 +230,11 @@ class Minibot:
     _axis_rt: int
     _buttons: int
     _display: Display | None
+    _ring: NeoPixelRing | None
+    _ring_rotation: RingRotation | None
+    _ring_connection_status: RingConnectionStatus | None
+    _ring_show_rainbow: bool
+    _button: Button | None
 
     def __init__(self, config):
         """Initialize from a MinibotConfig.
@@ -239,9 +248,10 @@ class Minibot:
         # Fail loudly rather than truncating: the name is how the driver station
         # identifies this robot, and a silently shortened one looks like a
         # different (or duplicate) robot on the station and the OLED.
-        assert len(config.robot_id) <= MC_ROBOT_ID_MAX, (
-            "robot_id %r is %d characters; max is %d"
-            % (config.robot_id, len(config.robot_id), MC_ROBOT_ID_MAX)
+        assert len(config.robot_id) <= MC_ROBOT_ID_MAX, "robot_id %r is %d characters; max is %d" % (
+            config.robot_id,
+            len(config.robot_id),
+            MC_ROBOT_ID_MAX,
         )
         self._robot_id = config.robot_id
         self._left_pin = config.left_motor_pin
@@ -249,8 +259,16 @@ class Minibot:
         self._channel = config.channel
         # Per-motor calibration: neutral pulse width
         # Swing is always ±_PWM_RANGE_US (300 us); _motor_write reads that constant.
-        self._neutral_left_us = _clamp(config.neutral_left_us, _PWM_MIN_US, _PWM_MAX_US) if config.neutral_left_us is not None else _PWM_CENTER_US
-        self._neutral_right_us = _clamp(config.neutral_right_us, _PWM_MIN_US, _PWM_MAX_US) if config.neutral_right_us is not None else _PWM_CENTER_US
+        self._neutral_left_us = (
+            _clamp(config.neutral_left_us, _PWM_MIN_US, _PWM_MAX_US)
+            if config.neutral_left_us is not None
+            else _PWM_CENTER_US
+        )
+        self._neutral_right_us = (
+            _clamp(config.neutral_right_us, _PWM_MIN_US, _PWM_MAX_US)
+            if config.neutral_right_us is not None
+            else _PWM_CENTER_US
+        )
 
         # Controller state (raw int16 axes, -32767..32767; neutral 0)
         self._axis_lx = 0
@@ -273,7 +291,7 @@ class Minibot:
         self._calib_announce_left = _CALIB_ANNOUNCE_COUNT
 
         self._sta = None
-        self._espnow = None
+        self._espnow = espnow.ESPNow()
         self._mac = b"\x00" * 6
         self._dongle_mac = None  # learned lazily from first received frame
 
@@ -289,6 +307,12 @@ class Minibot:
         self._slew_ms_right = self._slew_ms_left
 
         self._display = self._init_display(config)
+        self._ring = self._init_ring()
+        self._ring_rotation = RingRotation(RAINBOW_COLORS, rotate_delay_ms=200)
+        self._ring_connection_status = RingConnectionStatus()
+        self._ring_show_rainbow = False
+        self._button = self._init_button()
+        self._set_ring_colors()
 
         # Unrestricted until a station says otherwise. See _SPEED_LIMIT_* above
         # for why this is not loaded from anywhere.
@@ -323,7 +347,6 @@ class Minibot:
             pass
         self._mac = self._sta.config("mac")
 
-        self._espnow = espnow.ESPNow()
         self._espnow.active(True)
         # Broadcast peer is required before we can send heartbeats/discovery.
         self._add_peer(_BROADCAST)
@@ -338,6 +361,8 @@ class Minibot:
     def update(self):
         """Call FIRST each loop. Drains the radio, applies enable/failsafe,
         and sends periodic heartbeats."""
+        self._set_ring_colors()
+
         # Drain all pending ESP-NOW frames without blocking.
         while True:
             mac, msg = self._espnow.irecv(0)
@@ -424,13 +449,11 @@ class Minibot:
     # --- motors (value -1.0..1.0) -------------------------------------------
 
     def drive_left_motor(self, value):
-        self._out_left, self._slew_ms_left = self._slew(
-            self._out_left, value, self._slew_ms_left)
+        self._out_left, self._slew_ms_left = self._slew(self._out_left, value, self._slew_ms_left)
         self._motor_write(self._left_pwm, self._out_left, self._neutral_left_us)
 
     def drive_right_motor(self, value):
-        self._out_right, self._slew_ms_right = self._slew(
-            self._out_right, value, self._slew_ms_right)
+        self._out_right, self._slew_ms_right = self._slew(self._out_right, value, self._slew_ms_right)
         self._motor_write(self._right_pwm, self._out_right, self._neutral_right_us)
 
     def stop_all_motors(self):
@@ -450,9 +473,75 @@ class Minibot:
         self._pulse_us(self._left_pwm, self._neutral_left_us)
         self._pulse_us(self._right_pwm, self._neutral_right_us)
 
+    # --- button -----------------------------------------------------------
+
+    def _init_button(self) -> Button | None:
+        """Create and initialize button. Returns Button | None."""
+        try:
+            return Button()
+        except Exception as e:
+            print(f"[warn] Failed to initialize button: {e}")
+            return None
+
+    def _check_button(self) -> None:
+        """Check button state and toggle display mode."""
+        if self._button is None:
+            return
+        if self._button.check():
+            self._ring_show_rainbow = not self._ring_show_rainbow
+            mode = "rainbow" if self._ring_show_rainbow else "connection"
+            print(f"Button pressed: switched to {mode} mode")
+
+    # --- neopixel ring ---------------------------------------------------
+
+    def _init_ring(self) -> NeoPixelRing | None:
+        """Create and initialize NeoPixel ring."""
+        try:
+            ring = NeoPixelRing(max_intensity=20)
+            ring.clear()
+            ring.write()
+            return ring
+        except Exception as e:
+            print(f"[warn] Failed to initialize NeoPixel ring: {e}")
+            return None
+
+    def _set_ring_colors(self) -> None:
+        """Set the ring color based on display mode."""
+        if self._ring is None or self._ring_rotation is None or self._ring_connection_status is None:
+            return
+        try:
+            self._check_button()
+
+            if self._ring_show_rainbow:
+                # Rainbow rotation mode
+                self._ring_rotation.update()
+                colors = self._ring_rotation.get_colors()
+            else:
+                # Connection status mode
+                if self._dongle_mac is None:
+                    # Not connected to dongle
+                    self._ring_connection_status.set_status(self._ring_connection_status.STATUS_DISCONNECTED)
+                elif not self._enabled:
+                    # Connected but not assigned/enabled
+                    self._ring_connection_status.set_status(self._ring_connection_status.STATUS_CONNECTED_UNASSIGNED)
+                elif self._axis_ly != 0 or self._axis_ry != 0 or self._axis_lx != 0 or self._axis_rx != 0:
+                    # Driving (has input)
+                    self._ring_connection_status.set_status(self._ring_connection_status.STATUS_DRIVING)
+                    self._ring_connection_status.update_blink()
+                else:
+                    # Connected and assigned but not driving
+                    self._ring_connection_status.set_status(self._ring_connection_status.STATUS_CONNECTED_ASSIGNED)
+
+                colors = self._ring_connection_status.get_colors()
+
+            self._ring.set_colors(colors)
+            self._ring.write()
+        except Exception as e:
+            print(f"[warn] Failed to set ring colors: {e}")
+
     # --- display -----------------------------------------------------------
 
-    def _init_display(self, config) -> object:
+    def _init_display(self, config) -> Display | None:
         """Create and initialize display if enabled. Returns Display | None."""
         if not config.display_enabled:
             return None
@@ -582,7 +671,7 @@ class Minibot:
     def _handle_enable(self, data):
         if len(data) < struct.calcsize(_FMT_ENABLE):
             return
-        _, enabled, target_mac = struct.unpack(_FMT_ENABLE, data[:struct.calcsize(_FMT_ENABLE)])
+        _, enabled, target_mac = struct.unpack(_FMT_ENABLE, data[: struct.calcsize(_FMT_ENABLE)])
         if target_mac == _BROADCAST or target_mac == self._mac:
             self._enabled = enabled != 0
             # Refresh the expiry only while being told "enabled" — a disable does
