@@ -532,7 +532,7 @@ class Minibot:
 
     # --- display -----------------------------------------------------------
 
-    def _init_display(self, config) -> object:
+    def _init_display(self, config) -> Display | None:
         """Create and initialize display if enabled. Returns Display | None."""
         if not config.display_enabled:
             return None
