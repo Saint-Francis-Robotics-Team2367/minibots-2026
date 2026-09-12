@@ -62,7 +62,7 @@ config = (MinibotConfig("MiniBot1max", left_motor_pin=16, right_motor_pin=17, ch
 
 bot = Minibot(config)
 bot.begin()
-print("bot started")
+print("bot started, Hi")
 
 while True:
     bot.update()  # ALWAYS FIRST — handles comms, enable and the safety stop.
