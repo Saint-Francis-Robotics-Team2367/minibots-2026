@@ -1,9 +1,50 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+# Ignore unused imports from MicroPython builtins
+ignore = [
+  "F401",  # Unused imports (some are needed for MicroPython)
+  "E402",  # Module level import not at top (valid in boot sequences)
+]
+
+select = [
+  "E",    # pycodestyle errors
+  "W",    # pycodestyle warnings
+  "F",    # Pyflakes
+  "I",    # isort (imports)
+  "C901", # McCabe complexity
+]
+
+[tool.ruff.lint.per-file-ignores]
+"boot.py" = ["F401", "E402"]
+
+[project]
+name="minibot"
+version="3.9"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "micropython-esp32-stubs>=1.20",
+  "pyright>=1.1.414",
+  "ruff>=0.6.0",
+]
+
 [tool.pyright]
+include = ["."]
+exclude = [".*", "__*", "ssd1306.py"]
+
 typeCheckingMode = "basic"
-pythonVersion = "3.12"
-exclude = [".venv"]
-reportMissingImports = false
-reportUndefinedVariable = false
-reportAttributeAccessIssue = false
-reportOptionalMemberAccess = false
-reportUninitializedInstanceVariable = true
+venvPath = "."
+venv = ".venv"
+# Point stubPath at the venv's site-packages so the loose micropython-stubs
+# .pyi files (time.pyi, machine.pyi, etc.) win over pyright's bundled
+# typeshed stdlib stubs, which otherwise always take priority.
+stubPath = ".venv/lib/python3.12/site-packages"
+pythonPlatform = "Linux"
+
+reportMissingModuleSource = "none"
+reportUnnecessaryTypeIgnoreComment = "information"

@@ -19,8 +19,12 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install pyright
-        run: pip install pyright
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dev dependencies
+        working-directory: firmware/esp32-robot
+        run: uv pip install -e ".[dev]"
 
       - name: Run pyright
         working-directory: firmware/esp32-robot
