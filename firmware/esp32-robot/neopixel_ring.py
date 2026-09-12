@@ -1,6 +1,7 @@
-import neopixel
-import machine
 import time
+
+import machine
+import neopixel
 
 # Color constants
 RAINBOW_COLORS = [(255, 0, 0), (255, 0, 255), (0, 0, 255), (0, 255, 255), (0, 255, 0), (255, 255, 0)]
@@ -163,5 +164,5 @@ class RingRotation:
         """
         if not self.colors:
             return []
-        rotated = self.colors[self.offset % len(self.colors):] + self.colors[:self.offset % len(self.colors)]
+        rotated = self.colors[self.offset % len(self.colors) :] + self.colors[: self.offset % len(self.colors)]
         return rotated

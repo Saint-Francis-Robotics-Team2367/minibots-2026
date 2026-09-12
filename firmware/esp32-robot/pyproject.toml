@@ -1,6 +1,7 @@
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+exclude = ["ssd1306.py"]
 
 [tool.ruff.lint]
 # Ignore unused imports from MicroPython builtins

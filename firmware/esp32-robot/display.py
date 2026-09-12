@@ -1,7 +1,8 @@
 """OLED display driver for SSD1306."""
 
-from machine import Pin, I2C
 import framebuf
+from machine import I2C, Pin
+
 import ssd1306
 
 # framebuf's built-in font is a fixed 8x8 glyph and cannot be resized, so

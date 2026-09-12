@@ -19,16 +19,18 @@ this file -- they are not independently versioned.
 """
 
 import json
-import network
-import espnow
 import os
 import struct
 import time
-from machine import Pin, PWM
-from minibot_config import MinibotConfig
-from display import Display
-from neopixel_ring import NeoPixelRing, RingRotation, RingConnectionStatus, RAINBOW_COLORS
+
+import espnow
+import network
+from machine import PWM, Pin
+
 from button import Button
+from display import Display
+from minibot_config import MinibotConfig
+from neopixel_ring import RAINBOW_COLORS, NeoPixelRing, RingConnectionStatus, RingRotation
 
 # --- Protocol constants (keep in sync with firmware/common/minicore_protocol.h) ---
 MC_MSG_JOYSTICK = 0x01
@@ -56,15 +58,15 @@ MC_ENABLE_TIMEOUT_MS = 3000
 _BROADCAST = b"\xff\xff\xff\xff\xff\xff"
 
 # struct formats (little-endian, packed). Sizes are asserted below.
-_FMT_JOYSTICK = "<BBhhhhhhH8s"   # 24 bytes
-_FMT_ENABLE = "<BB6s"            # 8 bytes
-_FMT_HEARTBEAT = "<B6sB16sBB"    # 26 bytes
-_FMT_DISCOVERY_REQ = "<BB"       # 2 bytes
-_FMT_DISCOVERY_RESP = "<B6sB16s" # 24 bytes
-_FMT_SET_NEUTRAL = "<B6sHH"      # 11 bytes
-_FMT_NEUTRAL_ACK = "<B6sHHB"     # 12 bytes
-_FMT_SET_SPEED_LIMIT = "<BH"     # 3 bytes
-_FMT_SPEED_LIMIT_ACK = "<B6sH"   # 9 bytes
+_FMT_JOYSTICK = "<BBhhhhhhH8s"  # 24 bytes
+_FMT_ENABLE = "<BB6s"  # 8 bytes
+_FMT_HEARTBEAT = "<B6sB16sBB"  # 26 bytes
+_FMT_DISCOVERY_REQ = "<BB"  # 2 bytes
+_FMT_DISCOVERY_RESP = "<B6sB16s"  # 24 bytes
+_FMT_SET_NEUTRAL = "<B6sHH"  # 11 bytes
+_FMT_NEUTRAL_ACK = "<B6sHHB"  # 12 bytes
+_FMT_SET_SPEED_LIMIT = "<BH"  # 3 bytes
+_FMT_SPEED_LIMIT_ACK = "<B6sH"  # 9 bytes
 
 assert struct.calcsize(_FMT_JOYSTICK) == 24
 assert struct.calcsize(_FMT_ENABLE) == 8
@@ -101,10 +103,10 @@ assert struct.calcsize(_FMT_SPEED_LIMIT_ACK) == 9
 # (see Minibot.__init__), or set them live from the driver station -- see the
 # remote trim block below.
 _PWM_FREQ_HZ = 50
-_PWM_CENTER_US = 1500   # neutral pulse width (motors stopped)
-_PWM_RANGE_US = 300     # +/- swing at full stick
-_PWM_MIN_US = 500       # safety minimum (per controller specs)
-_PWM_MAX_US = 2500      # safety maximum (per controller specs)
+_PWM_CENTER_US = 1500  # neutral pulse width (motors stopped)
+_PWM_RANGE_US = 300  # +/- swing at full stick
+_PWM_MIN_US = 500  # safety minimum (per controller specs)
+_PWM_MAX_US = 2500  # safety maximum (per controller specs)
 
 # --- Remote neutral trim (driver station "Apply") ---
 # Clamp for a neutral pulse arriving over the air: the full 1-2 ms RC window, so
@@ -246,9 +248,10 @@ class Minibot:
         # Fail loudly rather than truncating: the name is how the driver station
         # identifies this robot, and a silently shortened one looks like a
         # different (or duplicate) robot on the station and the OLED.
-        assert len(config.robot_id) <= MC_ROBOT_ID_MAX, (
-            "robot_id %r is %d characters; max is %d"
-            % (config.robot_id, len(config.robot_id), MC_ROBOT_ID_MAX)
+        assert len(config.robot_id) <= MC_ROBOT_ID_MAX, "robot_id %r is %d characters; max is %d" % (
+            config.robot_id,
+            len(config.robot_id),
+            MC_ROBOT_ID_MAX,
         )
         self._robot_id = config.robot_id
         self._left_pin = config.left_motor_pin
@@ -256,8 +259,16 @@ class Minibot:
         self._channel = config.channel
         # Per-motor calibration: neutral pulse width
         # Swing is always ±_PWM_RANGE_US (300 us); _motor_write reads that constant.
-        self._neutral_left_us = _clamp(config.neutral_left_us, _PWM_MIN_US, _PWM_MAX_US) if config.neutral_left_us is not None else _PWM_CENTER_US
-        self._neutral_right_us = _clamp(config.neutral_right_us, _PWM_MIN_US, _PWM_MAX_US) if config.neutral_right_us is not None else _PWM_CENTER_US
+        self._neutral_left_us = (
+            _clamp(config.neutral_left_us, _PWM_MIN_US, _PWM_MAX_US)
+            if config.neutral_left_us is not None
+            else _PWM_CENTER_US
+        )
+        self._neutral_right_us = (
+            _clamp(config.neutral_right_us, _PWM_MIN_US, _PWM_MAX_US)
+            if config.neutral_right_us is not None
+            else _PWM_CENTER_US
+        )
 
         # Controller state (raw int16 axes, -32767..32767; neutral 0)
         self._axis_lx = 0
@@ -438,13 +449,11 @@ class Minibot:
     # --- motors (value -1.0..1.0) -------------------------------------------
 
     def drive_left_motor(self, value):
-        self._out_left, self._slew_ms_left = self._slew(
-            self._out_left, value, self._slew_ms_left)
+        self._out_left, self._slew_ms_left = self._slew(self._out_left, value, self._slew_ms_left)
         self._motor_write(self._left_pwm, self._out_left, self._neutral_left_us)
 
     def drive_right_motor(self, value):
-        self._out_right, self._slew_ms_right = self._slew(
-            self._out_right, value, self._slew_ms_right)
+        self._out_right, self._slew_ms_right = self._slew(self._out_right, value, self._slew_ms_right)
         self._motor_write(self._right_pwm, self._out_right, self._neutral_right_us)
 
     def stop_all_motors(self):
@@ -662,7 +671,7 @@ class Minibot:
     def _handle_enable(self, data):
         if len(data) < struct.calcsize(_FMT_ENABLE):
             return
-        _, enabled, target_mac = struct.unpack(_FMT_ENABLE, data[:struct.calcsize(_FMT_ENABLE)])
+        _, enabled, target_mac = struct.unpack(_FMT_ENABLE, data[: struct.calcsize(_FMT_ENABLE)])
         if target_mac == _BROADCAST or target_mac == self._mac:
             self._enabled = enabled != 0
             # Refresh the expiry only while being told "enabled" — a disable does
