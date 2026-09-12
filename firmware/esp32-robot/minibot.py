@@ -280,7 +280,7 @@ class Minibot:
         self._calib_announce_left = _CALIB_ANNOUNCE_COUNT
 
         self._sta = None
-        self._espnow = None
+        self._espnow = espnow.ESPNow()
         self._mac = b"\x00" * 6
         self._dongle_mac = None  # learned lazily from first received frame
 
@@ -336,7 +336,6 @@ class Minibot:
             pass
         self._mac = self._sta.config("mac")
 
-        self._espnow = espnow.ESPNow()
         self._espnow.active(True)
         # Broadcast peer is required before we can send heartbeats/discovery.
         self._add_peer(_BROADCAST)
@@ -467,7 +466,7 @@ class Minibot:
 
     # --- button -----------------------------------------------------------
 
-    def _init_button(self) -> object:
+    def _init_button(self) -> Button | None:
         """Create and initialize button. Returns Button | None."""
         try:
             return Button()
@@ -486,8 +485,8 @@ class Minibot:
 
     # --- neopixel ring ---------------------------------------------------
 
-    def _init_ring(self) -> object:
-        """Create and initialize NeoPixel ring. Returns NeoPixelRing | None."""
+    def _init_ring(self) -> NeoPixelRing | None:
+        """Create and initialize NeoPixel ring."""
         try:
             ring = NeoPixelRing(max_intensity=20)
             ring.clear()
