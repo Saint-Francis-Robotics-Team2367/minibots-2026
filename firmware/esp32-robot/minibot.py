@@ -58,15 +58,17 @@ MC_ENABLE_TIMEOUT_MS = 3000
 _BROADCAST = b"\xff\xff\xff\xff\xff\xff"
 
 # struct formats (little-endian, packed). Sizes are asserted below.
-_FMT_JOYSTICK = "<BBhhhhhhH8s"  # 24 bytes
-_FMT_ENABLE = "<BB6s"  # 8 bytes
-_FMT_HEARTBEAT = "<B6sB16sBB"  # 26 bytes
-_FMT_DISCOVERY_REQ = "<BB"  # 2 bytes
-_FMT_DISCOVERY_RESP = "<B6sB16s"  # 24 bytes
-_FMT_SET_NEUTRAL = "<B6sHH"  # 11 bytes
-_FMT_NEUTRAL_ACK = "<B6sHHB"  # 12 bytes
-_FMT_SET_SPEED_LIMIT = "<BH"  # 3 bytes
-_FMT_SPEED_LIMIT_ACK = "<B6sH"  # 9 bytes
+# fmt: off
+_FMT_JOYSTICK = "<BBhhhhhhH8s"   # 24 bytes
+_FMT_ENABLE = "<BB6s"            # 8 bytes
+_FMT_HEARTBEAT = "<B6sB16sBB"    # 26 bytes
+_FMT_DISCOVERY_REQ = "<BB"       # 2 bytes
+_FMT_DISCOVERY_RESP = "<B6sB16s" # 24 bytes
+_FMT_SET_NEUTRAL = "<B6sHH"      # 11 bytes
+_FMT_NEUTRAL_ACK = "<B6sHHB"     # 12 bytes
+_FMT_SET_SPEED_LIMIT = "<BH"     # 3 bytes
+_FMT_SPEED_LIMIT_ACK = "<B6sH"   # 9 bytes
+# fmt: on
 
 assert struct.calcsize(_FMT_JOYSTICK) == 24
 assert struct.calcsize(_FMT_ENABLE) == 8
