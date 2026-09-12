@@ -29,3 +29,11 @@ jobs:
       - name: Run pyright
         working-directory: firmware/esp32-robot
         run: uv run pyright .
+
+      - name: Check formatting with ruff
+        working-directory: firmware/esp32-robot
+        run: uv run ruff check .
+
+      - name: Check code format with ruff
+        working-directory: firmware/esp32-robot
+        run: uv run ruff format --check .
