@@ -228,6 +228,25 @@ precedence is the surprising part: editing `neutral_left_us=` in `main.py` has n
 effect while a saved calibration exists. `Minibot.clear_calibration()` (or
 deleting the file) hands control back.
 
+That ordering is the reason `begin()` exists at all rather than the constructor
+doing the work: config -> saved trim over it -> `PWM()` is a sequence, and the
+middle step is a filesystem read. The secondary reason is that `Minibot(config)`
+should not energize anything, so a robot can be constructed and inspected at the
+REPL without arming it.
+
+Two places that boundary is not actually held, both worth knowing before relying
+on it:
+
+- **`_init_display()` is called from `__init__`, not `begin()`** (`minibot.py:291`).
+  It constructs `Display()`, stages line 1 and pushes the framebuffer over I2C, so
+  the constructor *does* touch hardware — the OLED lights up on
+  `bot = Minibot(config)`. Only the motors and the radio wait for `begin()`.
+- **Nothing enforces that `begin()` ran.** Skip it and `_left_pwm`/`_right_pwm`
+  stay `None`; `_pulse_us()` returns early on `None` (`minibot.py:534`), so
+  `drive_*_motor()` is a silent no-op that reports nothing. The failure surfaces
+  from `update()` instead, as an `AttributeError` on `None.irecv` — loud, but not
+  a message that names the missing call.
+
 `0x07` is also sent **unprompted**, so the station can populate its fields
 whichever side came up first: on the robot's first `_CALIB_ANNOUNCE_COUNT`
 heartbeats, again whenever it newly learns the dongle's MAC (which is what covers

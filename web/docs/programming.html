@@ -163,6 +163,34 @@
             </p>
           </details>
 
+          <details>
+            <summary>Why <code>begin()</code> is separate from creating the bot</summary>
+            <p>
+              Making the <code>Minibot</code> only records your settings. Nothing reaches the
+              hardware until <code>begin()</code>, and the gap between the two lines is
+              deliberate.
+            </p>
+            <p>
+              <strong>A saved trim has to be read in between.</strong> If someone has used
+              the <strong>Neutral µs</strong> boxes on the driver station, that value lives on
+              the robot and wins over your <code>MinibotConfig</code>. It has to be loaded
+              <em>before</em> the motor outputs are created, because the very first pulse
+              those outputs send is the one the ESC believes — set it wrong and correct it a
+              moment later and the wheels have already moved. So the order is fixed: read
+              your settings, load any saved trim over them, then start the motors at the
+              neutral that came out of that.
+            </p>
+            <p>
+              <strong>And creating a robot should not make it twitch.</strong> Until
+              <code>begin()</code> runs there are no pulses on the motor pins and no radio.
+              That means <code>bot = Minibot(config)</code> is a safe line to sit on — useful
+              at the REPL, where you may want to look at a robot without arming it. It also
+              matches the shape you may know from Arduino: <code>begin()</code> is
+              <code>setup()</code>, and <code>update()</code> is the top of
+              <code>loop()</code>.
+            </p>
+          </details>
+
           <h2>The shape of every main.py</h2>
           <p>
             This is the starter template, and it is a complete working tank drive. Read it
