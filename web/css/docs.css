@@ -198,6 +198,51 @@
   margin-bottom: var(--sp-4);
 }
 
+/* ── Asides ─────────────────────────────────────────────────────────────── */
+/* The "why it works this way" detail: back-EMF behind the motor ramp, the boot
+   pause that lets an upload interrupt a running loop. None of it changes what a
+   student types, so it does not belong between them and the API — but it is the
+   honest answer to the question the behaviour provokes, so it stays on the page
+   rather than moving to the repo.
+
+   Every page must read complete with all of these shut. Nothing load-bearing
+   goes inside one. */
+.doc__body details {
+  margin: 0 0 var(--sp-4);
+  padding: 0 var(--sp-3);
+  font-size: 0.82rem;
+  background: var(--s-deck);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+.doc__body summary {
+  /* The marker is the only affordance that this opens, so it stays. Padding on
+     the summary rather than the details so the whole strip is the hit target. */
+  padding: var(--sp-3) 0;
+  color: var(--ink-dim);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.doc__body summary:hover {
+  color: var(--ink);
+}
+
+/* core.css scopes its focus ring to :where(button, select, input, a, [tabindex]),
+   which does not cover summary — and summary is focusable, so without this a
+   keyboard user gets no ring at all. Same declarations, so the two match. */
+.doc__body summary:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+
+/* Last child, not the details box, carries the bottom gap: an open aside would
+   otherwise end flush against its own border. */
+.doc__body details > :last-child {
+  margin-bottom: var(--sp-3);
+}
+
 /* ── Tables ─────────────────────────────────────────────────────────────── */
 /* API references are tables, and monospace tables run wide. Every one is
    wrapped in this scroller so the table scrolls inside its own box and the page
@@ -244,6 +289,49 @@
 .doc__body td:first-child {
   color: var(--ink);
   white-space: nowrap;
+}
+
+/* Opt out for a table whose first column is a sentence rather than an
+   identifier — the troubleshooting table on /docs/driving, where the symptom is
+   the row label. nowrap there pushes the whole answer column off a phone
+   screen, so the one thing a student needs is the thing they cannot see. */
+.doc__body table[data-prose] td:first-child {
+  width: 38%;
+  white-space: normal;
+}
+
+/* Stack both columns once there is no width left to split: below this each
+   column is ~14 monospace characters, which reads worse than one column of
+   each. */
+@media (max-width: 34rem) {
+  .doc__body table[data-prose],
+  .doc__body table[data-prose] tbody,
+  .doc__body table[data-prose] tr {
+    display: block;
+  }
+
+  /* The header stops earning its space once the columns stack: each cell is
+     already labelled by what it says. */
+  .doc__body table[data-prose] thead {
+    display: none;
+  }
+
+  .doc__body table[data-prose] td {
+    display: block;
+    width: auto;
+    border-bottom: 0;
+  }
+
+  .doc__body table[data-prose] td:first-child {
+    width: auto;
+    padding-bottom: 0;
+    font-weight: 600;
+  }
+
+  /* The row is now the unit, so the rule belongs on the row. */
+  .doc__body table[data-prose] tr + tr {
+    border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  }
 }
 
 .doc__body td:first-child code {

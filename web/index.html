@@ -7,7 +7,7 @@
     <title>MiniCore — Minibots documentation</title>
     <meta
       name="description"
-      content="How Minibots works, and how to build, wire and program one. Team 2367."
+      content="How Minibots works, and how to build, wire, program and drive one. Team 2367."
     />
     <link rel="canonical" href="https://minibots.team2367.org/" />
 
@@ -90,6 +90,7 @@
                 <li><a href="/" aria-current="page">Overview</a></li>
                 <li><a href="/docs/build">Building the robot</a></li>
                 <li><a href="/docs/wiring">Wiring the robot</a></li>
+                <li><a href="/docs/driving">Driving the robot</a></li>
                 <li><a href="/docs/programming">Programming the robot</a></li>
               </ul>
             </div>
@@ -182,6 +183,13 @@
               >
             </li>
             <li>
+              <a class="idx__name" href="/docs/driving">Driving the robot</a>
+              <span class="idx__what"
+                >Use the driver station: pair a gamepad to a robot, enable it, and stop
+                it.</span
+              >
+            </li>
+            <li>
               <a class="idx__name" href="/docs/programming">Programming the robot</a>
               <span class="idx__what"
                 >Write <code>main.py</code>: the loop, the full list of things you can ask
@@ -243,15 +251,6 @@
             through WebHID and Web Serial, which Safari and Firefox do not implement.
             These documentation pages read fine in any browser. You grant each device
             once, per browser — after that the driver station reconnects on its own.
-          </p>
-          <p>
-            The command-line path still works and is the offline fallback:
-            <code>scripts/flash-robot.sh</code> and
-            <code>scripts/flash-dongle.sh</code> in the
-            <a href="https://github.com/Saint-Francis-Robotics-Team2367/minibots-2026"
-              >minibots-2026</a
-            >
-            repository.
           </p>
         </div>
       </footer>

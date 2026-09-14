@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>MiniCore — Driving the robot</title>
+    <meta
+      name="description"
+      content="Use the driver station: connect the dongle, pair a gamepad to a robot, enable, and stop."
+    />
+    <link rel="canonical" href="https://minibots.team2367.org/docs/driving" />
+
+    <!-- Same host redirect as every page: it must run before render, and there
+         is no backend to do it centrally. -->
+    <script>
+      (function () {
+        var h = location.hostname;
+        // Only the two DEFAULT domains, anchored to the project name. A preview
+        // channel is also *.web.app (minibots-2367--<channel>-<hash>.web.app), and
+        // matching it here made every channel bounce to production — which is
+        // exactly where a deploy must be checked BEFORE it goes live. Found when a
+        // preview showed "Page Not Found" for /control while curl saw HTTP 200: the
+        // browser was following this redirect to the not-yet-deployed live site.
+        if (h === "minibots-2367.web.app" || h === "minibots-2367.firebaseapp.com") {
+          location.replace(
+            "https://minibots.team2367.org" + location.pathname + location.search + location.hash,
+          );
+        }
+      })();
+    </script>
+
+    <!-- ../ because this page lives in web/docs/. Links to other pages stay
+         absolute, so they do not care how deep this file sits. -->
+    <link rel="stylesheet" href="../css/core.css" />
+    <link rel="stylesheet" href="../css/docs.css" />
+  </head>
+  <body data-armed="false" data-link="down">
+    <div class="bezel">
+      <header class="rail">
+        <div class="rail__id">
+          <span class="rail__mark">MiniCore</span>
+          <span class="rail__sub">Driving · Team 2367</span>
+        </div>
+
+        <ul class="nav">
+          <li><a href="/">Home</a></li>
+          <li><a href="/control">Control</a></li>
+          <li><a href="/code-robot">Code</a></li>
+          <li><a href="/flash-dongle">Dongle</a></li>
+        </ul>
+
+        <div aria-hidden="true"></div>
+      </header>
+
+      <p class="notice" id="noSupport" hidden>
+        This browser can't reach USB devices, so none of the three tools will work.
+        Reading these pages is fine anywhere — to use the tools, open the site in Chrome
+        or Edge.
+      </p>
+
+      <div class="doc">
+        <!-- Copied verbatim from every other documentation page: the rail nav and
+             the host redirect above are duplicated the same way (no backend, no
+             build step), and this nav has to exist with JavaScript off. -->
+        <nav class="doc__side" aria-label="Documentation">
+          <div class="doc__nav">
+            <div class="doc__group">
+              <p class="hd" id="dgGuide">Guide</p>
+              <ul class="doc__list" aria-labelledby="dgGuide">
+                <li><a href="/">Overview</a></li>
+                <li><a href="/docs/build">Building the robot</a></li>
+                <li><a href="/docs/wiring">Wiring the robot</a></li>
+                <li><a href="/docs/driving" aria-current="page">Driving the robot</a></li>
+                <li><a href="/docs/programming">Programming the robot</a></li>
+              </ul>
+            </div>
+
+            <div class="doc__group">
+              <p class="hd" id="dgTools">Tools</p>
+              <ul class="doc__list" aria-labelledby="dgTools">
+                <li><a href="/control">Driver station</a></li>
+                <li><a href="/code-robot">Robot code</a></li>
+                <li><a href="/flash-dongle">Dongle firmware</a></li>
+              </ul>
+            </div>
+
+            <div class="doc__group">
+              <p class="hd" id="dgRef">Reference</p>
+              <ul class="doc__list" aria-labelledby="dgRef">
+                <li>
+                  <a href="https://github.com/Saint-Francis-Robotics-Team2367/minibots-2026"
+                    >Source on GitHub</a
+                  >
+                </li>
+              </ul>
+            </div>
+          </div>
+        </nav>
+
+        <main class="doc__body">
+          <h1>Driving the robot</h1>
+          <p class="doc__lead">
+            The <a href="/control">driver station</a> is the page you drive from, and the
+            page used at competition. It reads your gamepad and sends it to the robot. This
+            walks through it in the order you will actually do it.
+          </p>
+
+          <h2>What you need first</h2>
+          <ul>
+            <li>The <strong>dongle</strong> in a USB port on the driving laptop.</li>
+            <li>A <strong>gamepad</strong>, wired or paired to that laptop.</li>
+            <li>A <strong>robot powered on</strong>, with code on it that calls
+              <code>bot.update()</code> in its loop.</li>
+            <li><strong>Chrome or Edge.</strong> Safari and Firefox cannot reach USB, so
+              the driver station will not open in them.</li>
+          </ul>
+          <p>
+            Put the robot on blocks, or somewhere it can drive without hitting anything.
+            The first thing you will do on this page is give it power to its wheels.
+          </p>
+
+          <h2>Step 1 — connect the dongle</h2>
+          <p>
+            Click <strong>Connect dongle</strong> and pick the MiniCore device from the
+            list. You only do this <strong>once per browser</strong>: after that, every
+            later visit reconnects on its own as soon as the page loads, and plugging the
+            dongle back in reconnects it too.
+          </p>
+          <p>
+            The one exception is the <strong>Disconnect</strong> button. Press it and the
+            page will not reconnect on its own again until you either click Connect or
+            unplug and replug the dongle.
+          </p>
+          <p>Once it is connected, the four readouts along the top mean:</p>
+
+          <div class="doc__scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Readout</th>
+                  <th scope="col">What it tells you</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Dongle</strong></td>
+                  <td><code>Connected</code> or <code>Not connected</code>.</td>
+                </tr>
+                <tr>
+                  <td><strong>Channel</strong></td>
+                  <td>
+                    The Wi-Fi channel the dongle is using — normally <code>6</code>. Your
+                    robots must be on this same number or they will never appear.
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Packets out</strong></td>
+                  <td>
+                    Gamepad updates leaving the dongle each second. Only a slot with
+                    <em>both</em> a robot and a gamepad contributes, so this stays at
+                    <code>0</code> until you have paired something — that is not a fault.
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Robots seen</strong></td>
+                  <td>How many different robots the dongle can currently hear.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2>Step 2 — find your robot</h2>
+          <p>
+            Powered-on robots appear in the <strong>Robots</strong> list on their own,
+            usually within a second or two. <strong>Scan</strong> asks again, for when one
+            was powered on before the dongle was plugged in.
+          </p>
+
+          <div class="alert" data-kind="warn">
+            <strong>A robot on the wrong channel never appears at all</strong> — no error,
+            no warning, just an empty list. This is the most common reason a robot seems
+            dead. Check that <code>channel=</code> in your <code>main.py</code> matches the
+            <strong>Channel</strong> readout at the top of the page, then power-cycle the
+            robot.
+          </div>
+
+          <p>
+            If the channel matches and it still never shows up, check that the robot is
+            actually on, that its battery is charged, and that its
+            <code>main.py</code> reaches <code>bot.update()</code> — a robot stuck in an
+            error before that call never transmits. <a href="/code-robot">Robot code</a>
+            will show you what it prints.
+          </p>
+
+          <h2>Step 3 — find your gamepad</h2>
+          <p>
+            A gamepad does not appear until you <strong>press a button or move a stick on
+            it</strong>. That is a browser rule, not a bug — plugging it in is not enough.
+          </p>
+          <p>
+            Each row lights up while that pad is being touched. With several identical
+            controllers on one laptop, that highlight is how you tell which row is the one
+            in your hands.
+          </p>
+
+          <h2>Step 4 — pair a slot</h2>
+          <p>
+            There are <strong>four slots</strong>, so one laptop drives up to four robots.
+            Each slot needs two things:
+          </p>
+          <ol>
+            <li>
+              Pick your robot from the slot's <strong>Robot</strong> dropdown. It pairs the
+              moment you choose it — there is no separate confirm button.
+            </li>
+            <li>Pick your controller from the <strong>Gamepad</strong> dropdown.</li>
+          </ol>
+          <p>
+            <strong>Release</strong> unpairs the slot and frees the robot for another one.
+          </p>
+          <p>
+            The stick bars in the slot move as soon as a gamepad is assigned, even while
+            everything is still disabled. Use that: it confirms you paired the robot you
+            meant and that the right controller is in your hands, before any wheel can
+            turn.
+          </p>
+
+          <h2>Step 5 — enable, and know how to stop</h2>
+          <p>
+            <strong>Enable all robots</strong> is the switch that lets motors move. The
+            band reads <code>Disabled</code> or <code>Enabled</code>, and the line under it
+            tells you how many robots are live.
+          </p>
+
+          <div class="alert" data-kind="warn">
+            <strong>Enable is not per-slot.</strong> It enables every robot the dongle can
+            hear, including robots nobody has paired to a slot. If a robot is powered on
+            and in range, it is live — so know what is on the table before you press it.
+          </div>
+
+          <p>
+            <strong><kbd>Space</kbd> or <kbd>Esc</kbd> stops everything.</strong> It works
+            any time the page is in front of you, whether or not the button says Enabled,
+            and you do not need to click anything first. Learn it before you drive: it is
+            faster than finding the mouse.
+          </p>
+          <p>
+            The one place those keys do nothing is while your cursor is inside a text box
+            or a dropdown — typing a number there should not stop the field. Click the
+            page background first if you have been editing a value.
+          </p>
+          <p>
+            Nothing special is needed to get going again: press
+            <strong>Enable all robots</strong> once more. Reloading the page or closing the
+            tab also disables everything, so after a refresh you always have to enable
+            again.
+          </p>
+
+          <h2>What a slot is telling you</h2>
+          <p>
+            Each slot shows a status word. Reading it is usually faster than guessing why a
+            robot is not moving.
+          </p>
+
+          <div class="doc__scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Status</th>
+                  <th scope="col">Means</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>Empty</code></td>
+                  <td>No robot paired to this slot yet.</td>
+                </tr>
+                <tr>
+                  <td><code>Needs gamepad</code></td>
+                  <td>
+                    Robot paired, but no controller assigned — so nothing is being sent to
+                    it. Pick one from the Gamepad dropdown.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>Standby</code></td>
+                  <td>
+                    Robot and gamepad both set, everything healthy, waiting for you to
+                    enable. This is what a ready slot looks like.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>Enabling</code></td>
+                  <td>
+                    Enable has been sent and the robot has not confirmed yet. Normal for a
+                    moment; if it sticks here, the robot is hearing you only intermittently.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>Live</code></td>
+                  <td>Enabled and confirmed by the robot. It is following your gamepad.</td>
+                </tr>
+                <tr>
+                  <td><code>No heartbeat</code></td>
+                  <td>
+                    The robot has gone quiet — out of range, powered off, battery dead, or
+                    crashed. It stops its own motors when this happens.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>Still enabled</code></td>
+                  <td>
+                    This page thinks it is disabled but the robot reports itself enabled.
+                    Press <kbd>Space</kbd>. It clears in a few seconds on its own, because a
+                    robot that stops hearing "stay enabled" gives up by itself.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p>
+            Next to the status is the robot's battery, or <code>battery n/a</code> if that
+            robot has no sensor for it.
+          </p>
+
+          <h2>Speed limit</h2>
+          <p>
+            The <strong>Speed limit</strong> slider runs from <code>0.10</code> to
+            <code>1.00</code> and caps <strong>every robot on the field at once</strong> —
+            it is not per-slot. It scales the same number your code passes to
+            <code>drive_left_motor()</code>: at <code>0.60</code>, asking for
+            <code>1.0</code> gets you <code>0.60</code>, and anything already below that is
+            untouched. Robot code cannot raise it.
+          </p>
+          <p>
+            The value is sent when you <em>let go</em> of the slider, not while you drag it.
+          </p>
+
+          <div class="alert" data-kind="warn">
+            <strong>The speed limit survives a page reload.</strong> A cap someone set for a
+            demo last week is still there when you open the page today, and it is the
+            answer to most "why is my robot so slow" questions. The Activity log says so at
+            startup when a cap was restored — but check the slider first, before you go
+            looking at your code.
+          </div>
+
+          <h2>Trimming a wheel that creeps</h2>
+          <p>
+            If a wheel turns slowly while the sticks are centred, that motor's neutral is
+            slightly off. The slot's <strong>Neutral µs</strong> boxes fix it live:
+          </p>
+          <ol>
+            <li>
+              Type a whole number between <strong>1000 and 2000</strong> in
+              <strong>L</strong> or <strong>R</strong>. <code>1500</code> is the standard
+              starting point; move it 20–30 at a time.
+            </li>
+            <li>
+              Click <strong>Apply</strong>. Nothing is sent until you do, so a
+              half-typed number cannot reach a robot.
+            </li>
+            <li>
+              Read the line under the boxes. It shows what the robot says it is
+              <em>actually</em> running, which is how you confirm your value landed. If it
+              ends in <code>· not saved</code>, the robot has not written it to memory yet
+              and a reset will lose it.
+            </li>
+          </ol>
+          <p>
+            You can trim while robots are enabled — you have to be able to watch the wheel.
+          </p>
+
+          <div class="alert" data-kind="warn">
+            <strong>Neutral is the pulse sent on every stop</strong>, including the
+            automatic one when a robot loses its radio link. A neutral set near
+            <code>1000</code> or <code>2000</code> therefore makes "stopped" mean
+            near-full throttle in that direction. Keep the robot on blocks the first time
+            you apply an unfamiliar number, and watch the readout to confirm what landed.
+          </div>
+
+          <p>
+            A trim applied here is saved on the robot and
+            <strong>overrides its <code>main.py</code></strong> from then on. That is the
+            single most confusing thing in this system, so it is worth reading
+            <a href="/docs/programming">Programming the robot</a> on it — that page also
+            covers how to clear a saved trim and hand control back to your code.
+          </p>
+
+          <h2>When something is wrong</h2>
+          <div class="doc__scroll">
+            <table data-prose>
+              <thead>
+                <tr>
+                  <th scope="col">What you see</th>
+                  <th scope="col">Where to look</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Robot never appears in the list</td>
+                  <td>
+                    Channel mismatch first — compare <code>channel=</code> in your code
+                    with the <strong>Channel</strong> readout. Then power and battery.
+                  </td>
+                </tr>
+                <tr>
+                  <td>Gamepad never appears</td>
+                  <td>Press a button on it. Nothing shows up until you do.</td>
+                </tr>
+                <tr>
+                  <td><code>Radio send failing</code> at the top</td>
+                  <td>
+                    The dongle cannot get anything out. Reseat it in its USB port; try
+                    another port.
+                  </td>
+                </tr>
+                <tr>
+                  <td>Slot stuck on <code>Enabling</code></td>
+                  <td>
+                    The robot is only partly hearing you. Move it closer, and check its
+                    battery.
+                  </td>
+                </tr>
+                <tr>
+                  <td>Robot moves the wrong way, or only one wheel turns</td>
+                  <td>
+                    That is your code or your wiring, not this page.
+                    <a href="/docs/programming">Programming the robot</a> covers the sign
+                    flip that tank drive needs.
+                  </td>
+                </tr>
+                <tr>
+                  <td>Robot is much slower than expected</td>
+                  <td>The <strong>Speed limit</strong> slider. It persists between visits.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p>
+            The <strong>Activity</strong> log at the bottom right records everything the
+            page did and every reply it got, newest last. When something does not add up,
+            read it before changing anything — it usually already says what happened.
+          </p>
+
+          <h2>Next</h2>
+          <p>
+            <a href="/docs/programming">Programming the robot</a> covers writing the
+            <code>main.py</code> that decides what your robot does with everything this
+            page sends it.
+          </p>
+        </main>
+      </div>
+
+      <footer class="foot">
+        <div class="prose">
+          <p>
+            The driver station needs <strong>Chrome or Edge</strong> — it reaches the
+            dongle through WebHID, which Safari and Firefox do not implement. You grant
+            the dongle once per browser; after that it reconnects on its own.
+          </p>
+        </div>
+      </footer>
+    </div>
+
+    <script type="module" src="../js/docs.js"></script>
+  </body>
+</html>

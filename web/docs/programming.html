@@ -71,6 +71,7 @@
                 <li><a href="/">Overview</a></li>
                 <li><a href="/docs/build">Building the robot</a></li>
                 <li><a href="/docs/wiring">Wiring the robot</a></li>
+                <li><a href="/docs/driving">Driving the robot</a></li>
                 <li><a href="/docs/programming" aria-current="page">Programming the robot</a></li>
               </ul>
             </div>
@@ -107,83 +108,41 @@
 
           <h2>Where your code goes</h2>
           <p>
-            A robot holds a handful of files. You only ever write <strong>one</strong> of
-            them.
+            A robot holds a handful of files. <code>main.py</code> is
+            <strong>yours</strong> — the only one you ever write. The rest are the library
+            that talks to the driver station and drives the motors for you; leave them
+            alone.
           </p>
-
-          <div class="doc__scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">File</th>
-                  <th scope="col">What it is</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><code>main.py</code></td>
-                  <td><strong>Yours.</strong> This is the file you edit.</td>
-                </tr>
-                <tr>
-                  <td><code>minibot.py</code></td>
-                  <td>
-                    The library. Handles the radio, the enable switch, the joystick and the
-                    safety stop. Don't edit it.
-                  </td>
-                </tr>
-                <tr>
-                  <td><code>minibot_config.py</code></td>
-                  <td>Holds your robot's settings — name, pins, channel. Don't edit it.</td>
-                </tr>
-                <tr>
-                  <td><code>boot.py</code></td>
-                  <td>Runs at power-up, before your code. Don't edit it.</td>
-                </tr>
-                <tr>
-                  <td><code>display.py</code>, <code>ssd1306.py</code></td>
-                  <td>Drives the optional OLED. Don't edit them.</td>
-                </tr>
-                <tr>
-                  <td><code>calib.json</code></td>
-                  <td>
-                    Appears on its own if anyone has trimmed the motors from the driver
-                    station. Read the warning about this below — it catches people out.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <p>
+            One more is worth knowing the name of: <code>calib.json</code> appears on its
+            own if anyone has trimmed the motors from the driver station, and it quietly
+            overrides your code. Read <a href="#trap">the trap</a> below — it catches
+            people out.
+          </p>
 
           <h2>How to edit and upload it</h2>
           <p>
-            <strong>In your browser</strong> — open <a href="/code-robot">Robot code</a>,
-            plug the robot into USB, and click <strong>Connect robot</strong>. Then
-            <strong>Pull from robot</strong> reads its current <code>main.py</code> into
-            the editor, and <strong>Upload and run</strong> writes your version back,
-            restarts the robot, and shows you what it prints. Chrome or Edge only.
-          </p>
-          <p>
-            <strong>On your machine</strong> — edit
-            <code>firmware/esp32-robot/main.py</code> in the repository and run
-            <code>./scripts/flash-robot.sh</code>. This is the offline route.
+            Open <a href="/code-robot">Robot code</a>, plug the robot into USB, and click
+            <strong>Connect robot</strong>. Then <strong>Pull from robot</strong> reads its
+            current <code>main.py</code> into the editor, and
+            <strong>Upload and run</strong> writes your version back, restarts the robot,
+            and shows you what it prints. Chrome or Edge only.
           </p>
 
           <div class="alert" data-kind="warn">
-            <strong>The browser editor does not type-check your code.</strong> The
-            repository runs <code>pyright</code> on pull requests, which catches misspelled
-            method names and wrong argument types before they reach a robot. Edit in the
-            browser and you skip that check — a syntax error still surfaces when you
-            upload, but <code>bot.drive_left_moter(0.5)</code> will not. Read your
-            spelling carefully, or use the command-line route for anything substantial.
+            <strong>The editor does not check your spelling.</strong> A syntax error — a
+            missing colon, an unclosed bracket — surfaces when you upload. A misspelled
+            method name does not: <code>bot.drive_left_moter(0.5)</code> uploads happily
+            and then fails on the robot, where you will see it in the output as an
+            <code>AttributeError</code>. Check names against the tables below rather than
+            trusting them to be caught.
           </div>
 
           <h2>What runs when you power the robot on</h2>
           <ol>
             <li>
-              <code>boot.py</code> waits about <strong>1.5 seconds</strong> and prints
-              <code>[boot] Starting in 1500 ms…</code>. That pause is the window the upload
-              tools use to interrupt the board, which is why an upload works even though
-              your code runs a loop that never ends. You don't have to do anything with it.
+              The robot pauses about <strong>1.5 seconds</strong> and prints
+              <code>[boot] Starting in 1500 ms…</code>. Nothing for you to do.
             </li>
             <li>Your <code>main.py</code> starts.</li>
             <li>
@@ -192,6 +151,17 @@
             </li>
             <li>Your <code>while True:</code> loop runs until the power goes off.</li>
           </ol>
+
+          <details>
+            <summary>Why the 1.5 second pause exists</summary>
+            <p>
+              Your loop never ends, so once it is running nothing else can get a word in —
+              including an upload. That pause is the gap the upload tools use to interrupt
+              the board before your code takes over, which is why
+              <strong>Upload and run</strong> works on a robot that is already busy driving.
+              Delete it and the only way to reprogram a robot would be a full erase.
+            </p>
+          </details>
 
           <h2>The shape of every main.py</h2>
           <p>
@@ -445,23 +415,28 @@ while True:
 
           <h3>Motor commands ramp</h3>
           <p>
-            <code>drive_left_motor()</code> and <code>drive_right_motor()</code> move
+            <code>drive_left_motor()</code> and <code>drive_right_motor()</code> ease
             <em>toward</em> the number you pass rather than jumping to it — a full
-            forward-to-reverse reversal takes about half a second. So if you print the
-            value you asked for and watch the wheel, they will disagree for a moment. That
-            is correct.
-          </p>
-          <p>
-            The reason is electrical. Slamming a stick through neutral puts the battery
-            voltage and the motor's back-EMF in series, drawing roughly
-            <strong>twice stall current</strong>. The rail sags, the ESP32's brownout
-            detector resets the board, and from the driver station it looks exactly like
-            the robot dropping its radio link. The ramp bounds that current.
+            forward-to-reverse reversal takes about <strong>half a second</strong>. So if
+            you print the value you asked for and watch the wheel, they will disagree for a
+            moment. That is correct, and there is no way to switch it off.
           </p>
           <p>
             <code>stop_all_motors()</code> is <strong>never</strong> ramped, so real stops
             are still instant.
           </p>
+
+          <details>
+            <summary>Why the ramp exists</summary>
+            <p>
+              The reason is electrical. Slamming a stick through neutral puts the battery
+              voltage and the motor's back-EMF in series, drawing roughly
+              <strong>twice stall current</strong>. The rail sags, the ESP32 resets itself,
+              and from the driver station that looks exactly like the robot dropping its
+              radio link — so a brownout gets misdiagnosed as a radio problem. The ramp
+              bounds the current instead.
+            </p>
+          </details>
 
           <h3>The link-loss failsafe</h3>
           <p>
@@ -486,11 +461,12 @@ while True:
               >If your robot feels slower than your numbers suggest, check the slider
               before you go looking for a bug.</strong
             >
-            Robots start unrestricted at every power-up, and the limit is not saved on the
-            robot.
+            The cap is not stored on the robot, but the driver station remembers it
+            <em>between visits</em>, so one set last week is still set today — see
+            <a href="/docs/driving">Driving the robot</a>.
           </p>
 
-          <h2>The trap that catches everyone</h2>
+          <h2 id="trap">The trap that catches everyone</h2>
 
           <div class="alert" data-kind="warn">
             <strong>A motor trim set from the driver station overrides your
@@ -521,12 +497,10 @@ while True:
           <ul>
             <li>
               <strong>From the driver station,</strong> with the
-              <strong>Neutral µs</strong> boxes and <strong>Apply</strong>. Values are sent
-              only when you click Apply, never streamed, and only to that slot's robot. The
-              line under the boxes shows what the robot reports it is
-              <em>actually</em> running, so you can watch a value land or see it clamped.
-              Fastest way to find the right number — but remember it then overrides your
-              code.
+              <strong>Neutral µs</strong> boxes and <strong>Apply</strong>. Fastest way to
+              find the right number, because you can watch the wheel while you change it —
+              but remember it then overrides your code.
+              <a href="/docs/driving">Driving the robot</a> walks through it.
             </li>
             <li>
               <strong>In your code,</strong> with <code>neutral_left_us=</code> and
@@ -550,13 +524,19 @@ while True:
             <code>print()</code> works, and its output has somewhere to go.
             <a href="/code-robot">Robot code</a> streams it after an
             <strong>Upload and run</strong>, so printing a value is the normal way to find
-            out why the robot is doing something odd. On the command line,
-            <code>./scripts/flash-robot.sh --repl</code> gives you the same thing plus a
-            live Python prompt.
+            out why the robot is doing something odd. That output pane is also where a
+            crash in your code shows up, with the line number.
           </p>
           <p>
             Print sparingly inside the loop, though — it runs thousands of times a second,
             and a print on every pass will bury anything useful.
+          </p>
+
+          <h2>Now drive it</h2>
+          <p>
+            Code on the robot does nothing until the driver station enables it.
+            <a href="/docs/driving">Driving the robot</a> covers connecting the dongle,
+            pairing your gamepad to your robot, and the key that stops everything.
           </p>
         </main>
       </div>
@@ -564,13 +544,10 @@ while True:
       <footer class="foot">
         <div class="prose">
           <p>
-            The library this page documents is <code>minibot.py</code>, served from this
-            site and uploaded to robots verbatim. Its source, and the full protocol the
-            robot speaks to the dongle, are in the
-            <a href="https://github.com/Saint-Francis-Robotics-Team2367/minibots-2026"
-              >minibots-2026</a
-            >
-            repository.
+            Every call on this page is provided by <code>minibot.py</code>, the library
+            uploaded to your robot alongside your <code>main.py</code>. You never edit it,
+            and the tables above are its full surface — if a method is not listed here, it
+            is not something to call.
           </p>
         </div>
       </footer>
