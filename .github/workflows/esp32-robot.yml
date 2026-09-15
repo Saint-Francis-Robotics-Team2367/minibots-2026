@@ -7,7 +7,8 @@ on:
       - main
     paths:
       - 'firmware/esp32-robot/**/*.py'
-      - '.github/workflows/pyright.yml'
+      - 'firmware/esp32-robot/pyproject.toml'
+      - '.github/workflows/esp32-robot.yml'
 
 jobs:
   type-check:
@@ -24,7 +25,7 @@ jobs:
 
       - name: Install dev dependencies
         working-directory: firmware/esp32-robot
-        run: uv venv && uv pip install -e ".[dev]"
+        run: uv venv --python 3.12 && uv pip install -e ".[dev]"
 
       - name: Run pyright
         working-directory: firmware/esp32-robot

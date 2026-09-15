@@ -67,6 +67,7 @@ Install dev dependencies once:
 ```bash
 # from firmware/esp32-robot/
 pip install uv
+uv venv --python 3.12      # 3.12 exactly: see stubPath in pyproject.toml
 uv pip install -e ".[dev]"
 ```
 

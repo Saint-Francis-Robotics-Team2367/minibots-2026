@@ -44,6 +44,13 @@ venv = ".venv"
 # Point stubPath at the venv's site-packages so the loose micropython-stubs
 # .pyi files (time.pyi, machine.pyi, etc.) win over pyright's bundled
 # typeshed stdlib stubs, which otherwise always take priority.
+#
+# The version is baked into this path and there is no version-agnostic spelling
+# of it, so the venv must be 3.12 exactly: `uv venv --python 3.12`. Build it on
+# anything newer and pyright looks in a directory that does not exist, finds no
+# MicroPython stubs, and reports the whole API as missing -- "ticks_ms is not a
+# known attribute of module time" and 14 more, which read like real bugs rather
+# than a bad path. CI pins 3.12 via setup-python, so this only bites locally.
 stubPath = ".venv/lib/python3.12/site-packages"
 pythonPlatform = "Linux"
 
