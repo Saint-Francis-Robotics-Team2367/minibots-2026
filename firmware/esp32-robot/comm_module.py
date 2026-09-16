@@ -15,7 +15,6 @@ import time
 import espnow
 import network
 
-
 # --- Protocol constants (keep in sync with firmware/common/minicore_protocol.h) ---
 MC_MSG_JOYSTICK = 0x01
 MC_MSG_ENABLE = 0x02

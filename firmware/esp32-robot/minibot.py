@@ -20,7 +20,7 @@ this file -- they are not independently versioned.
 
 import time
 
-from machine import Pin, PWM
+from machine import PWM, Pin
 
 from button import Button
 from comm_module import CommModule
@@ -50,11 +50,13 @@ from neopixel_ring import RAINBOW_COLORS, NeoPixelRing, RingConnectionStatus, Ri
 # _PWM_CENTER_US +/- _PWM_RANGE_US (1500 +/- 300 = 1200-1800us).
 # If your ESCs need a different center, pass neutral_left_us= / neutral_right_us=
 # (see Minibot.__init__), or set them live from the driver station.
+# fmt: off
 _PWM_FREQ_HZ = 50
 _PWM_CENTER_US = 1500  # neutral pulse width (motors stopped)
 _PWM_RANGE_US = 300    # +/- swing at full stick
 _PWM_MIN_US = 500      # safety minimum (per controller specs)
 _PWM_MAX_US = 2500     # safety maximum (per controller specs)
+# fmt: on
 
 # Stick deadband, as a fraction of full travel (carried over from the old
 # firmware's `if (abs(axis) < 2000) axis = 0`). This is a *stick* deadband, so a
