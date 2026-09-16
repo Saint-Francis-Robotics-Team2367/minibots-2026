@@ -95,24 +95,8 @@ _SLEW_PER_S = 4.0
 # step this exists to prevent. Erring short only makes the ramp gentler.
 _SLEW_MAX_DT_MS = 50
 
-# --- Global speed limit ---
-# Cap on normalized motor output, in the same -1..1 units as
-# drive_left_motor(). 1.0 is unrestricted. Set field-wide from the driver
-# station (MC_MSG_SET_SPEED_LIMIT); see MC_SPEED_LIMIT_* in
-# firmware/common/minicore_policy.h -- policy, not wire format.
-#
-# Deliberately NOT a Minibot(...) parameter, for the same reason as _SLEW_PER_S
-# above: a driver who has capped the field so a rookie can practise, or so the
-# robots are safe indoors, must not be overridable from the file students edit.
-#
-# NOT persisted, unlike the neutral trim. A neutral is a property of this
-# robot's ESCs and should survive a reset; a speed limit is a property of what
-# is happening in the room today. One that outlived the session would quietly
-# cap a robot days later, and the first symptom is a robot that "feels slow"
-# with nothing on screen explaining why. Robots boot unrestricted and the
-# station re-asserts.
-_SPEED_LIMIT_MIN = 0.10
-_SPEED_LIMIT_MAX = 1.00
+# The global speed limit that bounds every motor command lives in comm_module.py
+# (_SPEED_LIMIT_MIN/_MAX); _slew() reads it through self.comm.get_speed_limit().
 
 
 def _clamp(v, lo, hi):
