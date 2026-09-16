@@ -16,9 +16,18 @@ import { session } from "./store.js";
 import { MicroPythonSerial, SerialError } from "./serial.js";
 import { PortOwner, flash, fetchImage, ROBOT_MICROPYTHON_OFFSET } from "./esptool.js";
 
-/** The five files flash-robot.sh:193 uploads, in its order. */
-const LIB_FILES = ["minibot.py", "minibot_config.py", "display.py", "ssd1306.py"];
-/** boot.py is the sixth, written only on a full reflash — no script ever sends
+/** The library modules flash-robot.sh:193 uploads (it globs *.py minus boot.py).
+ *  Every module minibot.py imports has to be here: the import is top-level, so a
+ *  missing one is an ImportError at boot, not a degraded robot. */
+const LIB_FILES = [
+  "minibot.py",
+  "minibot_config.py",
+  "display.py",
+  "ssd1306.py",
+  "button.py",
+  "neopixel_ring.py",
+];
+/** boot.py is the last, written only on a full reflash — no script ever sends
  *  it, yet it is what creates the 1500 ms window every upload depends on. */
 const BOOT_FILE = "boot.py";
 
