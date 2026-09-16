@@ -70,6 +70,18 @@ assert struct.calcsize(_FMT_SPEED_LIMIT_ACK) == 9
 _NEUTRAL_TRIM_MIN_US = 1000
 _NEUTRAL_TRIM_MAX_US = 2000
 
+# Clamp for a neutral passed in from main.py, which is deliberately WIDER than
+# the over-the-air one above. Two different trust levels: a value in main.py was
+# typed by whoever owns the robot and is visible next to the code it affects, so
+# it is held only to the ESC's absolute limits; a value arriving over the radio
+# (or read back out of calib.json, which is editable from the REPL) is untrusted
+# and gets the narrow RC window.
+# Same numbers as _PWM_MIN_US / _PWM_MAX_US in minibot.py, which _pulse_us
+# re-applies as the final backstop -- duplicated rather than imported, because
+# minibot imports this module.
+_NEUTRAL_CONFIG_MIN_US = 500
+_NEUTRAL_CONFIG_MAX_US = 2500
+
 # Where a station-applied calibration is saved so it survives a reset
 _CALIB_PATH = "calib.json"
 
@@ -155,8 +167,8 @@ class CommModule:
         # Calibration state
         self._calib_stored = True
         self._calib_announce_left = _CALIB_ANNOUNCE_COUNT
-        self._neutral_left_us = _clamp(neutral_left_us, _NEUTRAL_TRIM_MIN_US, _NEUTRAL_TRIM_MAX_US)
-        self._neutral_right_us = _clamp(neutral_right_us, _NEUTRAL_TRIM_MIN_US, _NEUTRAL_TRIM_MAX_US)
+        self._neutral_left_us = _clamp(neutral_left_us, _NEUTRAL_CONFIG_MIN_US, _NEUTRAL_CONFIG_MAX_US)
+        self._neutral_right_us = _clamp(neutral_right_us, _NEUTRAL_CONFIG_MIN_US, _NEUTRAL_CONFIG_MAX_US)
 
         # WiFi and ESP-NOW
         self._sta = None
