@@ -245,6 +245,25 @@ class Minibot:
         self._out_right, self._slew_ms_right = self._slew(self._out_right, value, self._slew_ms_right)
         self._motor_write(self._right_pwm, self._out_right, self.comm.get_neutral_right_us())
 
+    def stop_all_motors(self):
+        """Cut both motors to neutral immediately -- never ramped.
+
+        The slew limiter deliberately does not apply here. update() calls this
+        when the robot is disabled or the link goes stale, and a stop that eases
+        off is not a stop. Clearing the limiter's state matters as much as the
+        pulse does: leave _out_* at the pre-stop value and the next
+        drive_*_motor() ramps from a throttle the motors are no longer at,
+        stepping straight back to most of it.
+        """
+        self._out_left = 0.0
+        self._out_right = 0.0
+        self._slew_ms_left = time.ticks_ms()
+        self._slew_ms_right = self._slew_ms_left
+        self._pulse_us(self._left_pwm, self.comm.get_neutral_left_us())
+        self._pulse_us(self._right_pwm, self.comm.get_neutral_right_us())
+
+    # --- calibration ---------------------------------------------------------
+
     def clear_calibration(self):
         """Forget the saved calibration; main.py's values win at the next boot.
 
@@ -268,23 +287,6 @@ class Minibot:
         """
         if self._out_left == 0.0 and self._out_right == 0.0:
             self.stop_all_motors()
-
-    def stop_all_motors(self):
-        """Cut both motors to neutral immediately -- never ramped.
-
-        The slew limiter deliberately does not apply here. update() calls this
-        when the robot is disabled or the link goes stale, and a stop that eases
-        off is not a stop. Clearing the limiter's state matters as much as the
-        pulse does: leave _out_* at the pre-stop value and the next
-        drive_*_motor() ramps from a throttle the motors are no longer at,
-        stepping straight back to most of it.
-        """
-        self._out_left = 0.0
-        self._out_right = 0.0
-        self._slew_ms_left = time.ticks_ms()
-        self._slew_ms_right = self._slew_ms_left
-        self._pulse_us(self._left_pwm, self.comm.get_neutral_left_us())
-        self._pulse_us(self._right_pwm, self.comm.get_neutral_right_us())
 
     # --- button -----------------------------------------------------------
 
