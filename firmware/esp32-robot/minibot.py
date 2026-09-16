@@ -252,11 +252,11 @@ class Minibot:
 
     def drive_left_motor(self, value):
         self._out_left, self._slew_ms_left = self._slew(self._out_left, value, self._slew_ms_left)
-        self._motor_write(self._left_pwm, self._out_left, self._neutral_left_us)
+        self._motor_write(self._left_pwm, self._out_left, self.comm.get_neutral_left_us())
 
     def drive_right_motor(self, value):
         self._out_right, self._slew_ms_right = self._slew(self._out_right, value, self._slew_ms_right)
-        self._motor_write(self._right_pwm, self._out_right, self._neutral_right_us)
+        self._motor_write(self._right_pwm, self._out_right, self.comm.get_neutral_right_us())
 
     def stop_all_motors(self):
         """Cut both motors to neutral immediately -- never ramped.
@@ -272,8 +272,8 @@ class Minibot:
         self._out_right = 0.0
         self._slew_ms_left = time.ticks_ms()
         self._slew_ms_right = self._slew_ms_left
-        self._pulse_us(self._left_pwm, self._neutral_left_us)
-        self._pulse_us(self._right_pwm, self._neutral_right_us)
+        self._pulse_us(self._left_pwm, self.comm.get_neutral_left_us())
+        self._pulse_us(self._right_pwm, self.comm.get_neutral_right_us())
 
     # --- button -----------------------------------------------------------
 
