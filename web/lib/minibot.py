@@ -295,7 +295,7 @@ class Minibot:
         self._calib_announce_left = _CALIB_ANNOUNCE_COUNT
 
         self._sta = None
-        self._espnow = espnow.ESPNow()
+        self._espnow = None
         self._mac = b"\x00" * 6
         self._dongle_mac = None  # learned lazily from first received frame
 
@@ -351,6 +351,7 @@ class Minibot:
             pass
         self._mac = self._sta.config("mac")
 
+        self._espnow = espnow.ESPNow()
         self._espnow.active(True)
         # Broadcast peer is required before we can send heartbeats/discovery.
         self._add_peer(_BROADCAST)
@@ -369,6 +370,7 @@ class Minibot:
 
         # Drain all pending ESP-NOW frames without blocking.
         while True:
+            assert self._espnow
             mac, msg = self._espnow.irecv(0)
             if mac is None:
                 break
@@ -631,6 +633,7 @@ class Minibot:
 
     def _add_peer(self, mac):
         try:
+            assert self._espnow
             self._espnow.add_peer(mac, channel=self._channel)
         except OSError:
             # Already added — ESP-NOW raises if the peer exists.
@@ -639,6 +642,7 @@ class Minibot:
     def _send(self, mac, payload):
         self._add_peer(mac)
         try:
+            assert self._espnow
             self._espnow.send(mac, payload)
         except OSError:
             pass
