@@ -235,7 +235,11 @@ class CommModule:
     def is_enabled(self) -> bool:
         """Check if robot is enabled by driver station."""
         return self._enabled
-    
+
+    def is_connected_to_dongle(self) -> bool:
+        """Check if we have heard from the dongle (discovered its MAC)."""
+        return self._dongle_mac is not None
+
     def get_robot_id(self) -> str:
         """Return the robot id."""
         return self._robot_id

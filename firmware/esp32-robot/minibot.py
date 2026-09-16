@@ -323,7 +323,7 @@ class Minibot:
                 lx, ly, rx, ry, lt, rt, buttons = self.comm.get_joystick_axes()
                 has_input = ly != 0 or ry != 0 or lx != 0 or rx != 0
 
-                if self.comm._dongle_mac is None:
+                if not self.comm.is_connected_to_dongle():
                     # Not connected to dongle
                     self._ring_connection_status.set_status(self._ring_connection_status.STATUS_DISCONNECTED)
                 elif not self.comm.is_enabled():
