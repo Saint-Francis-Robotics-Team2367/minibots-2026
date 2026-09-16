@@ -18,67 +18,15 @@ dongle, so a change to it means reflashing the dongle as well as re-uploading
 this file -- they are not independently versioned.
 """
 
-import json
-import os
-import struct
 import time
 
-import espnow
-import network
-from machine import PWM, Pin
+from machine import Pin, PWM
 
 from button import Button
+from comm_module import CommModule
 from display import Display
 from minibot_config import MinibotConfig
 from neopixel_ring import RAINBOW_COLORS, NeoPixelRing, RingConnectionStatus, RingRotation
-
-# --- Protocol constants (keep in sync with firmware/common/minicore_protocol.h) ---
-MC_MSG_JOYSTICK = 0x01
-MC_MSG_ENABLE = 0x02
-MC_MSG_HEARTBEAT = 0x03
-MC_MSG_DISCOVERY_REQ = 0x04
-MC_MSG_DISCOVERY_RESP = 0x05
-MC_MSG_SET_NEUTRAL = 0x06
-MC_MSG_NEUTRAL_ACK = 0x07
-MC_MSG_SET_SPEED_LIMIT = 0x08
-MC_MSG_SPEED_LIMIT_ACK = 0x09
-
-MC_ROBOT_ID_MAX = 16
-MC_HEARTBEAT_INTERVAL_MS = 1000
-MC_MOTOR_TIMEOUT_MS = 250
-
-# The enable flag expires unless the driver station keeps re-asserting it. Without
-# this, "enabled" is a latch the robot holds forever: a robot that is out of range
-# or powered down at the moment the station disables never hears it, and comes
-# back still enabled. The station re-broadcasts enable ~every 500 ms while armed,
-# so this tolerates several consecutive lost broadcasts (ESP-NOW broadcasts are
-# unacknowledged) before standing the robot down.
-MC_ENABLE_TIMEOUT_MS = 3000
-
-_BROADCAST = b"\xff\xff\xff\xff\xff\xff"
-
-# struct formats (little-endian, packed). Sizes are asserted below.
-# fmt: off
-_FMT_JOYSTICK = "<BBhhhhhhH8s"   # 24 bytes
-_FMT_ENABLE = "<BB6s"            # 8 bytes
-_FMT_HEARTBEAT = "<B6sB16sBB"    # 26 bytes
-_FMT_DISCOVERY_REQ = "<BB"       # 2 bytes
-_FMT_DISCOVERY_RESP = "<B6sB16s" # 24 bytes
-_FMT_SET_NEUTRAL = "<B6sHH"      # 11 bytes
-_FMT_NEUTRAL_ACK = "<B6sHHB"     # 12 bytes
-_FMT_SET_SPEED_LIMIT = "<BH"     # 3 bytes
-_FMT_SPEED_LIMIT_ACK = "<B6sH"   # 9 bytes
-# fmt: on
-
-assert struct.calcsize(_FMT_JOYSTICK) == 24
-assert struct.calcsize(_FMT_ENABLE) == 8
-assert struct.calcsize(_FMT_HEARTBEAT) == 26
-assert struct.calcsize(_FMT_DISCOVERY_REQ) == 2
-assert struct.calcsize(_FMT_DISCOVERY_RESP) == 24
-assert struct.calcsize(_FMT_SET_NEUTRAL) == 11
-assert struct.calcsize(_FMT_NEUTRAL_ACK) == 12
-assert struct.calcsize(_FMT_SET_SPEED_LIMIT) == 3
-assert struct.calcsize(_FMT_SPEED_LIMIT_ACK) == 9
 
 # --- PWM calibration ---
 # Matched to the ESC datasheet:
@@ -87,7 +35,6 @@ assert struct.calcsize(_FMT_SPEED_LIMIT_ACK) == 9
 #   Period           2.9-100 ms (~10-345 Hz)         -> 50 Hz = 20 ms, mid-range
 #   Logic high min   1.0 V / low max 0.4 V           -> ESP32 drives 0/3.3 V, fine
 #   Input current    <1 mA                           -> direct GPIO, no buffer
-#   Deadband         4% default (0.1-25% adjustable) -> see _DEADBAND note
 #
 # NOTE: the retired C++ firmware used 1758us +/- 391us (clamp 1000-2500us). The
 # very old Arduino library wrote LEDC duty 90 on a 10-bit 50 Hz timer
@@ -102,51 +49,16 @@ assert struct.calcsize(_FMT_SPEED_LIMIT_ACK) == 9
 # pulse, not the operating range. What keeps normal output inside 1-2 ms is
 # _PWM_CENTER_US +/- _PWM_RANGE_US (1500 +/- 300 = 1200-1800us).
 # If your ESCs need a different center, pass neutral_left_us= / neutral_right_us=
-# (see Minibot.__init__), or set them live from the driver station -- see the
-# remote trim block below.
-# fmt: off
+# (see Minibot.__init__), or set them live from the driver station.
 _PWM_FREQ_HZ = 50
 _PWM_CENTER_US = 1500  # neutral pulse width (motors stopped)
 _PWM_RANGE_US = 300    # +/- swing at full stick
 _PWM_MIN_US = 500      # safety minimum (per controller specs)
 _PWM_MAX_US = 2500     # safety maximum (per controller specs)
-# fmt: on
-
-# --- Remote neutral trim (driver station "Apply") ---
-# Clamp for a neutral pulse arriving over the air: the full 1-2 ms RC window, so
-# the station can express any neutral the ESC spec allows. This replaced a
-# +/-100 us window around 1500 -- typical trim is +/-30-50 us, but robots here
-# run ESCs offset far enough (1700 us and similar) that the narrow window
-# refused their real neutral.
-#
-# Note what the wider range admits: neutral is the pulse driven on every stop,
-# including the 250 ms link-loss failsafe, so a neutral at either rail makes
-# "motors stopped" mean full throttle that way. What still stands between a typo
-# and that: _pulse_us' own clamp, this only moving on an explicit Apply, and the
-# ack echoing back what actually landed.
-#
-# Keep in sync with MC_NEUTRAL_TRIM_* in firmware/common/minicore_policy.h --
-# policy, not wire format, so changing it needs no dongle reflash.
-_NEUTRAL_TRIM_MIN_US = 1000
-_NEUTRAL_TRIM_MAX_US = 2000
-
-# Where a station-applied calibration is saved so it survives a reset -- notably
-# a brownout mid-match, which is exactly when losing the trim would be worst.
-# JSON rather than packed bytes so it can be read, edited or deleted from the
-# REPL; the file is a few dozen bytes either way.
-_CALIB_PATH = "calib.json"
-
-# How many heartbeats after boot also carry an unsolicited calibration announce.
-# The station needs the robot's real neutrals to fill its fields, and either side
-# may come up first. Repeating covers the broadcast fallback below, which is
-# unacknowledged and may be lost; three is ~3 s at the heartbeat interval.
-_CALIB_ANNOUNCE_COUNT = 3
 
 # Stick deadband, as a fraction of full travel (carried over from the old
 # firmware's `if (abs(axis) < 2000) axis = 0`). This is a *stick* deadband, so a
-# controller resting off-center doesn't make the robot creep; it is separate
-# from -- and wider than -- the ESC's own 4% throttle deadband (+/-12us of the
-# 300us travel), so the ESC's deadband is fully covered either way.
+# controller resting off-center doesn't make the robot creep.
 _DEADBAND = 2000.0 / 32767.0  # ~6.1% of stick travel = +/-18.3us of pulse
 
 # --- Motor slew rate ---
@@ -224,22 +136,6 @@ class Minibot:
     STANDBY = 0
     TELEOP = 1
 
-    # Type hints for all instance attributes
-    _robot_id: str
-    _axis_ly: int
-    _axis_lx: int
-    _axis_rx: int
-    _axis_ry: int
-    _axis_lt: int
-    _axis_rt: int
-    _buttons: int
-    _display: Display | None
-    _ring: NeoPixelRing | None
-    _ring_rotation: RingRotation | None
-    _ring_connection_status: RingConnectionStatus | None
-    _ring_show_rainbow: bool
-    _button: Button | None
-
     def __init__(self, config):
         """Initialize from a MinibotConfig.
 
@@ -247,67 +143,27 @@ class Minibot:
         their neutral. That span is a library constant, not a per-robot setting.
 
         The motor slew limit is not settable here on purpose -- it is fixed at
-        _SLEW_PER_S so robot code cannot opt out of it. See the note there.
+        _SLEW_PER_S so robot code cannot opt out of it.
         """
-        # Fail loudly rather than truncating: the name is how the driver station
-        # identifies this robot, and a silently shortened one looks like a
-        # different (or duplicate) robot on the station and the OLED.
-        assert len(config.robot_id) <= MC_ROBOT_ID_MAX, "robot_id %r is %d characters; max is %d" % (
-            config.robot_id,
-            len(config.robot_id),
-            MC_ROBOT_ID_MAX,
-        )
-        self._robot_id = config.robot_id
         self._left_pin = config.left_motor_pin
         self._right_pin = config.right_motor_pin
-        self._channel = config.channel
-        # Per-motor calibration: neutral pulse width
-        # Swing is always ±_PWM_RANGE_US (300 us); _motor_write reads that constant.
-        self._neutral_left_us = (
-            _clamp(config.neutral_left_us, _PWM_MIN_US, _PWM_MAX_US)
-            if config.neutral_left_us is not None
-            else _PWM_CENTER_US
+
+        # Create the communication module to handle WiFi, ESP-NOW, and protocol
+        self.comm = CommModule(
+            config.robot_id,
+            config.channel,
+            config.neutral_left_us,
+            config.neutral_right_us,
         )
-        self._neutral_right_us = (
-            _clamp(config.neutral_right_us, _PWM_MIN_US, _PWM_MAX_US)
-            if config.neutral_right_us is not None
-            else _PWM_CENTER_US
-        )
-
-        # Controller state (raw int16 axes, -32767..32767; neutral 0)
-        self._axis_lx = 0
-        self._axis_ly = 0
-        self._axis_rx = 0
-        self._axis_ry = 0
-        self._axis_lt = 0
-        self._axis_rt = 0
-        self._buttons = 0
-
-        self._enabled = False
-        self._last_enable_ms = 0
-        self._last_joystick_ms = 0
-        self._last_hb_ms = 0
-
-        # "Will these exact neutrals still be in force after a reset?" True for
-        # the constructor values, since main.py reproduces them every boot; set
-        # from the file on load, and cleared only when a save actually fails.
-        self._calib_stored = True
-        self._calib_announce_left = _CALIB_ANNOUNCE_COUNT
-
-        self._sta = None
-        self._espnow = None
-        self._mac = b"\x00" * 6
-        self._dongle_mac = None  # learned lazily from first received frame
 
         self._left_pwm = None
         self._right_pwm = None
 
         # Rate-limited motor state. _out_* is what we last actually commanded,
         # which the limiter has to remember to know how far it may step next.
-        # The rate itself is the fixed _SLEW_PER_S, not per-robot state.
         self._out_left = 0.0
         self._out_right = 0.0
-        self._slew_ms_left = time.ticks_ms()
+        self._slew_ms_left = int(time.ticks_ms())
         self._slew_ms_right = self._slew_ms_left
 
         self._display = self._init_display(config)
@@ -318,94 +174,34 @@ class Minibot:
         self._button = self._init_button()
         self._set_ring_colors()
 
-        # Unrestricted until a station says otherwise. See _SPEED_LIMIT_* above
-        # for why this is not loaded from anywhere.
-        self._speed_limit = _SPEED_LIMIT_MAX
-
     # --- lifecycle -----------------------------------------------------------
 
     def begin(self):
         """Bring up the motor outputs, Wi-Fi and ESP-NOW. Call once."""
-        # Saved calibration BEFORE the PWM channels exist. _init_motor_pwm has to
-        # be handed the final neutral: the duty passed to the PWM() constructor
-        # is the first thing the ESC sees, and correcting it afterwards is too
-        # late (see the note there).
-        self._load_calibration()
+        # Load calibration and bring up communication first. This loads any saved
+        # neutral trim and starts the WiFi/ESP-NOW stack.
+        self.comm.begin()
 
         # Motors FIRST, at neutral: bringing up Wi-Fi takes a moment, and until
         # a PWM channel drives these pins they float, which some ESCs latch onto
         # as a throttle command. Get a valid neutral pulse train out immediately.
-        self._left_pwm = self._init_motor_pwm(self._left_pin, self._neutral_left_us)
-        self._right_pwm = self._init_motor_pwm(self._right_pin, self._neutral_right_us)
+        self._left_pwm = self._init_motor_pwm(self._left_pin, self.comm.get_neutral_left_us())
+        self._right_pwm = self._init_motor_pwm(self._right_pin, self.comm.get_neutral_right_us())
         self.stop_all_motors()
-
-        # Wi-Fi STA on the shared channel (no AP association; ESP-NOW only).
-        self._sta = network.WLAN(network.STA_IF)
-        self._sta.active(True)
-        self._sta.disconnect()
-        try:
-            self._sta.config(channel=self._channel)
-        except OSError:
-            # Some ports require the channel be set via ESP-NOW peer instead;
-            # add_peer(channel=...) below still pins it.
-            pass
-        self._mac = self._sta.config("mac")
-
-        self._espnow = espnow.ESPNow()
-        self._espnow.active(True)
-        # Broadcast peer is required before we can send heartbeats/discovery.
-        self._add_peer(_BROADCAST)
-
-        now = time.ticks_ms()
-        self._last_joystick_ms = now
-        self._last_enable_ms = now
-        self._last_hb_ms = now
 
     # --- main loop step ------------------------------------------------------
 
     def update(self):
         """Call FIRST each loop. Drains the radio, applies enable/failsafe,
         and sends periodic heartbeats."""
+        now = int(time.ticks_ms())
+        comm_status = self.comm.update(now)
+
         self._set_ring_colors()
 
-        # Drain all pending ESP-NOW frames without blocking.
-        while True:
-            assert self._espnow
-            mac, msg = self._espnow.irecv(0)
-            if mac is None:
-                break
-            if msg:
-                self._handle(mac, bytes(msg))
-
-        now = time.ticks_ms()
-
-        # Let the enable flag lapse if the station has gone quiet. This is what
-        # keeps "enabled" from being a latch the robot holds across a driver
-        # station reload, a closed tab, or its own trip out of radio range.
-        if self._enabled and time.ticks_diff(now, self._last_enable_ms) > MC_ENABLE_TIMEOUT_MS:
-            self._enabled = False
-
-        # Failsafe: neutral motors when disabled or link is stale. Also zero the
-        # cached axes, so a main.py that drives from the sticks can't be handed
-        # the last-known (possibly full-throttle) values from before the link
-        # dropped — otherwise it would immediately undo this stop.
-        if not self._enabled or time.ticks_diff(now, self._last_joystick_ms) > MC_MOTOR_TIMEOUT_MS:
-            self._zero_inputs()
+        # Failsafe: neutral motors when disabled or link is stale.
+        if not comm_status["enabled"] or comm_status["joystick_stale"]:
             self.stop_all_motors()
-
-        # Heartbeat so the dongle/web UI knows we're alive.
-        if time.ticks_diff(now, self._last_hb_ms) >= MC_HEARTBEAT_INTERVAL_MS:
-            self._last_hb_ms = now
-            self._send_heartbeat()
-            # Ride the first few heartbeats with our calibration, so the driver
-            # station can fill its fields with what we are actually running
-            # without anyone clicking Scan. Same target as the heartbeat, which
-            # falls back to broadcast until we have heard the dongle -- the case
-            # where no unicast traffic has reached us yet (a slot paired to us
-            # but with no gamepad selected sends nothing).
-            if self._calib_announce_left > 0:
-                self._calib_announce_left -= 1
-                self._send_neutral_ack(self._link_target())
 
     # --- inputs (normalized -1.0..1.0) --------------------------------------
 
@@ -415,42 +211,42 @@ class Minibot:
         return 0.0 if -_DEADBAND < value < _DEADBAND else value
 
     def get_left_x(self):
-        return self._stick(self._axis_lx)
+        return self._stick(self.comm.get_left_x())
 
     def get_left_y(self):
-        return self._stick(self._axis_ly)
+        return self._stick(self.comm.get_left_y())
 
     def get_right_x(self):
-        return self._stick(self._axis_rx)
+        return self._stick(self.comm.get_right_x())
 
     def get_right_y(self):
-        return self._stick(self._axis_ry)
+        return self._stick(self.comm.get_right_y())
 
     def get_left_trigger(self):
-        return self._axis_lt / 32767.0
+        return self.comm.get_left_trigger() / 32767.0
 
     def get_right_trigger(self):
-        return self._axis_rt / 32767.0
+        return self.comm.get_right_trigger() / 32767.0
 
     # --- buttons (True when pressed) ----------------------------------------
 
     def get_cross(self):
-        return bool(self._buttons & (1 << 0))
+        return bool(self.comm.get_buttons() & (1 << 0))
 
     def get_circle(self):
-        return bool(self._buttons & (1 << 1))
+        return bool(self.comm.get_buttons() & (1 << 1))
 
     def get_square(self):
-        return bool(self._buttons & (1 << 2))
+        return bool(self.comm.get_buttons() & (1 << 2))
 
     def get_triangle(self):
-        return bool(self._buttons & (1 << 3))
+        return bool(self.comm.get_buttons() & (1 << 3))
 
     # --- game status ---------------------------------------------------------
 
     def get_game_status(self):
         """TELEOP when the driver station has enabled this robot, else STANDBY."""
-        return Minibot.TELEOP if self._enabled else Minibot.STANDBY
+        return Minibot.TELEOP if self.comm.is_enabled() else Minibot.STANDBY
 
     # --- motors (value -1.0..1.0) -------------------------------------------
 
@@ -523,14 +319,17 @@ class Minibot:
                 self._ring_rotation.update()
                 colors = self._ring_rotation.get_colors()
             else:
-                # Connection status mode
-                if self._dongle_mac is None:
+                # Connection status mode - check if we have dongle connection
+                lx, ly, rx, ry, lt, rt, buttons = self.comm.get_joystick_axes()
+                has_input = ly != 0 or ry != 0 or lx != 0 or rx != 0
+
+                if self.comm._dongle_mac is None:
                     # Not connected to dongle
                     self._ring_connection_status.set_status(self._ring_connection_status.STATUS_DISCONNECTED)
-                elif not self._enabled:
+                elif not self.comm.is_enabled():
                     # Connected but not assigned/enabled
                     self._ring_connection_status.set_status(self._ring_connection_status.STATUS_CONNECTED_UNASSIGNED)
-                elif self._axis_ly != 0 or self._axis_ry != 0 or self._axis_lx != 0 or self._axis_rx != 0:
+                elif has_input:
                     # Driving (has input)
                     self._ring_connection_status.set_status(self._ring_connection_status.STATUS_DRIVING)
                     self._ring_connection_status.update_blink()
@@ -553,7 +352,7 @@ class Minibot:
             return None
         try:
             display = Display()
-            display.set_line1(self._robot_id)
+            display.set_line1(self.comm.get_robot_id())
             # set_line*() only stages text in RAM; nothing reaches the panel
             # until show() pushes the framebuffer over I2C.
             display.show()
@@ -563,15 +362,6 @@ class Minibot:
             return None
 
     # --- internals -----------------------------------------------------------
-
-    def _zero_inputs(self):
-        self._axis_lx = 0
-        self._axis_ly = 0
-        self._axis_rx = 0
-        self._axis_ry = 0
-        self._axis_lt = 0
-        self._axis_rt = 0
-        self._buttons = 0
 
     def _init_motor_pwm(self, pin, neutral_us):
         """Create a motor PWM that is already at neutral on its first output edge.
@@ -616,7 +406,7 @@ class Minibot:
         a stop must never be ramped, and must never be limited either.
         """
         now = time.ticks_ms()
-        target = _clamp(target, -self._speed_limit, self._speed_limit)
+        target = _clamp(target, -self.comm.get_speed_limit(), self.comm.get_speed_limit())
         dt_ms = _clamp(time.ticks_diff(now, last_ms), 0, _SLEW_MAX_DT_MS)
         step = _SLEW_PER_S * dt_ms / 1000.0
         return cur + _clamp(target - cur, -step, step), now
@@ -630,221 +420,3 @@ class Minibot:
             return
         us = _clamp(us, _PWM_MIN_US, _PWM_MAX_US)
         pwm.duty_u16(_us_to_duty_u16(us))
-
-    def _add_peer(self, mac):
-        try:
-            assert self._espnow
-            self._espnow.add_peer(mac, channel=self._channel)
-        except OSError:
-            # Already added — ESP-NOW raises if the peer exists.
-            pass
-
-    def _send(self, mac, payload):
-        self._add_peer(mac)
-        try:
-            assert self._espnow
-            self._espnow.send(mac, payload)
-        except OSError:
-            pass
-
-    def _handle(self, mac, data):
-        if len(data) < 1:
-            return
-        # Learn the dongle's MAC from the first frame we hear. A link coming up
-        # is also a station that knows nothing about our calibration, so re-arm
-        # the announce: this is the path that covers us rebooting (brownout,
-        # power cycle) into an already-running driver station.
-        if self._dongle_mac is None:
-            self._dongle_mac = bytes(mac)
-            self._calib_announce_left = _CALIB_ANNOUNCE_COUNT
-
-        msg_type = data[0]
-        if msg_type == MC_MSG_SET_NEUTRAL:
-            self._handle_set_neutral(mac, data)
-        elif msg_type == MC_MSG_SET_SPEED_LIMIT:
-            self._handle_set_speed_limit(mac, data)
-        elif msg_type == MC_MSG_DISCOVERY_REQ:
-            self._send_discovery_resp(mac)
-            # Answer a scan with our calibration too, so the station can fill its
-            # fields the moment we show up in the robot list.
-            self._send_neutral_ack(mac)
-            # And with the speed limit in force, so a station that has just come
-            # up learns immediately that this robot is still unrestricted.
-            self._send_speed_limit_ack(mac)
-        elif msg_type == MC_MSG_ENABLE:
-            self._handle_enable(data)
-        elif msg_type == MC_MSG_JOYSTICK:
-            self._handle_joystick(data)
-
-    def _handle_enable(self, data):
-        if len(data) < struct.calcsize(_FMT_ENABLE):
-            return
-        _, enabled, target_mac = struct.unpack(_FMT_ENABLE, data[: struct.calcsize(_FMT_ENABLE)])
-        if target_mac == _BROADCAST or target_mac == self._mac:
-            self._enabled = enabled != 0
-            # Refresh the expiry only while being told "enabled" — a disable does
-            # not need keeping alive, and must not extend the window.
-            if self._enabled:
-                self._last_enable_ms = time.ticks_ms()
-
-    def _handle_joystick(self, data):
-        n = struct.calcsize(_FMT_JOYSTICK)
-        if len(data) < n:
-            return
-        (_, _seq, lx, ly, rx, ry, lt, rt, buttons, _aux) = struct.unpack(_FMT_JOYSTICK, data[:n])
-        self._axis_lx = lx
-        self._axis_ly = ly
-        self._axis_rx = rx
-        self._axis_ry = ry
-        self._axis_lt = lt
-        self._axis_rt = rt
-        self._buttons = buttons
-        self._last_joystick_ms = time.ticks_ms()
-
-    def _handle_set_neutral(self, mac, data):
-        n = struct.calcsize(_FMT_SET_NEUTRAL)
-        if len(data) < n:
-            return
-        _, target_mac, left_us, right_us = struct.unpack(_FMT_SET_NEUTRAL, data[:n])
-        # Addressed to us specifically -- a broadcast is refused outright rather
-        # than filtered. Neutral trim is per-robot ESC calibration, so applying
-        # one robot's values field-wide would change what "stopped" means for
-        # every other robot at once.
-        if target_mac != self._mac:
-            return
-
-        self._neutral_left_us = _clamp(left_us, _NEUTRAL_TRIM_MIN_US, _NEUTRAL_TRIM_MAX_US)
-        self._neutral_right_us = _clamp(right_us, _NEUTRAL_TRIM_MIN_US, _NEUTRAL_TRIM_MAX_US)
-
-        # A neutral change is a step, not a ramp. The slew limiter works in
-        # normalized -1..1 units and neutral is the offset those map onto, so it
-        # has nothing to say here; the trim clamp bounds the step to ~20% of
-        # range and this only happens on a button press, so it is left unramped.
-        #
-        # Re-emit immediately if the motors are already stopped, so the effect is
-        # visible without touching the sticks -- watching for creep at centered
-        # sticks is the entire point of calibrating.
-        if self._out_left == 0.0 and self._out_right == 0.0:
-            self.stop_all_motors()
-
-        self._calib_stored = self._save_calibration()
-        self._send_neutral_ack(mac)
-
-    def _handle_set_speed_limit(self, mac, data):
-        n = struct.calcsize(_FMT_SET_SPEED_LIMIT)
-        if len(data) < n:
-            return
-        _, limit_milli = struct.unpack(_FMT_SET_SPEED_LIMIT, data[:n])
-
-        # No addressee check, unlike _handle_set_neutral. This frame is
-        # broadcast by design: the cap is field-wide, and a robot that decided
-        # it was meant for someone else would be the one robot still at full
-        # speed. Clamped here because the robot is authoritative -- the dongle
-        # forwards the value untouched.
-        self._speed_limit = _clamp(limit_milli / 1000.0, _SPEED_LIMIT_MIN, _SPEED_LIMIT_MAX)
-
-        # No immediate re-write of the motors. A lower cap takes effect through
-        # _slew() on the next drive_*_motor() call, which ramps the output down
-        # rather than stepping it; if nothing is driving, the motors are already
-        # at neutral and there is nothing to bring down.
-        self._send_speed_limit_ack(mac)
-
-    # --- calibration persistence ---------------------------------------------
-
-    def _load_calibration(self):
-        """Apply a saved station calibration over main.py's values, if present.
-
-        A missing file is the ordinary first-boot case, and a corrupt one must
-        not stop the robot booting -- either way we keep what main.py passed in.
-        Saved values are re-clamped on the way in: the file is editable from the
-        REPL, so it is untrusted input like anything arriving over the radio.
-        """
-        try:
-            with open(_CALIB_PATH) as f:
-                saved = json.load(f)
-            left = int(saved["nl"])
-            right = int(saved["nr"])
-        except (OSError, ValueError, KeyError, TypeError):
-            return
-        self._neutral_left_us = _clamp(left, _NEUTRAL_TRIM_MIN_US, _NEUTRAL_TRIM_MAX_US)
-        self._neutral_right_us = _clamp(right, _NEUTRAL_TRIM_MIN_US, _NEUTRAL_TRIM_MAX_US)
-        self._calib_stored = True
-
-    def _save_calibration(self):
-        """Persist the current neutrals. True if they will survive a reset."""
-        try:
-            with open(_CALIB_PATH, "w") as f:
-                json.dump({"nl": self._neutral_left_us, "nr": self._neutral_right_us}, f)
-            return True
-        except OSError:
-            # Filesystem full or read-only. The values are still applied for this
-            # session -- the station is simply told they are not persistent, so
-            # the driver knows a reset reverts them.
-            return False
-
-    def clear_calibration(self):
-        """Forget the saved calibration; main.py's values win at the next boot.
-
-        Run once from the REPL when a robot should go back to the numbers in its
-        main.py. Editing the constructor alone will not do it: a saved
-        calibration is loaded over the top of those values in begin().
-        """
-        try:
-            os.remove(_CALIB_PATH)
-            return True
-        except OSError:
-            return False
-
-    # --- outbound frames -----------------------------------------------------
-
-    def _link_target(self):
-        """Where robot -> station frames go: the dongle once we have heard from
-        it, else broadcast. ESP-NOW broadcasts are unacknowledged, which is why
-        the calibration announce repeats instead of firing once."""
-        return self._dongle_mac if self._dongle_mac is not None else _BROADCAST
-
-    def _send_neutral_ack(self, target):
-        """Report the neutrals actually in force (post-clamp) to the station."""
-        ack = struct.pack(
-            _FMT_NEUTRAL_ACK,
-            MC_MSG_NEUTRAL_ACK,
-            self._mac,
-            self._neutral_left_us,
-            self._neutral_right_us,
-            1 if self._calib_stored else 0,
-        )
-        self._send(target, ack)
-
-    def _send_speed_limit_ack(self, target):
-        """Report the speed limit actually in force (post-clamp) to the station."""
-        ack = struct.pack(
-            _FMT_SPEED_LIMIT_ACK,
-            MC_MSG_SPEED_LIMIT_ACK,
-            self._mac,
-            int(round(self._speed_limit * 1000.0)),
-        )
-        self._send(target, ack)
-
-    def _send_discovery_resp(self, mac):
-        name = self._robot_id.encode()[:MC_ROBOT_ID_MAX]
-        resp = struct.pack(
-            _FMT_DISCOVERY_RESP,
-            MC_MSG_DISCOVERY_RESP,
-            self._mac,
-            len(name),
-            name,  # struct pads/truncates to 16 bytes
-        )
-        self._send(mac, resp)
-
-    def _send_heartbeat(self):
-        name = self._robot_id.encode()[:MC_ROBOT_ID_MAX]
-        hb = struct.pack(
-            _FMT_HEARTBEAT,
-            MC_MSG_HEARTBEAT,
-            self._mac,
-            len(name),
-            name,
-            0xFF,  # battery unknown
-            1 if self._enabled else 0,
-        )
-        self._send(self._link_target(), hb)
