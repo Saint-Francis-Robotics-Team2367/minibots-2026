@@ -163,7 +163,7 @@ class Minibot:
         # which the limiter has to remember to know how far it may step next.
         self._out_left = 0.0
         self._out_right = 0.0
-        self._slew_ms_left = int(time.ticks_ms())
+        self._slew_ms_left = time.ticks_ms()
         self._slew_ms_right = self._slew_ms_left
 
         self._display = self._init_display(config)
@@ -194,7 +194,7 @@ class Minibot:
     def update(self):
         """Call FIRST each loop. Drains the radio, applies enable/failsafe,
         and sends periodic heartbeats."""
-        now = int(time.ticks_ms())
+        now = time.ticks_ms()
         comm_status = self.comm.update(now)
 
         self._set_ring_colors()

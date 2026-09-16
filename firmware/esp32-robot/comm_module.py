@@ -97,9 +97,10 @@ class CommModule:
     _mac: bytes
     _dongle_mac: bytes | None
     _enabled: bool
-    _last_enable_ms: int
-    _last_joystick_ms: int
-    _last_hb_ms: int
+    # No annotation on the tick fields: time.ticks_ms() returns an opaque
+    # counter, not an int (it is free to wrap), so only ticks_diff() may be
+    # used on these. Annotating them "int" is what made int(ticks_ms()) look
+    # necessary, and int() is exactly what the opaque type refuses.
     _calib_stored: bool
     _calib_announce_left: int
     _neutral_left_us: int
@@ -141,9 +142,10 @@ class CommModule:
         self._buttons = 0
 
         self._enabled = False
-        self._last_enable_ms = 0
-        self._last_joystick_ms = 0
-        self._last_hb_ms = 0
+        now = time.ticks_ms()
+        self._last_enable_ms = now
+        self._last_joystick_ms = now
+        self._last_hb_ms = now
 
         # Calibration state
         self._calib_stored = True
@@ -180,18 +182,19 @@ class CommModule:
         # Broadcast peer is required before we can send heartbeats/discovery.
         self._add_peer(_BROADCAST)
 
-        now = int(time.ticks_ms())
+        now = time.ticks_ms()
         self._last_joystick_ms = now
         self._last_enable_ms = now
         self._last_hb_ms = now
 
-    def update(self, now: int) -> dict:
+    def update(self, now) -> dict:
         """Process inbound messages, handle timeouts, send heartbeats.
 
         Call this at the top of your loop before reading inputs or driving motors.
 
         Args:
-            now: Current time in milliseconds (typically time.ticks_ms())
+            now: A time.ticks_ms() value. Only compared with ticks_diff(),
+                never used as a plain integer.
 
         Returns:
             A dict with status info:
@@ -354,7 +357,7 @@ class CommModule:
         if target_mac == _BROADCAST or target_mac == self._mac:
             self._enabled = enabled != 0
             if self._enabled:
-                self._last_enable_ms = int(time.ticks_ms())
+                self._last_enable_ms = time.ticks_ms()
 
     def _handle_joystick(self, data):
         n = struct.calcsize(_FMT_JOYSTICK)
@@ -368,7 +371,7 @@ class CommModule:
         self._axis_lt = lt
         self._axis_rt = rt
         self._buttons = buttons
-        self._last_joystick_ms = int(time.ticks_ms())
+        self._last_joystick_ms = time.ticks_ms()
 
     def _handle_set_neutral(self, mac, data):
         n = struct.calcsize(_FMT_SET_NEUTRAL)
