@@ -218,6 +218,15 @@ class CommModule:
         # Check if joystick input is stale
         joystick_stale = time.ticks_diff(now, self._last_joystick_ms) > MC_MOTOR_TIMEOUT_MS
 
+        # Drop the cached axes on the same condition that stops the motors, so a
+        # main.py driving straight from the sticks cannot be handed the
+        # last-known (possibly full-throttle) values from before the link
+        # dropped -- it would undo the stop on the very next line. The axes live
+        # here, so the zeroing has to happen here; Minibot.update() can only see
+        # the flags this returns.
+        if not self._enabled or joystick_stale:
+            self._zero_inputs()
+
         # Heartbeat so the dongle/web UI knows we're alive.
         if time.ticks_diff(now, self._last_hb_ms) >= MC_HEARTBEAT_INTERVAL_MS:
             self._last_hb_ms = now
