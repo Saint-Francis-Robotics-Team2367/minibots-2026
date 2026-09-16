@@ -85,6 +85,12 @@ def _clamp(v, lo, hi):
     return lo if v < lo else hi if v > hi else v
 
 
+def _noop():
+    """Default neutral-change hook. A real callable rather than None so the
+    call site needs no branch, and no Callable annotation is needed -- there is
+    no `typing` module on MicroPython to import one from."""
+
+
 class CommModule:
     """Handles all ESP-NOW communication with the driver station."""
 
@@ -160,6 +166,12 @@ class CommModule:
 
         # Speed limit (unrestricted until a station says otherwise)
         self._speed_limit = _SPEED_LIMIT_MAX
+
+        # Called when a station applies new neutrals, so the owner can push them
+        # to the hardware. This module has no motor handle by design; without the
+        # hook the new neutral would sit here unheard until something else wrote
+        # a pulse. See set_on_neutral_change().
+        self._on_neutral_change = _noop
 
     def begin(self):
         """Bring up Wi-Fi and ESP-NOW. Call once before update()."""
@@ -297,6 +309,16 @@ class CommModule:
         self._neutral_right_us = _clamp(right_us, _NEUTRAL_TRIM_MIN_US, _NEUTRAL_TRIM_MAX_US)
         return self._save_calibration()
 
+    def set_on_neutral_change(self, callback) -> None:
+        """Register a no-arg callable invoked after the neutrals change.
+
+        Called on a station Apply, once the new values are in force and before
+        the ack goes out. The owner uses it to re-emit the pulse so the change
+        is visible without touching the sticks -- watching for creep at centered
+        sticks is the entire point of calibrating.
+        """
+        self._on_neutral_change = callback
+
     def set_speed_limit(self, limit_milli: int) -> None:
         """Update speed limit from driver station."""
         self._speed_limit = _clamp(limit_milli / 1000.0, _SPEED_LIMIT_MIN, _SPEED_LIMIT_MAX)
@@ -392,6 +414,12 @@ class CommModule:
 
         self._neutral_left_us = _clamp(left_us, _NEUTRAL_TRIM_MIN_US, _NEUTRAL_TRIM_MAX_US)
         self._neutral_right_us = _clamp(right_us, _NEUTRAL_TRIM_MIN_US, _NEUTRAL_TRIM_MAX_US)
+
+        # Let the owner put the new neutral on the wire. A neutral change is a
+        # step, not a ramp: the slew limiter works in normalized -1..1 units and
+        # neutral is the offset those map onto, so it has nothing to say here.
+        # The trim clamp bounds the step and this only happens on a button press.
+        self._on_neutral_change()
 
         self._calib_stored = self._save_calibration()
         self._send_neutral_ack(mac)

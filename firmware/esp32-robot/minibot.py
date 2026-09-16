@@ -157,6 +157,7 @@ class Minibot:
             config.neutral_left_us,
             config.neutral_right_us,
         )
+        self.comm.set_on_neutral_change(self._on_neutral_change)
 
         self._left_pwm = None
         self._right_pwm = None
@@ -259,6 +260,18 @@ class Minibot:
     def drive_right_motor(self, value):
         self._out_right, self._slew_ms_right = self._slew(self._out_right, value, self._slew_ms_right)
         self._motor_write(self._right_pwm, self._out_right, self.comm.get_neutral_right_us())
+
+    def _on_neutral_change(self):
+        """A station applied new neutrals -- put them on the wire now.
+
+        Only when the motors are already stopped: then the pulse is the neutral
+        itself, and re-emitting shows the change without anyone touching the
+        sticks, which is the whole point of calibrating. If something is being
+        driven, the next drive_*_motor() picks the new neutral up on its own and
+        stepping it here would be a throttle jump nobody asked for.
+        """
+        if self._out_left == 0.0 and self._out_right == 0.0:
+            self.stop_all_motors()
 
     def stop_all_motors(self):
         """Cut both motors to neutral immediately -- never ramped.
