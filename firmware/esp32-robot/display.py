@@ -14,12 +14,6 @@ _FONT_H = 8
 class Display:
     """OLED display showing up to 3 lines of text, scaled to fill the panel."""
 
-    WIDTH: int
-    HEIGHT: int
-    line1: str
-    line2: str
-    line3: str
-
     def __init__(
         self,
         scl_pin: int = 22,
@@ -37,15 +31,15 @@ class Display:
             height: Display height in pixels (default: 32)
             i2c_addr: I2C address of display (default: 0x3C)
         """
-        self.WIDTH = width
-        self.HEIGHT = height
+        self.WIDTH: int = width
+        self.HEIGHT: int = height
 
         i2c = I2C(0, scl=Pin(scl_pin), sda=Pin(sda_pin), freq=400000)
         self.oled = ssd1306.SSD1306_I2C(width, height, i2c, addr=i2c_addr)
 
-        self.line1 = ""
-        self.line2 = ""
-        self.line3 = ""
+        self.line1: str = ""
+        self.line2: str = ""
+        self.line3: str = ""
 
         self.show()
 
@@ -81,7 +75,7 @@ class Display:
         """Update display, scaling the text as large as the panel allows."""
         self.oled.fill(0)
 
-        lines = [t for t in (self.line1, self.line2, self.line3) if t]
+        lines = [t for t in [self.line1, self.line2, self.line3] if t]
         if lines:
             # Share the height evenly, so every row is the same size; each line
             # then gets the widest horizontal scale its own length permits.
