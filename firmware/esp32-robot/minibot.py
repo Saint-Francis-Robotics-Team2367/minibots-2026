@@ -261,6 +261,18 @@ class Minibot:
         self._out_right, self._slew_ms_right = self._slew(self._out_right, value, self._slew_ms_right)
         self._motor_write(self._right_pwm, self._out_right, self.comm.get_neutral_right_us())
 
+    def clear_calibration(self):
+        """Forget the saved calibration; main.py's values win at the next boot.
+
+        Run once from the REPL when a robot should go back to the numbers in its
+        main.py. Editing the constructor alone will not do it: a saved
+        calibration is loaded over the top of those values in begin().
+
+        Kept on Minibot even though the file belongs to CommModule: `bot` is the
+        only name students have at the REPL, and the README sends them here.
+        """
+        return self.comm.clear_calibration()
+
     def _on_neutral_change(self):
         """A station applied new neutrals -- put them on the wire now.
 
