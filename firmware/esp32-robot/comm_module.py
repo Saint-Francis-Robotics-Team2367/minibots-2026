@@ -147,6 +147,7 @@ class CommModule:
     _axis_lt: int
     _axis_rt: int
     _buttons: int
+    _joystick_stale: bool
 
     def __init__(self, robot_id: str, channel: int, neutral_left_us: int = 1500, neutral_right_us: int = 1500):
         """Initialize the communication module.
@@ -179,6 +180,7 @@ class CommModule:
         self._last_enable_ms = now
         self._last_joystick_ms = now
         self._last_hb_ms = now
+        self._joystick_stale = False
 
         # Calibration state
         self._calib_stored = True
@@ -226,21 +228,14 @@ class CommModule:
         self._last_enable_ms = now
         self._last_hb_ms = now
 
-    def update(self, now) -> dict:
+    def update(self) -> None:
         """Process inbound messages, handle timeouts, send heartbeats.
 
         Call this at the top of your loop before reading inputs or driving motors.
 
         Args:
-            now: A time.ticks_ms() value. Only compared with ticks_diff(),
-                never used as a plain integer.
-
-        Returns:
-            A dict with status info:
-            {
-                "enabled": bool,
-                "joystick_stale": bool,
-            }
+            now: Current time in milliseconds (typically time.ticks_ms()).
+                Only compared with ticks_diff(), never used as a plain integer.
         """
         # Drain all pending ESP-NOW frames without blocking.
         while True:
@@ -252,11 +247,12 @@ class CommModule:
                 self._handle(mac, bytes(msg))
 
         # Let the enable flag lapse if the station has gone quiet.
+        now = time.ticks_ms()
         if self._enabled and time.ticks_diff(now, self._last_enable_ms) > MC_ENABLE_TIMEOUT_MS:
             self._enabled = False
 
         # Check if joystick input is stale
-        joystick_stale = time.ticks_diff(now, self._last_joystick_ms) > MC_MOTOR_TIMEOUT_MS
+        self._joystick_stale = time.ticks_diff(now, self._last_joystick_ms) > MC_MOTOR_TIMEOUT_MS
 
         # Drop the cached axes on the same condition that stops the motors, so a
         # main.py driving straight from the sticks cannot be handed the
@@ -264,7 +260,7 @@ class CommModule:
         # dropped -- it would undo the stop on the very next line. The axes live
         # here, so the zeroing has to happen here; Minibot.update() can only see
         # the flags this returns.
-        if not self._enabled or joystick_stale:
+        if not self._enabled or self._joystick_stale:
             self._zero_inputs()
 
         # Heartbeat so the dongle/web UI knows we're alive.
@@ -276,11 +272,6 @@ class CommModule:
                 self._calib_announce_left -= 1
                 self._send_neutral_ack(self._link_target())
 
-        return {
-            "enabled": self._enabled,
-            "joystick_stale": joystick_stale,
-        }
-
     # --- Getters -----------------------------------------------------------------
 
     def is_enabled(self) -> bool:
@@ -290,6 +281,10 @@ class CommModule:
     def is_connected_to_dongle(self) -> bool:
         """Check if we have heard from the dongle (discovered its MAC)."""
         return self._dongle_mac is not None
+
+    def is_joystick_stale(self) -> bool:
+        """Check if joystick input is stale (link loss or no recent packets)."""
+        return self._joystick_stale
 
     def get_robot_id(self) -> str:
         """Return the robot id."""

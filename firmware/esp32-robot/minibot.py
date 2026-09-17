@@ -181,13 +181,12 @@ class Minibot:
     def update(self):
         """Call FIRST each loop. Drains the radio, applies enable/failsafe,
         and sends periodic heartbeats."""
-        now = time.ticks_ms()
-        comm_status = self.comm.update(now)
+        self.comm.update()
 
         self._set_ring_colors()
 
         # Failsafe: neutral motors when disabled or link is stale.
-        if not comm_status["enabled"] or comm_status["joystick_stale"]:
+        if not self.comm.is_enabled() or self.comm.is_joystick_stale():
             self.stop_all_motors()
 
     # --- inputs (normalized -1.0..1.0) --------------------------------------
