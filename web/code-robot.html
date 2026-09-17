@@ -177,6 +177,47 @@
                 <label for="flashConfirm">Type ERASE to continue</label>
                 <input type="text" id="flashConfirm" autocomplete="off" spellcheck="false" />
               </p>
+
+              <!-- Hidden until it is needed, then revealed by code-robot.js: on
+                   Windows at load (no software reset can work there), and anywhere
+                   after a failed connect. Inside the pane rather than in the
+                   full-width help strip because it is a step in THIS operation,
+                   not a standing property of the machine like the driver panel. -->
+              <div id="manualBoot" class="mb" hidden>
+                <p class="mb__why">
+                  <strong>Use the <kbd>BOOT</kbd> button.</strong> Chrome on Windows
+                  cannot switch this board into install mode by itself, so do it by hand:
+                </p>
+                <ol class="steps">
+                  <li class="step">
+                    <span class="step__n">1</span>
+                    <span class="step__body">
+                      <span class="step__do">Hold <kbd>BOOT</kbd> down.</span>
+                      <span class="step__why">Also labelled <kbd>IO0</kbd>.</span>
+                    </span>
+                  </li>
+                  <li class="step">
+                    <span class="step__n">2</span>
+                    <span class="step__body">
+                      <span class="step__do">Tap <kbd>RESET</kbd>, release <kbd>BOOT</kbd>.</span>
+                      <span class="step__why">Also <kbd>EN</kbd>. The robot goes dark — correct.</span>
+                    </span>
+                  </li>
+                  <li class="step">
+                    <span class="step__n">3</span>
+                    <span class="step__body">
+                      <span class="step__do">Press Erase below.</span>
+                      <span class="step__why">Do not unplug. It waits until reset again.</span>
+                    </span>
+                  </li>
+                </ol>
+                <!-- Hidden by revealManualBoot({required:true}) on Windows, where the
+                     steps are mandatory and a togglable box would misdescribe them. -->
+                <p class="field field--check" id="flashManualField">
+                  <input type="checkbox" id="flashManual" />
+                  <label for="flashManual">The board is in its bootloader</label>
+                </p>
+              </div>
               <button type="button" id="btnFlash" class="btn btn--danger" disabled>
                 Erase and install MicroPython
               </button>

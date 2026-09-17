@@ -11,9 +11,16 @@
  * shown a Windows driver download first, because installing a vendor kext on a
  * modern Mac conflicts with Apple's own and can break a machine that worked. And
  * an unrecognised platform must not silently fall through to Windows.
+ *
+ * signalsAreAtomic() is covered here too — it is detectOS's other consumer, and
+ * it decides whether flashing uses the automatic reset or the manual BOOT/RESET.
+ * Importing esptool.js costs nothing offline: its only top-level import is
+ * drivers.js, and the 214 KB CDN bundle is fetched inside loadEsptool(), which
+ * these cases never call.
  */
 
 const { detectOS } = await import("../js/drivers.js");
+const { signalsAreAtomic } = await import("../js/esptool.js");
 
 let pass = 0;
 const fail = [];
@@ -82,12 +89,49 @@ check("garbage platform", { platform: "SomeFutureOS" }, "other");
 check("uppercase WIN32", { platform: "WIN32" }, "windows");
 check("darwin", { platform: "darwin" }, "mac");
 
+/* ── signalsAreAtomic ───────────────────────────────────────────────────────
+   Lives here rather than in a new file because it is detectOS's only consumer
+   outside the driver panel and shares its exact failure mode.
+
+   What this pins is a HARDWARE consequence, not a preference: where setSignals()
+   writes DTR and RTS separately, /code-robot's reset passes through DTR=1,RTS=1,
+   the ESP32 boots its own firmware instead of the ROM loader, and every flash
+   fails with "Failed to connect with the device". Windows must therefore answer
+   false so the caller switches to "no_reset" and the manual BOOT/RESET steps.
+   The "darwin" row is the one that would silently break it: "darwin" contains
+   "win", so a windows-first substring test would strand every Mac on the manual
+   path. See esptool.js:signalsAreAtomic for the Chromium sources. */
+const atomic = [
+  ["Windows via userAgentData", { userAgentData: { platform: "Windows" } }, false],
+  ["Win32 via legacy platform", { platform: "Win32" }, false],
+  ["uppercase WIN32", { platform: "WIN32" }, false],
+  ["Windows on ARM", { userAgentData: { platform: "Windows" }, platform: "" }, false],
+  ["macOS", { userAgentData: { platform: "macOS" } }, true],
+  ["MacIntel", { platform: "MacIntel" }, true],
+  ["darwin — contains 'win', must NOT be windows", { platform: "darwin" }, true],
+  ["Linux", { platform: "Linux x86_64" }, true],
+  // An unrecognised platform gets the automatic reset, matching detectOS's
+  // "other" pane: the sequence is correct everywhere except Windows, and the
+  // manual route stays one failed attempt away regardless.
+  ["unknown platform", { platform: "SomeFutureOS" }, true],
+  ["absent navigator", null, true],
+];
+
+for (const [label, nav, want] of atomic) {
+  const got = signalsAreAtomic(nav);
+  if (got === want) {
+    pass++;
+  } else {
+    fail.push(`signalsAreAtomic ${label}: expected ${want}, got ${got}`);
+  }
+}
+
 const total = pass + fail.length;
 if (fail.length) {
-  console.error(`detectOS: ${pass}/${total} passed\n`);
+  console.error(`drivers: ${pass}/${total} passed\n`);
   for (const f of fail) {
     console.error(`  FAIL ${f}`);
   }
   process.exit(1);
 }
-console.log(`detectOS: ${pass}/${total} passed`);
+console.log(`drivers (detectOS + signalsAreAtomic): ${pass}/${total} passed`);

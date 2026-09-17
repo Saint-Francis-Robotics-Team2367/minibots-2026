@@ -15,7 +15,13 @@ import { $, log, clearLog } from "./dom.js";
 import { session } from "./store.js";
 import { MicroPythonSerial, CancelledError } from "./serial.js";
 import { mountDriverHelp } from "./drivers.js";
-import { PortOwner, flash, fetchImage, ROBOT_MICROPYTHON_OFFSET } from "./esptool.js";
+import {
+  PortOwner,
+  flash,
+  fetchImage,
+  signalsAreAtomic,
+  ROBOT_MICROPYTHON_OFFSET,
+} from "./esptool.js";
 
 /** The library modules flash-robot.sh:193 uploads (it globs *.py minus boot.py).
  *  Every module minibot.py imports has to be here: the import is top-level, so a
@@ -579,11 +585,20 @@ async function fullReflash() {
 
     owner.claim("esptool");
     try {
+      // Windows cannot enter the ROM loader from software on this circuit
+      // (esptool.js:signalsAreAtomic), so there the board must already be sitting
+      // in it — hence the checkbox, and hence "no_reset" rather than a sequence
+      // that would spend seven attempts failing.
+      const manual = !signalsAreAtomic() || $("flashManual")?.checked === true;
+      if (manual) {
+        log("Skipping the automatic reset — expecting the board in its bootloader");
+      }
       log("Erasing flash and writing MicroPython — do not unplug");
       await flash({
         port,
         images: [{ address: ROBOT_MICROPYTHON_OFFSET, data: image }],
         eraseAll: true,
+        resetMode: manual ? "no_reset" : "default_reset",
         // No reset option to pass: esptool.js overrides the library's sequence
         // itself, because esptool-js's ClassicReset cannot enter the bootloader on
         // these boards at all — it moves DTR and RTS one at a time and the (1,1)
@@ -635,6 +650,20 @@ async function fullReflash() {
   } catch (err) {
     note("flashNote", String(err.message), "err");
     log(`Reflash failed: ${err.message}`, "err");
+    // "Failed to connect with the device" is esptool-js's message for "all seven
+    // syncs timed out", which on these boards means the chip never left its own
+    // firmware — a reset problem, not a port problem. The port opened, so the
+    // driver is fine and the driver panel would be the wrong advice; what fixes it
+    // is the manual BOOT/RESET. Matched loosely because the string is the
+    // library's, not ours.
+    if (/failed to connect/i.test(String(err.message))) {
+      revealManualBoot();
+      log(
+        "The board did not enter its bootloader. Do the BOOT/RESET steps now " +
+          "shown under the button, then Erase again.",
+        "warn",
+      );
+    }
   } finally {
     setBusy(false);
     prog.hidden = true;
@@ -681,6 +710,40 @@ function selectMode(which) {
   }
 }
 
+/**
+ * Open the BOOT/RESET steps.
+ *
+ * Two callers with genuinely different needs, hence `required`:
+ *
+ *   Windows, at load — the steps are the ONLY way to flash, so the checkbox is
+ *   not a choice and is hidden. Leaving it visible and pre-ticked would claim the
+ *   student had done steps they have not even read yet, and leaving it visible and
+ *   clear would imply un-ticking it changes something. It does not: the reset mode
+ *   is forced by signalsAreAtomic(), not by the box.
+ *
+ *   After a failed connect anywhere else — the auto-reset is normally right here,
+ *   so this is an opt-in, and it is ticked because someone who just read a failure
+ *   should not have to hunt for one more control to act on it.
+ *
+ * Idempotent either way, so the failure path can call it on every attempt.
+ *
+ * @param {{required?: boolean}} [opts]
+ */
+function revealManualBoot({ required = false } = {}) {
+  const box = $("manualBoot");
+  if (box) {
+    box.hidden = false;
+  }
+  const field = $("flashManualField");
+  const check = $("flashManual");
+  if (field) {
+    field.hidden = required;
+  }
+  if (check) {
+    check.checked = !required;
+  }
+}
+
 function download() {
   const blob = new Blob([getCode()], { type: "text/x-python" });
   const a = document.createElement("a");
@@ -711,6 +774,14 @@ if (!MicroPythonSerial.supported) {
   log("Web Serial unavailable in this browser", "err");
 } else {
   driverHelp = mountDriverHelp({ mount: $("drvHelp"), device: "robot" });
+  // On Windows this is not a fallback, it is the only route: Chrome writes DTR and
+  // RTS one at a time there, so no software sequence can enter the ROM loader on
+  // this board's auto-reset circuit (esptool.js:signalsAreAtomic). Showing the
+  // steps before the first failure — rather than after seven timed-out syncs —
+  // is the difference between a 30-second detour and an unexplained dead end.
+  if (!signalsAreAtomic()) {
+    revealManualBoot({ required: true });
+  }
 }
 
 $("btnConnect").addEventListener("click", async () => {
