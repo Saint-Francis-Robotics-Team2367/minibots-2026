@@ -28,6 +28,7 @@ import {
  *  missing one is an ImportError at boot, not a degraded robot. */
 const LIB_FILES = [
   "minibot.py",
+  "comm_module.py",
   "minibot_config.py",
   "display.py",
   "ssd1306.py",
