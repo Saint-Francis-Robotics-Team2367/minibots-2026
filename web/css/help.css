@@ -64,15 +64,13 @@
 }
 
 /* Why, not just what. Half of getting this wrong is not knowing what the button
-   press is for, so each step says what it accomplishes.
-
-   --ink-dim, not --ink-mute: measured 4.16:1 against .step's --s-deck background,
-   which fails WCAG AA for body text at this size. These lines are not decorative —
-   they carry the alternate silkscreen names (IO0 for BOOT, EN for RESET), which is
-   exactly what a student needs when their board is labelled differently — so they
-   have to be readable. --ink-dim is 7.10:1 on the same background. */
+   press is for, so each step says what it accomplishes. */
 .step__why {
   font-size: 0.72rem;
+  color: var(--ink-mute);
+}
+
+.step__why code {
   color: var(--ink-dim);
 }
 
@@ -223,59 +221,4 @@
     color: HighlightText;
     background: Highlight;
   }
-}
-
-/* ── Manual BOOT/RESET, inside /code-robot's reflash pane ───────────────────
-   Reuses .steps above rather than restyling a list: it is the same kind of thing
-   for the same reason — an ordered sequence where doing step 2 before step 1
-   leaves the board in the wrong mode. Only the wrapper and its checkbox are new.
-
-   Warn-toned, not danger-toned. The surrounding pane is already .pane--danger for
-   the erase itself, and painting this the same red would say "this is another
-   destructive thing" when it is the instruction that makes the operation work. */
-/* Tight because of WHERE it lands: /code-robot's reflash pane is the 21rem side
-   rail, and .steps was written for the full-width strip. Every extra line here
-   pushes the Erase button — the actual point of the pane — further below the fold,
-   so the copy is trimmed to one line per step and the padding kept small. */
-.mb {
-  margin-top: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--warn);
-  border-left-width: 3px;
-  border-radius: var(--r);
-  background: color-mix(in srgb, var(--warn) 8%, transparent);
-}
-
-.mb__why {
-  margin: 0;
-  font-size: 0.76rem;
-  line-height: 1.45;
-  color: var(--warn-text);
-}
-
-/* The one checkbox in the project, so .field's uppercase micro-label — right for
-   a text input's caption above it — has to be undone here: it sits BESIDE the box
-   and reads as a sentence, not a field name. */
-.field--check {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--sp-2);
-  margin: var(--sp-2) 0 0;
-}
-
-.field--check > label {
-  font-size: 0.78rem;
-  letter-spacing: normal;
-  text-transform: none;
-  color: var(--ink);
-}
-
-.field--check input[type="checkbox"] {
-  flex: none;
-  /* Nudged down onto the first line's baseline: align-items:flex-start lines the
-     box up with the label's box, not its text. */
-  margin: 0.15rem 0 0;
-  width: 0.95rem;
-  height: 0.95rem;
-  accent-color: var(--info);
 }

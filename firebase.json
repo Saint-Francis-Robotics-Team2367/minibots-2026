@@ -10,8 +10,8 @@
     "cleanUrls": true,
     "headers": [
       {
-        "comment": "Filenames here are not content-hashed, so Firebase's default max-age=3600 serves a stale driver station for an hour after a deploy. Revalidate every time instead: these files are a few KB and the panel must never be a version behind the firmware. mjs and md are in the glob for web/test/: those files ship too (Hosting publishes all of web/), and while nothing loads them in a browser, leaving them on the 1-hour default made the pre-deploy route gate fail on files it had not changed.",
-        "source": "/**/*.@(html|css|js|mjs|md)",
+        "comment": "Filenames here are not content-hashed, so Firebase's default max-age=3600 serves a stale driver station for an hour after a deploy. Revalidate every time instead: these files are a few KB and the panel must never be a version behind the firmware.",
+        "source": "/**/*.@(html|css|js)",
         "headers": [
           {
             "key": "Cache-Control",

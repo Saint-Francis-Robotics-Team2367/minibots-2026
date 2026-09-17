@@ -27,63 +27,12 @@
  * writes to flash, and "latest" is not a version.
  */
 
-import { detectOS } from "./drivers.js";
-
 const ESPTOOL_URL = "https://cdn.jsdelivr.net/npm/esptool-js@0.6.1/bundle.js";
 
 /** Chip flash offsets. The dongle's come from its build/flash_args. */
 export const ROBOT_MICROPYTHON_OFFSET = 0x1000;
 
 /* ── Reset sequences ────────────────────────────────────────────────────── */
-
-/**
- * Whether `setSignals()` moves DTR and RTS together on this platform.
- *
- * TightReset below is only correct if it does, and on Windows it does not. From
- * Chromium's own implementation, `services/device/serial/serial_io_handler_win.cc`,
- * `SerialIoHandlerWin::SetControlSignals()` is two sequential calls:
- *
- *   if (signals.has_dtr && !EscapeCommFunction(…, signals.dtr ? SETDTR : CLRDTR))
- *   if (signals.has_rts && !EscapeCommFunction(…, signals.rts ? SETRTS : CLRRTS))
- *
- * DTR first, then RTS, with no transaction around them — Win32 has no atomic
- * modem-control write for this, so Chrome cannot offer one. The step that matters,
- * (DTR=0,RTS=1) → (DTR=1,RTS=0), therefore executes as (0,1) → **(1,1)** → (1,0),
- * and that (1,1) is exactly the state the bench measurements below call the bug:
- * both transistors conduct, EN rises while IO0 is still high, the chip boots its
- * application, all seven syncs time out. On Windows TightReset silently DEGRADES
- * INTO ClassicReset, which is why the fix verified on macOS never applied there.
- *
- * There is no reordering that avoids it. On this circuit "EN low" is (0,1) and
- * "IO0 low" is (1,0) — the two lines must cross simultaneously, so any
- * one-at-a-time path passes through (1,1) (releases EN too early) or (0,0)
- * (releases IO0 too early). Sequential writes cannot enter the ROM loader here at
- * all, which is why the answer is a manual BOOT/RESET rather than better timing.
- *
- * esptool.py reached the same conclusion: `esptool/reset.py` documents
- * UnixTightReset as "POSIX-only… Falls back to ClassicReset on Windows because
- * … NotImplementedError there (no ioctl)".
- *
- * macOS is atomic only by luck, not by contract. `serial_io_handler_posix.cc`
- * batches into one TIOCMBIS + one TIOCMBIC, and since this transition moves the
- * two lines in OPPOSITE directions it is two ioctls there too — it works because
- * TIOCMBIS(DTR) lands before TIOCMBIC(RTS) and Apple's CP210x DriverKit coalesces
- * them faster than EN can respond. Chromium is also splitting that path apart
- * behind the `kSerialSplitDtrAndRts` feature flag. So treat a `true` here as
- * "expected to work", and keep the manual route reachable everywhere — see the
- * failure path in code-robot.js, which offers it after any failed connect.
- *
- * Platform-sniffed for the same reason drivers.js:59 is: no feature test exists
- * for "does this browser write both modem lines at once". detectOS() is reused
- * rather than re-derived because its mac-before-windows ordering is load-bearing
- * ("darwin" contains "win") and duplicating it would risk reintroducing that bug.
- *
- * @param {Parameters<typeof detectOS>[0]} [nav]
- * @returns {boolean}
- */
-export function signalsAreAtomic(nav = globalThis.navigator) {
-  return detectOS(nav) !== "windows";
-}
 
 /**
  * Why this module supplies its own reset instead of using the library's.
@@ -111,17 +60,12 @@ export function signalsAreAtomic(nav = globalThis.navigator) {
  * esptool.py does not hit this because on Unix it defaults to UnixTightReset,
  * which sets both lines in a single TIOCMSET ioctl (esptool/reset.py:75).
  *
- * Web Serial can express that ON SOME PLATFORMS:
- * `setSignals({dataTerminalReady, requestToSend})` carries both flags in one
- * call, and on macOS/Linux Chrome collapses them into a single bit-set ioctl.
- * That is the browser equivalent of the tight reset, so this is the sequence to
- * use — for the dongle too, since a dongle already sitting in its ROM bootloader
- * is unaffected by a reset that lands in the same place.
- *
- * It is NOT universal, and the exception is Windows, where the same call becomes
- * two sequential EscapeCommFunction() writes and this sequence cannot work at
- * all. See signalsAreAtomic() above for the source and the consequence; callers
- * must gate on it and fall back to a manual BOOT/RESET.
+ * Web Serial can express that: `setSignals({dataTerminalReady, requestToSend})`
+ * carries both flags in one call, and for a CP210x/CH34x bridge Chrome sends
+ * them as one control transfer. That is the browser equivalent of the tight
+ * reset, so this is the sequence to use — for the dongle too, since a dongle
+ * already sitting in its ROM bootloader is unaffected by a reset that lands in
+ * the same place.
  */
 class TightReset {
   /** @param {{device: SerialPort}} transport @param {number} resetDelay */
@@ -250,13 +194,6 @@ export class PortOwner {
  * @param {(line: string) => void} [opts.onLog]
  * @param {string} [opts.flashSize]
  * @param {number} [opts.baudRate]
- * @param {"default_reset" | "no_reset"} [opts.resetMode] How to reach the ROM
- *   loader. "no_reset" assumes the board is ALREADY sitting in it, put there by a
- *   manual BOOT/RESET, and skips the automatic sequence entirely — the only
- *   workable path where signalsAreAtomic() is false. Verified against the pinned
- *   0.6.1 bundle: constructResetSequence() returns [] for "no_reset", and
- *   connect() tolerates that (`a.length>0 ? … : null`), so it syncs without ever
- *   touching DTR/RTS.
  */
 export async function flash({
   port,
@@ -266,7 +203,6 @@ export async function flash({
   onLog,
   flashSize = "keep",
   baudRate = 115200,
-  resetMode = "default_reset",
 }) {
   const mod = await loadEsptool();
   const { ESPLoader, Transport } = mod;
@@ -303,8 +239,7 @@ export async function flash({
       },
     });
 
-    // main() forwards this straight to detectChip()/connect() as the reset mode.
-    const chip = await loader.main(resetMode);
+    const chip = await loader.main();
     say(`Detected ${chip}`);
 
     // Total bytes across all images, so one bar covers the whole operation
