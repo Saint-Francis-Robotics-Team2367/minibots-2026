@@ -76,6 +76,17 @@ export class FakeBoard {
     }
     if (c === '\x02') { this.state = 'friendly'; this.#emit('\r\n>>> '); return; }
     if (c === '\x04') {
+      // Ctrl-D at the friendly prompt is softReset(): the board reboots and runs
+      // main.py again, so it is interruptible-only from here on. That is the state
+      // every upload leaves behind, and the reason a later command has to
+      // re-enter raw mode rather than assume it.
+      if (this.state === 'friendly') {
+        this.#emit('MPY: soft reboot\r\n');
+        this.#emit('[boot] Starting in 1500 ms — press Ctrl-C now to stop for upload.\r\n');
+        this.running = true;
+        this.log.push('soft-reboot');
+        return;
+      }
       if (this.state === 'awaiting-reset') {
         this.#emit('\r\nsoft reboot\r\n');
         // boot.py prints during the gap — the exact thing mpremote's split await exists for

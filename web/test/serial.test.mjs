@@ -133,6 +133,54 @@ for (const rawPaste of [true, false]) {
 }
 
 /*
+ * What an upload leaves behind.
+ *
+ * Every upload ends in softReset() so main.py runs, and that drops raw mode. The
+ * bug this pins: /code-robot kept its buttons live over that state, so the next
+ * Upload or Pull hit #writeCommand's guard and died with "Not in raw REPL" until
+ * the user reconnected. The page's fix is ensureRepl(); what belongs here is the
+ * transport half — that inRaw reports it honestly, that commands do refuse, and
+ * that re-entering works on a board which is running again rather than idling.
+ */
+console.log('\n=== after a soft reset (what every upload leaves behind) ===');
+{
+  const board = new FakeBoard({
+    files: { 'main.py': new TextEncoder().encode(MAIN) },
+    windowSize: 64,
+  });
+  const mp = new MicroPythonSerial();
+  await mp.connect(fakePort(board));
+  await mp.enterRawWithRetry();
+  await mp.writeFile('main.py', 'print("v2")\n');
+
+  await mp.softReset();
+  ok('softReset leaves raw mode', mp.inRaw === false);
+  ok('softReset restarts main.py', board.log.includes('soft-reboot'));
+
+  // The guard itself. Without ensureRepl() this is the error the user saw.
+  let threw = null;
+  try { await mp.readTextFile('main.py'); } catch (e) { threw = e.message; }
+  ok('a command after softReset refuses with "Not in raw REPL"',
+     threw === 'Not in raw REPL', String(threw));
+
+  // And the recovery: the board is RUNNING now, so this exercises the interrupt
+  // path, not the idle one.
+  await mp.enterRawWithRetry();
+  ok('re-enter after softReset reaches raw mode', mp.inRaw === true);
+  const back = await mp.readTextFile('main.py');
+  ok('the file written before the reset is readable after re-entry',
+     back === 'print("v2")\n', JSON.stringify(back));
+
+  // Raw-paste is re-negotiated from scratch, because softReset resets the latch:
+  // a second upload has to work exactly like the first.
+  await mp.writeFile('main.py', 'print("v3")\n');
+  ok('a second upload writes after re-entry',
+     new TextDecoder().decode(board.files['main.py']) === 'print("v3")\n');
+
+  await mp.close();
+}
+
+/*
  * Cancelling the handshake.
  *
  * /code-robot's Erase button is for a board with no MicroPython — where all

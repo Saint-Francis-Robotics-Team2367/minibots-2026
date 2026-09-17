@@ -24,6 +24,22 @@ Both negotiation outcomes are exercised: `R\x01` (raw-paste) and `R\x00`
 (fall back to plain raw REPL, 256 bytes at a time). The window size is set to 64
 so a multi-KB file crosses many flow-control windows rather than fitting in one.
 
+### After a soft reset
+
+Every upload ends in `softReset()`, because that is how `main.py` gets to run —
+and it drops raw mode. `FakeBoard` models that: Ctrl-D at the friendly prompt
+reboots and starts running again, so re-entering has to interrupt a live program
+rather than nudge an idle prompt.
+
+This section is here because of a shipped bug. `/code-robot` kept Upload, Pull and
+Clear enabled across that state, so the click after an upload hit
+`#writeCommand`'s guard and reported `Upload failed: Not in raw REPL` — and stayed
+broken until the user reconnected, because `connect()` held the only `enterRaw`
+call. The page's fix is `ensureRepl()`; what is pinned here is the transport half:
+that `inRaw` reports the state honestly, that a command really does refuse, and
+that re-entry then works and raw-paste is renegotiated so a *second* upload
+behaves like the first.
+
 ### Handshake cancellation
 
 `silentPort()` is the other half: a port that opens and then says nothing, which

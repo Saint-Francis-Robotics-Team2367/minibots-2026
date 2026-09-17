@@ -60,11 +60,16 @@ let stopStream = null;
  * Two states, not one, because the fresh-ESP32 case needs them apart.
  *
  * `portOpen` — we hold the serial port.
- * `atRepl`   — the board answered the raw-REPL handshake.
+ * `atRepl`   — the board answered the raw-REPL handshake, so a REPL is reachable.
  *
  * A board with no MicroPython on it opens fine and never reaches a REPL. Gating
  * full reflash on `atRepl` would disable it on exactly the boards it exists for,
  * so pull/upload require `atRepl` while reflash requires only `portOpen`.
+ *
+ * Reachable is the operative word, and `atRepl` is deliberately NOT `mp.inRaw`:
+ * every upload ends in a soft reset so main.py can run, which leaves raw mode
+ * behind on a board that is still perfectly reachable. ensureRepl() closes that
+ * gap by re-entering on demand, so the buttons can stay live across it.
  */
 let portOpen = false;
 let atRepl = false;
@@ -301,6 +306,52 @@ async function disconnect() {
   log("Disconnected");
 }
 
+/**
+ * Re-enter the raw REPL if we are not in it, before anything executes Python.
+ *
+ * Every upload deliberately ends in softReset(), because that is how main.py
+ * gets to run — and it leaves raw mode behind. `mp.inRaw` goes false while
+ * `atRepl` stays true (see its note), so without this the next Upload, Pull or
+ * Clear reaches the board's guard and fails with "Not in raw REPL", and stays
+ * that way until a reconnect happens to redo the handshake. Reconnecting was the
+ * only cure precisely because connect() held the only enterRaw call.
+ *
+ * With retry, not a bare enterRaw: by now the board is running the student's
+ * code again, which is the same interruptible-window problem the initial
+ * handshake has, and boot.py's window is 1500 ms.
+ *
+ * The stream is stopped first and unconditionally. streamOutput() drains the same
+ * buffer the exec helpers read from, so it has to be off before a command either
+ * way — and if it were still running it would eat the raw banner this waits for.
+ * The visible consequence is that reading from the robot stops the robot; that is
+ * inherent (you cannot read its files without interrupting it), so it is logged
+ * rather than hidden.
+ *
+ * Not preemptable, unlike connect()'s handshake: callers hold `busy` through it,
+ * which is what keeps a second click from interleaving commands. The worst case
+ * is the same ~30 s of retries connect() can spend, and it narrates each attempt
+ * rather than looking hung.
+ *
+ * @throws on a board that will not come back — with REMEDIATION, not a guard message
+ */
+async function ensureRepl() {
+  stopWatching();
+  if (mp.inRaw) {
+    return;
+  }
+  log("Interrupting the robot to reach its REPL");
+  try {
+    await mp.enterRawWithRetry((m) => log(m, "warn"));
+  } catch (err) {
+    // The board stopped answering, so the buttons must stop claiming it will.
+    atRepl = false;
+    renderConn();
+    throw err;
+  }
+  atRepl = true;
+  log("At the robot's REPL", "go");
+}
+
 /* ── Pull ───────────────────────────────────────────────────────────────── */
 
 async function pull() {
@@ -308,7 +359,9 @@ async function pull() {
     return;
   }
   note("pullNote", "");
+  setBusy(true);
   try {
+    await ensureRepl();
     let code;
     try {
       code = await mp.readTextFile("main.py");
@@ -328,6 +381,8 @@ async function pull() {
   } catch (err) {
     note("pullNote", String(err.message), "err");
     log(`Pull failed: ${err.message}`, "err");
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -359,7 +414,9 @@ async function clearCalibration() {
   if (!confirm("Delete the robot's saved calibration? main.py's values take over after a reset.")) {
     return;
   }
+  setBusy(true);
   try {
+    await ensureRepl();
     await mp.execOrThrow("import os\ntry:\n os.remove('calib.json')\nexcept OSError:\n pass");
     note("calibNote", "Cleared. Reset the robot for main.py's values to take effect.");
     log("Saved calibration cleared", "go");
@@ -367,6 +424,8 @@ async function clearCalibration() {
   } catch (err) {
     note("calibNote", String(err.message), "err");
     log(`Could not clear calibration: ${err.message}`, "err");
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -386,12 +445,16 @@ async function push() {
     note("pushNote", "The editor is empty.", "err");
     return;
   }
-  stopWatching();
   const prog = $("pushProg");
   const fill = $("pushFill");
   prog.hidden = false;
   setBusy(true);
   try {
+    // Before the first read: after any earlier upload the board is running, not
+    // waiting at a prompt, and the boot.py check below is what used to trip over
+    // that.
+    await ensureRepl();
+
     // boot.py is checked first, and written when it is missing or is not ours.
     //
     // The scripts send five files and assume boot.py is already right
