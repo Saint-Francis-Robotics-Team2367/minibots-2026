@@ -463,6 +463,7 @@ class CommModule:
                 saved = json.load(f)
             left = int(saved["nl"])
             right = int(saved["nr"])
+            print(f"calibratioon loaded: {left}, {right}")
         except (OSError, ValueError, KeyError, TypeError):
             return
         self._neutral_left_us = _clamp(left, _NEUTRAL_TRIM_MIN_US, _NEUTRAL_TRIM_MAX_US)
@@ -474,6 +475,7 @@ class CommModule:
         try:
             with open(_CALIB_PATH, "w") as f:
                 json.dump({"nl": self._neutral_left_us, "nr": self._neutral_right_us}, f)
+                print(f"calibration saved: {self._neutral_left_us}, {self._neutral_right_us}")
             return True
         except OSError:
             return False
