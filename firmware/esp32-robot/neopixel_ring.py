@@ -3,16 +3,6 @@ import time
 import machine
 import neopixel
 
-# Color constants
-RAINBOW_COLORS: list[tuple[int, int, int]] = [
-    (255, 0, 0),
-    (255, 0, 255),
-    (0, 0, 255),
-    (0, 255, 255),
-    (0, 255, 0),
-    (255, 255, 0),
-]
-
 
 class NeoPixelRing:
     def __init__(self, num_leds: int = 12, pin: int = 14, *, max_intensity: int = 255):
