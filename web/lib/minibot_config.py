@@ -1,5 +1,14 @@
 """Configuration builder for Minibot instances."""
 
+# Color constants
+RAINBOW_COLORS: list[tuple[int, int, int]] = [
+    (255, 0, 0),
+    (255, 0, 255),
+    (0, 0, 255),
+    (0, 255, 255),
+    (0, 255, 0),
+    (255, 255, 0),
+]
 
 class MinibotConfig:
     """Builder for Minibot configuration."""
@@ -11,6 +20,7 @@ class MinibotConfig:
     neutral_left_us: int
     neutral_right_us: int
     display_enabled: bool
+    ring_colors: list[tuple[int, int, int]]
 
     def __init__(
         self,
@@ -22,6 +32,7 @@ class MinibotConfig:
         neutral_left_us: int = 1500,
         neutral_right_us: int = 1500,
         display_enabled: bool = True,
+        ring_colors: list[tuple[int, int, int]] =  RAINBOW_COLORS
     ) -> None:
         """Initialize with required parameters.
 
@@ -41,6 +52,7 @@ class MinibotConfig:
         self.neutral_left_us = neutral_left_us
         self.neutral_right_us = neutral_right_us
         self.display_enabled = display_enabled
+        self.ring_colors = ring_colors
 
     def with_neutral_left_us(self, us: int) -> "MinibotConfig":
         """Set neutral pulse width for left motor in microseconds.
@@ -56,4 +68,13 @@ class MinibotConfig:
         Defaults to 1500 us (RC standard). Range: 1000-2000 us.
         """
         self.neutral_right_us = us
+        return self
+
+    def with_ring_colors(self, colors: list[tuple[int, int, int]]) -> "MinibotConfig":
+        """Set the ring colors
+
+        Defaults to Rainbow
+        """
+
+        self.ring_colors = colors
         return self

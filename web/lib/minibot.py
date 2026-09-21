@@ -26,7 +26,7 @@ from button import Button
 from comm_module import CommModule
 from display import Display
 from minibot_config import MinibotConfig
-from neopixel_ring import RAINBOW_COLORS, NeoPixelRing, RingConnectionStatus, RingRotation
+from neopixel_ring import NeoPixelRing, RingConnectionStatus, RingRotation
 
 # --- PWM calibration ---
 # Matched to the ESC datasheet:
@@ -122,7 +122,7 @@ class Minibot:
     STANDBY = 0
     TELEOP = 1
 
-    def __init__(self, config):
+    def __init__(self, config: MinibotConfig):
         """Initialize from a MinibotConfig.
 
         Motors always swing ±_PWM_RANGE_US (300 us) at full stick, centered on
@@ -155,7 +155,7 @@ class Minibot:
 
         self._display = self._init_display(config)
         self._ring = self._init_ring()
-        self._ring_rotation = RingRotation(RAINBOW_COLORS, rotate_delay_ms=200)
+        self._ring_rotation = RingRotation(config.ring_colors, rotate_delay_ms=200)
         self._ring_connection_status = RingConnectionStatus()
         self._ring_show_rainbow = False
         self._button = self._init_button()
@@ -319,6 +319,10 @@ class Minibot:
             print(f"[warn] Failed to initialize NeoPixel ring: {e}")
             return None
 
+    def set_ring_delay(self, delay: int) -> None:
+        assert self._ring_rotation
+        self._ring_rotation.rotate_delay_ms = delay
+
     def _set_ring_colors(self) -> None:
         """Set the ring color based on display mode."""
         if self._ring is None or self._ring_rotation is None or self._ring_connection_status is None:
@@ -372,6 +376,14 @@ class Minibot:
         except Exception as e:
             print(f"[warn] Failed to initialize display: {e}")
             return None
+
+    def set_display_line2(self, text: str) -> None:
+        assert self._display
+        self._display.set_line2(text)
+
+    def display_show(self) -> None:
+        assert self._display
+        self._display.show()
 
     # --- internals -----------------------------------------------------------
 
