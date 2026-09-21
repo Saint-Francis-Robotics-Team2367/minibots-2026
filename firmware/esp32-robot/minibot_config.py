@@ -72,7 +72,7 @@ class MinibotConfig:
 
     def with_ring_colors(self, colors: list[tuple[int, int, int]]) -> "MinibotConfig":
         """Set the ring colors
-        
+
         Defaults to Rainbow
         """
 
