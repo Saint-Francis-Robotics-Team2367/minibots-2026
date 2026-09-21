@@ -10,6 +10,7 @@ RAINBOW_COLORS: list[tuple[int, int, int]] = [
     (255, 255, 0),
 ]
 
+
 class MinibotConfig:
     """Builder for Minibot configuration."""
 
@@ -32,7 +33,7 @@ class MinibotConfig:
         neutral_left_us: int = 1500,
         neutral_right_us: int = 1500,
         display_enabled: bool = True,
-        ring_colors: list[tuple[int, int, int]] =  RAINBOW_COLORS
+        ring_colors: list[tuple[int, int, int]] = RAINBOW_COLORS,
     ) -> None:
         """Initialize with required parameters.
 
