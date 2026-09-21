@@ -300,6 +300,17 @@ while True:
                   <td><code>True</code></td>
                   <td>Show status on the OLED. Set <code>False</code> if there isn't one.</td>
                 </tr>
+                <tr>
+                  <td><code>ring_colors</code></td>
+                  <td>rainbow</td>
+                  <td>
+                    The list of <code>(red, green, blue)</code> colours the LED ring cycles
+                    through, each value <code>0</code>–<code>255</code>. You can also set it
+                    with <code>.with_ring_colors([...])</code> on the end of the config. The
+                    default is available as <code>RAINBOW_COLORS</code>, imported from
+                    <code>minibot_config</code>.
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -434,6 +445,45 @@ while True:
               </tbody>
             </table>
           </div>
+
+          <h3>The LED ring and the display</h3>
+          <div class="doc__scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Call</th>
+                  <th scope="col">What it does</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>bot.set_ring_delay(ms)</code></td>
+                  <td>
+                    Set how many milliseconds the ring waits between steps of its colour
+                    rotation. Smaller is faster. The colours themselves come from
+                    <code>ring_colors</code> in your <code>MinibotConfig</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>bot.set_display_line2(text)</code></td>
+                  <td>
+                    Stage a line of text on the second row of the OLED. Line one always
+                    shows the robot's name. Nothing appears until you call
+                    <code>bot.display_show()</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>bot.display_show()</code></td>
+                  <td>Push the staged text to the OLED.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Both display calls need a display. With
+            <code>display_enabled=False</code>, or if the OLED failed to start, they raise an
+            error rather than doing nothing.
+          </p>
 
           <h2>Three things the library does whether you like it or not</h2>
           <p>
