@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "web/css/docs.css"
+        ],
+        "createdAt": "2026-09-08T08:06:54.913Z",
+        "reason": "Forced-colors accessibility fallback: CanvasText (OS keyword, no author palette), marks the current page for High Contrast users. Normal mode has no accent bar — current item is 2px like every sibling, only the colour differs."
+      }
+    ]
+  }
+}

@@ -29,8 +29,9 @@ __pycache__/
 $py.class
 .venv/
 venv/
-# Private virtualenv the flash-robot scripts create for esptool + mpremote.
-.venv-flash/
+# Private virtualenvs: .venv-flash (flash-robot scripts: esptool + mpremote),
+# .venv-pw (local Playwright test harness).
+.venv-*/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
@@ -59,6 +60,18 @@ pnpm-debug.log
 
 # --- Debug / local ---
 .gdb_history
+
+# Chrome for Testing build + throwaway profile used for local browser testing.
+/chrome/
+
+# One-off local reports dropped at the repo root.
+/claude-*.csv
+
+# --- AI tooling: commit shared config, ignore per-machine state ---
+.claude/settings.local.json
+.impeccable/hook.cache.json
+.impeccable/hook.pending.json
+.impeccable/config.local.json
 
 # --- Local env (never commit) ---
 .env
