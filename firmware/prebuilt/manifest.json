@@ -26,13 +26,13 @@
     "flash_mode": "dio",
     "flash_freq": "80m",
     "flash_size": "2MB",
-    "built_from": "1c9e5dc9fadf070b373d9043f9f5dd7233cb23f1",
-    "built_at": "2026-09-07T06:09:36Z",
+    "built_from": "7b7e71dd43f05df166b83753a368a6e555b454f7",
+    "built_at": "2026-10-10T23:06:13Z",
     "images": [
       {
         "offset": "0x0",
         "path": "firmware/prebuilt/dongle/bootloader.bin",
-        "sha256": "2dd3422371755d31dfc3ad67a4efe4ed480a68177e5acfe95c6f93dd535f5810",
+        "sha256": "d471305b55e314b89634503276a935c2c400857e44d574e07870920bbf97c1c0",
         "bytes": 21552
       },
       {
@@ -44,7 +44,7 @@
       {
         "offset": "0x10000",
         "path": "firmware/prebuilt/dongle/minicore_dongle.bin",
-        "sha256": "49251d275af66fdbf66307abf6126617dd8af2ebf9f7955003e0a47f627c428f",
+        "sha256": "82f96c03b0587648bd324099c3a9a41d099080deda4742d7302ad65437744365",
         "bytes": 1102688
       }
     ]
