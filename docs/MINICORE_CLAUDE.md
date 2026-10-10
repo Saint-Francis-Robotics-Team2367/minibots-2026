@@ -250,7 +250,10 @@ on it:
 `0x07` is also sent **unprompted**, so the station can populate its fields
 whichever side came up first: on the robot's first `_CALIB_ANNOUNCE_COUNT`
 heartbeats, again whenever it newly learns the dongle's MAC (which is what covers
-a robot rebooting into a running station), and alongside every discovery
+a robot rebooting into a running station; the MAC is learned only from message
+types a dongle sends, `_FROM_DONGLE` in `comm_module.py`, because a robot that
+hasn't heard a dongle broadcasts its heartbeats and a second robot would
+otherwise adopt the first one as its dongle), and alongside every discovery
 response. It reuses the heartbeat's target selection, so it falls back to
 broadcast until the dongle is known — repeating because ESP-NOW broadcasts are
 unacknowledged. `stored` answers "will this survive a reset?", letting a failed
@@ -342,8 +345,8 @@ making it steady. It is derived from recent send history, not set as a raw flag:
 a failure reads as set for up to `MC_SEND_ERR_HOLD_US` (1 s) and is cleared early
 by the next success on the same peer. Two details matter if you touch it:
 
-- The history is **per paired slot**. Unicast joystick traffic runs at ~60 Hz per
-  robot, so one shared flag would interleave a dead robot's failures with a live
+- The history is **per paired slot**. Unicast joystick traffic runs at up to
+  50 Hz per robot, so one shared flag would interleave a dead robot's failures with a live
   robot's successes and blink.
 - **Broadcast completions are ignored.** ESP-NOW does not acknowledge broadcasts
   and always reports them `SUCCESS`, even with every robot on the field powered
@@ -499,7 +502,9 @@ ESP-NOW operates at the MAC layer below Wi-Fi, so it does not need a router or a
 Strategies:
 - Lock all devices to the least congested Wi-Fi channel (channels 1, 6, or 11 are non-overlapping -- scan beforehand)
 - Keep payloads small (~20-24 bytes for joystick state)
-- Send at high rate (50-100Hz) so the robot always uses the latest state and a few dropped packets are imperceptible
+- Pace the joystick stream, and never let it queue. The station sends each slot on a fixed 50 Hz timer (`CONTROL_TICK_MS` in `control.js`), skips a frame identical to the last one, and re-sends an unchanged one every 100 ms (`JOY_KEEPALIVE_MS`) to stay well under the robot's 250 ms failsafe. The dongle keeps only the newest frame per slot and lets it out once that slot's previous frame has completed (`joystick_tx_task` in `minicore_bridge.c`), so at most one joystick frame per robot is ever in the radio.
+  The station used to send one frame per slot per `requestAnimationFrame`, so its rate followed the display's refresh (120 Hz on many laptops), and the dongle sent each one straight away. The Wi-Fi driver queues every peer's frames in one FIFO, so with two robots the queue backed up behind retries: robots drove on stick values up to ~2 s old and the dongle reported send failures. Don't go back to sending from the USB callback, or to tying the rate to rendering.
+- Power save is off on both ends (`esp_wifi_set_ps(WIFI_PS_NONE)` on the dongle, `pm=PM_NONE` on the robot). A dozing radio misses unicasts, and every miss becomes retries that hold up the shared queue.
 - ESP-NOW supports optional ACK callbacks on unicast -- use these to detect connection loss
 
 Fallback options if 2.4GHz is completely unusable:

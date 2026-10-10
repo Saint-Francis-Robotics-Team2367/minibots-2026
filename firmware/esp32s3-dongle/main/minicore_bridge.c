@@ -22,7 +22,7 @@
 static const char *TAG = "mc_bridge";
 
 static uint8_t s_channel = 3;
-static bool s_global_enabled;
+static volatile bool s_global_enabled;
 
 /* ESP-NOW send failures are reported asynchronously in espnow_send_cb, long
  * after esp_now_send() has already returned ESP_OK. A single "did it fail" bit
@@ -54,6 +54,36 @@ static bool s_paired_valid[MC_MAX_ROBOTS];
 static bool s_discovery_active;
 static esp_timer_handle_t s_disc_timer;
 
+/* Joystick frames are not sent from the USB callback. They used to be, one
+ * esp_now_send() per HID report with no regard for whether the last frame had
+ * left yet, and the Wi-Fi driver queues every frame for every peer in a single
+ * FIFO. With two robots the station's report rate outran the radio: a robot
+ * needing MAC retries held the queue, the other robot's frames waited behind it,
+ * and robots drove on stick values up to ~2 s old while the queue overflowed
+ * into send failures.
+ *
+ * Now each slot holds only its newest frame, and joystick_tx_task sends it once
+ * that slot's previous frame has completed. At most one joystick frame per robot
+ * is ever in the radio, so nothing queues and a frame is never older than one
+ * send. A frame overwritten while waiting was stale anyway; the robot only ever
+ * wants the latest sticks.
+ *
+ * s_tx_lock guards the pending frames, the in-flight stamps and the pairing
+ * table, which the USB task, the Wi-Fi task (send callback) and the tx task all
+ * touch. */
+static portMUX_TYPE s_tx_lock = portMUX_INITIALIZER_UNLOCKED;
+static joystick_packet_t s_tx_pending[MC_MAX_ROBOTS];
+static bool s_tx_pending_valid[MC_MAX_ROBOTS];
+/* When the slot's in-flight frame was handed to esp_now_send, 0 = none. A
+ * SET_NEUTRAL to the same peer completes through the same callback and can clear
+ * this early; that only ever lets a second frame into the radio, never zero. */
+static int64_t s_tx_inflight_us[MC_MAX_ROBOTS];
+/* Backstop in case a completion never arrives (e.g. the peer was unpaired
+ * between send and callback), so a slot cannot stall forever. Far longer than a
+ * unicast with its full retry budget takes. */
+#define MC_TX_INFLIGHT_TIMEOUT_US 100000 /* 100 ms */
+static TaskHandle_t s_tx_task;
+
 static void discovery_timer_cb(void *arg)
 {
     (void)arg;
@@ -80,7 +110,9 @@ static esp_err_t ensure_broadcast_peer(void)
     p.channel = s_channel;
     p.ifidx = WIFI_IF_STA;
     p.encrypt = false;
-    return esp_now_add_peer(&p);
+    esp_err_t e = esp_now_add_peer(&p);
+    /* Another task may have added it between the check and the add. */
+    return e == ESP_ERR_ESPNOW_EXIST ? ESP_OK : e;
 }
 
 static esp_err_t ensure_unicast_peer(const uint8_t *mac)
@@ -93,7 +125,9 @@ static esp_err_t ensure_unicast_peer(const uint8_t *mac)
     peer.channel = s_channel;
     peer.ifidx = WIFI_IF_STA;
     peer.encrypt = false;
-    return esp_now_add_peer(&peer);
+    esp_err_t e = esp_now_add_peer(&peer);
+    /* The USB task (SET_NEUTRAL, PAIR) and the tx task both add peers. */
+    return e == ESP_ERR_ESPNOW_EXIST ? ESP_OK : e;
 }
 
 /* Which paired slot a completion callback belongs to, or -1 if the peer is not
@@ -117,7 +151,12 @@ static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status
     if (!mac_addr || is_broadcast_mac(mac_addr)) {
         return;
     }
+    taskENTER_CRITICAL(&s_tx_lock);
     int slot = slot_for_mac(mac_addr);
+    if (slot >= 0) {
+        s_tx_inflight_us[slot] = 0;
+    }
+    taskEXIT_CRITICAL(&s_tx_lock);
     if (slot < 0) {
         return;
     }
@@ -126,6 +165,72 @@ static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status
         s_slot_ok_us[slot] = now;
     } else {
         s_slot_err_us[slot] = now;
+    }
+    /* The radio is free for this slot; send its newest frame if one is waiting. */
+    if (s_tx_task) {
+        xTaskNotifyGive(s_tx_task);
+    }
+}
+
+/* Drop every waiting joystick frame. Called on disable, so a frame queued while
+ * enabled can never go out after the field was stood down. */
+static void tx_pending_clear_all(void)
+{
+    taskENTER_CRITICAL(&s_tx_lock);
+    for (int i = 0; i < (int)MC_MAX_ROBOTS; i++) {
+        s_tx_pending_valid[i] = false;
+    }
+    taskEXIT_CRITICAL(&s_tx_lock);
+}
+
+static void joystick_tx_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        /* Woken by a new frame or a completion; the timeout only exists to
+         * expire a stuck in-flight stamp. */
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10));
+        for (int i = 0; i < (int)MC_MAX_ROBOTS; i++) {
+            joystick_packet_t pkt = {0};
+            uint8_t mac[6] = {0};
+            bool go = false;
+            int64_t now = esp_timer_get_time();
+
+            taskENTER_CRITICAL(&s_tx_lock);
+            if (s_tx_inflight_us[i] != 0 && now - s_tx_inflight_us[i] > MC_TX_INFLIGHT_TIMEOUT_US) {
+                s_tx_inflight_us[i] = 0;
+            }
+            if (s_tx_pending_valid[i] && (!s_paired_valid[i] || !s_global_enabled)) {
+                /* Re-checked here as well as on arrival: the enable gate must hold
+                 * at the moment the frame leaves, not just when it was queued. */
+                s_tx_pending_valid[i] = false;
+            } else if (s_tx_pending_valid[i] && s_tx_inflight_us[i] == 0) {
+                pkt = s_tx_pending[i];
+                memcpy(mac, s_paired_mac[i], 6);
+                s_tx_pending_valid[i] = false;
+                s_tx_inflight_us[i] = now;
+                go = true;
+            }
+            taskEXIT_CRITICAL(&s_tx_lock);
+            if (!go) {
+                continue;
+            }
+
+            /* These two paths fail synchronously (peer table full, radio not
+             * ready, queue full), so no completion callback will ever arrive for
+             * them. Free the slot and stamp the failure directly; it ages out on
+             * the same hold as a real NAK. */
+            esp_err_t e = ensure_unicast_peer(mac);
+            if (e == ESP_OK) {
+                e = esp_now_send(mac, (const uint8_t *)&pkt, sizeof(pkt));
+            }
+            if (e != ESP_OK) {
+                taskENTER_CRITICAL(&s_tx_lock);
+                s_tx_inflight_us[i] = 0;
+                taskEXIT_CRITICAL(&s_tx_lock);
+                s_slot_err_us[i] = esp_timer_get_time();
+            }
+        }
     }
 }
 
@@ -180,6 +285,12 @@ void minicore_bridge_init(uint8_t wifi_channel)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_ERROR_CHECK(esp_wifi_set_channel(s_channel, WIFI_SECOND_CHAN_NONE));
+    /* Keep the radio awake. A dozing radio misses frames and forces retries,
+     * and the dongle's whole job is to be listening. */
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+
+    /* Before the send callback is registered, since that callback wakes it. */
+    xTaskCreate(joystick_tx_task, "mc_joy_tx", 3072, NULL, 6, &s_tx_task);
 
     ESP_ERROR_CHECK(esp_now_init());
     ESP_ERROR_CHECK(esp_now_register_send_cb(espnow_send_cb));
@@ -266,17 +377,12 @@ void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t le
         if (!s_global_enabled) {
             return;
         }
-        /* These two paths fail synchronously (peer table full, radio not ready),
-         * so no completion callback will ever arrive for them. Stamp the slot's
-         * failure time directly; it ages out on the same hold as a real NAK. */
-        if (ensure_unicast_peer(s_paired_mac[ctrl]) != ESP_OK) {
-            s_slot_err_us[ctrl] = esp_timer_get_time();
-            return;
-        }
-        esp_err_t e = esp_now_send(s_paired_mac[ctrl], buf + 1, sizeof(joystick_packet_t));
-        if (e != ESP_OK) {
-            s_slot_err_us[ctrl] = esp_timer_get_time();
-        }
+        /* Hand it to joystick_tx_task, replacing any frame still waiting. */
+        taskENTER_CRITICAL(&s_tx_lock);
+        memcpy(&s_tx_pending[ctrl], buf + 1, sizeof(joystick_packet_t));
+        s_tx_pending_valid[ctrl] = true;
+        taskEXIT_CRITICAL(&s_tx_lock);
+        xTaskNotifyGive(s_tx_task);
         break;
     }
     case MC_HID_RID_ENABLE: {
@@ -290,6 +396,9 @@ void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t le
         }
         if (is_broadcast_mac(ep.target_mac)) {
             s_global_enabled = (ep.enabled != 0);
+            if (!s_global_enabled) {
+                tx_pending_clear_all();
+            }
         }
         if (ensure_broadcast_peer() != ESP_OK) {
             s_bcast_err_us = esp_timer_get_time();
@@ -364,12 +473,17 @@ void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t le
         if (idx >= MC_MAX_ROBOTS) {
             return;
         }
+        taskENTER_CRITICAL(&s_tx_lock);
         memcpy(s_paired_mac[idx], buf + 1, 6);
         /* Start the slot's send history clean, before it counts as paired, so a
-         * newly assigned robot never inherits the previous occupant's fault. */
+         * newly assigned robot never inherits the previous occupant's fault --
+         * or the previous occupant's waiting frame. */
         s_slot_err_us[idx] = 0;
         s_slot_ok_us[idx] = 0;
+        s_tx_pending_valid[idx] = false;
+        s_tx_inflight_us[idx] = 0;
         s_paired_valid[idx] = true;
+        taskEXIT_CRITICAL(&s_tx_lock);
         if (ensure_unicast_peer(s_paired_mac[idx]) != ESP_OK) {
             ESP_LOGW(TAG, "pair: add peer failed slot %u", (unsigned)idx);
         }
@@ -393,8 +507,12 @@ void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t le
                 }
             }
         }
+        taskENTER_CRITICAL(&s_tx_lock);
         s_paired_valid[idx] = false;
         memset(s_paired_mac[idx], 0, 6);
+        s_tx_pending_valid[idx] = false;
+        s_tx_inflight_us[idx] = 0;
+        taskEXIT_CRITICAL(&s_tx_lock);
         break;
     }
     case MC_HID_RID_SET_NEUTRAL: {

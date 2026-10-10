@@ -40,6 +40,16 @@ MC_ENABLE_TIMEOUT_MS = 3000
 
 _BROADCAST = b"\xff\xff\xff\xff\xff\xff"
 
+# Message types only a dongle sends. Everything else on the channel is another
+# robot talking to the station.
+_FROM_DONGLE = (
+    MC_MSG_JOYSTICK,
+    MC_MSG_ENABLE,
+    MC_MSG_DISCOVERY_REQ,
+    MC_MSG_SET_NEUTRAL,
+    MC_MSG_SET_SPEED_LIMIT,
+)
+
 # struct formats (little-endian, packed). Sizes are asserted below.
 # fmt: off
 _FMT_JOYSTICK = "<BBhhhhhhH8s"   # 24 bytes
@@ -216,6 +226,14 @@ class CommModule:
         except OSError:
             # Some ports require the channel be set via ESP-NOW peer instead
             pass
+        # Keep the radio awake. With modem power save on, a robot can be dozing
+        # when the dongle's unicast arrives; it misses the frame, the dongle
+        # retries, and those retries back up every other robot's traffic behind
+        # them in the dongle's single transmit queue.
+        try:
+            self._sta.config(pm=self._sta.PM_NONE)
+        except (AttributeError, ValueError, OSError):
+            pass
         self._mac = self._sta.config("mac")
 
         self._espnow = espnow.ESPNow()
@@ -384,12 +402,19 @@ class CommModule:
     def _handle(self, mac, data):
         if len(data) < 1:
             return
-        # Learn the dongle's MAC from the first frame we hear.
+        msg_type = data[0]
+        # Frames from other robots (their heartbeats and acks) are not for us.
+        if msg_type not in _FROM_DONGLE:
+            return
+        # Learn the dongle's MAC from the first frame only a dongle sends. Learning
+        # it from *any* first frame let a robot lock onto another robot: until it
+        # hears a dongle, a robot broadcasts its heartbeats, so a second robot
+        # powered up before the station armed or scanned would adopt the first
+        # robot's MAC and send its heartbeats there for the rest of its uptime.
         if self._dongle_mac is None:
             self._dongle_mac = bytes(mac)
             self._calib_announce_left = _CALIB_ANNOUNCE_COUNT
 
-        msg_type = data[0]
         if msg_type == MC_MSG_SET_NEUTRAL:
             self._handle_set_neutral(mac, data)
         elif msg_type == MC_MSG_SET_SPEED_LIMIT:

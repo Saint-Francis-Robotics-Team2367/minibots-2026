@@ -48,7 +48,9 @@ import {
 /** @type {HIDDevice | null} */
 let device = null;
 let seq = 0;
-let raf = 0;
+let loopTimer = 0;
+/** Bumped to retire a running control loop. See startGamepadLoop(). */
+let loopGen = 0;
 let armed = false;
 let wifiChannel = 3;
 /**
@@ -240,10 +242,7 @@ async function autoConnect() {
 async function disconnectDongle() {
   // Stop the control loop before anything else, so it can't race a send against
   // the closing device.
-  if (raf) {
-    cancelAnimationFrame(raf);
-    raf = 0;
-  }
+  stopGamepadLoop();
   // Never leave robots enabled behind a closing link. Sent unconditionally: a
   // robot may be latched enabled from an earlier session even when armed is
   // false here. Awaited, because device.close() would abort it in flight.
@@ -887,8 +886,40 @@ function setStick(id, value) {
   el.style.width = `${Math.abs(pct)}%`;
 }
 
+// The control loop runs on a fixed timer, not requestAnimationFrame. rAF fires
+// at the display's refresh rate, so a 120 Hz laptop sent twice the packets of a
+// 60 Hz one, per robot, and the dongle forwards every one over ESP-NOW. With two
+// robots that was enough to back up the dongle's transmit queue: robots drove on
+// stick values up to ~2 s old and the dongle reported send failures.
+const CONTROL_TICK_MS = 20; // 50 Hz
+// A slot whose packet hasn't changed is re-sent at this interval instead of every
+// tick. Must stay well under the robot's MC_MOTOR_TIMEOUT_MS (250 ms) failsafe,
+// which treats silence as link loss and stops the motors.
+const JOY_KEEPALIVE_MS = 100;
+
+function stopGamepadLoop() {
+  loopGen++;
+  if (loopTimer) {
+    clearTimeout(loopTimer);
+    loopTimer = 0;
+  }
+}
+
 function startGamepadLoop() {
+  // A tick spends most of its time awaiting sendReport, so cancelling the
+  // pending timer alone cannot stop it: the in-flight tick would reschedule
+  // itself once its await returned, and the next connect would start a second
+  // loop beside it, doubling every robot's traffic. Each loop instead owns a
+  // generation and exits as soon as it is no longer the current one.
+  stopGamepadLoop();
+  const gen = loopGen;
+  /** Per slot: the last payload sent (excluding seq) and when. */
+  const lastKey = new Array(MC_MAX_ROBOTS).fill("");
+  const lastSentMs = new Array(MC_MAX_ROBOTS).fill(0);
+
   const tick = async () => {
+    if (gen !== loopGen) return;
+    const started = performance.now();
     const gps = navigator.getGamepads ? navigator.getGamepads() : [];
 
     // Light up any gamepad the driver is actually touching.
@@ -901,12 +932,7 @@ function startGamepadLoop() {
       if (el) el.dataset.active = String(active);
     }
 
-    if (!device || !device.opened) {
-      raf = requestAnimationFrame(tick);
-      return;
-    }
-
-    for (let slot = 0; slot < MC_MAX_ROBOTS; slot++) {
+    for (let slot = 0; slot < MC_MAX_ROBOTS && device && device.opened; slot++) {
       const sel = document.querySelector(`select.slot-gamepad[data-idx="${slot}"]`);
       const gp = sel && sel.value !== "" ? gps[Number(sel.value)] : null;
 
@@ -915,23 +941,36 @@ function startGamepadLoop() {
       setStick(`stick-r-${slot}`, gp ? -(gp.axes[3] ?? 0) : 0);
 
       if (!pairMac[slot] || !gp) {
+        lastKey[slot] = "";
         continue;
       }
       // Stick values only leave the station when armed. Disarmed slots stream a
       // neutral packet rather than silence: silence would leave the robot's
       // 250 ms failsafe as the only thing stopping the motors, and a neutral
       // command stops them outright even if the enable latch is somehow stuck.
-      const joy = gamepadToJoystick(++seq, armed ? gp : null, null);
+      const joy = gamepadToJoystick(0, armed ? gp : null, null);
+      const key = JSON.stringify({ ...joy, seq: 0 });
+      const now = performance.now();
+      if (key === lastKey[slot] && now - lastSentMs[slot] < JOY_KEEPALIVE_MS) {
+        continue;
+      }
+      joy.seq = ++seq & 0xff;
       try {
         await sendReport(MC_HID_RID_JOYSTICK, encodeJoystickOut(slot, joy));
+        lastKey[slot] = key;
+        lastSentMs[slot] = now;
         txCount++;
       } catch (err) {
         log(`Joystick send failed: ${err}`, "err");
       }
+      if (gen !== loopGen) return;
     }
-    raf = requestAnimationFrame(tick);
+
+    if (gen !== loopGen) return;
+    const elapsed = performance.now() - started;
+    loopTimer = setTimeout(tick, Math.max(0, CONTROL_TICK_MS - elapsed));
   };
-  raf = requestAnimationFrame(tick);
+  loopTimer = setTimeout(tick, 0);
 }
 
 /* ── Wiring ───────────────────────────────────────────────────────────────── */
