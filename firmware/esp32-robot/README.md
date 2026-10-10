@@ -101,7 +101,7 @@ Open `main.py`. The `Minibot` object gives you everything:
 
 Set your robot's **name**, **motor pins**, and **Wi-Fi channel** in the
 `Minibot(...)` line at the top of `main.py`. The channel must match the dongle
-(default `6`).
+(default `3`).
 
 ### Setting neutral from the driver station
 

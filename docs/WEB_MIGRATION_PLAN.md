@@ -202,7 +202,7 @@ Two things this page can retire from the CLI:
   plainly that they override `main.py` (`minibot.py:305`). Verified bounds for form
   validation: `robot_id` ≤ 16 chars (`minibot.py:42`), constructor neutral clamp
   **500–2500 µs** (`_PWM_MIN_US`/`_PWM_MAX_US`, `minibot.py:104`), over-the-air trim clamp
-  1000–2000 (`minibot.py:122`), channel default 6. Note `MinibotConfig` itself validates
+  1000–2000 (`minibot.py:122`), channel default 3. Note `MinibotConfig` itself validates
   **nothing** — it is a pure data holder, and its docstring's "1000-2000" is descriptive
   only, so the form is the first real gate.
 - **`clear_calibration()`** — currently REPL-only, with the README sending students to

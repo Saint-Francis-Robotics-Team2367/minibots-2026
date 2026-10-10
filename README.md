@@ -171,7 +171,7 @@ scripts remain the source of truth for the pinned versions.
 
 ESP-NOW requires the same **802.11 channel** on the dongle and every robot.
 
-- Dongle: default channel **6** at boot ([minicore_app.c](firmware/esp32s3-dongle/main/minicore_app.c) `CONFIG_MINICORE_WIFI_CHANNEL`, or add `CONFIG_MINICORE_WIFI_CHANNEL` via `sdkconfig`).
+- Dongle: default channel **3** at boot ([minicore_app.c](firmware/esp32s3-dongle/main/minicore_app.c) `CONFIG_MINICORE_WIFI_CHANNEL`, or add `CONFIG_MINICORE_WIFI_CHANNEL` via `sdkconfig`).
 - Robot: the `channel=` argument to `Minibot(...)` in [main.py](firmware/esp32-robot/main.py) (must match the dongle).
 
 ## Robot code (MicroPython) — details

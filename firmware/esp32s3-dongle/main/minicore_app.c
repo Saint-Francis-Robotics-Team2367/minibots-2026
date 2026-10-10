@@ -19,7 +19,7 @@
 static const char *TAG = "mc_dongle";
 
 #ifndef CONFIG_MINICORE_WIFI_CHANNEL
-#define CONFIG_MINICORE_WIFI_CHANNEL 6
+#define CONFIG_MINICORE_WIFI_CHANNEL 3
 #endif
 
 static void dongle_status_task(void *arg)

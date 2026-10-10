@@ -201,7 +201,7 @@
 from minibot_config import MinibotConfig
 
 # Your robot's name, its motor pins, and the radio channel.
-config = MinibotConfig("MiniBot1", left_motor_pin=16, right_motor_pin=17, channel=6)
+config = MinibotConfig("MiniBot1", left_motor_pin=16, right_motor_pin=17, channel=3)
 
 bot = Minibot(config)
 bot.begin()
@@ -277,7 +277,7 @@ while True:
                   <td>required</td>
                   <td>
                     Wi-Fi channel for the radio. <strong>Must match the dongle</strong> —
-                    normally <code>6</code>. Get this wrong and the robot never appears in
+                    normally <code>3</code>. Get this wrong and the robot never appears in
                     the driver station at all, with no error anywhere.
                   </td>
                 </tr>

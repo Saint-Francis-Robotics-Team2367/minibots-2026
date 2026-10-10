@@ -50,7 +50,7 @@ let device = null;
 let seq = 0;
 let raf = 0;
 let armed = false;
-let wifiChannel = 6;
+let wifiChannel = 3;
 /**
  * Cleared by the Disconnect button so the automatic path can't immediately undo
  * a deliberate disconnect. Set again by Connect, or by a physical unplug.

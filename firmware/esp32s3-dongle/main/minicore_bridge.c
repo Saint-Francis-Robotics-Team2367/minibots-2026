@@ -21,7 +21,7 @@
 
 static const char *TAG = "mc_bridge";
 
-static uint8_t s_channel = 6;
+static uint8_t s_channel = 3;
 static bool s_global_enabled;
 
 /* ESP-NOW send failures are reported asynchronously in espnow_send_cb, long
