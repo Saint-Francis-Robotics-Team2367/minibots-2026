@@ -335,9 +335,14 @@ class Minibot:
                 self._ring_rotation.update()
                 colors = self._ring_rotation.get_colors()
             else:
-                # Connection status mode - check if we have dongle connection
-                lx, ly, rx, ry, lt, rt, buttons = self.comm.get_joystick_axes()
-                has_input = ly != 0 or ry != 0 or lx != 0 or rx != 0
+                # Connection status mode. Use the same deadbanded stick getters
+                # as the motors so resting stick drift does not look like driving.
+                has_input = (
+                    self.get_left_x() != 0.0
+                    or self.get_left_y() != 0.0
+                    or self.get_right_x() != 0.0
+                    or self.get_right_y() != 0.0
+                )
 
                 if not self.comm.is_connected_to_dongle():
                     # Not connected to dongle
