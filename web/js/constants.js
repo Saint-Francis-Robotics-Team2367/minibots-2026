@@ -48,7 +48,7 @@ export const MC_HID_IN_STATUS_LEN = 16;
  * reports the value it was BUILT with; if it differs from this, the dongle is
  * running firmware that predates (or postdates) this page and needs reflashing.
  * Surfacing that beats debugging a silent mismatch. */
-export const MC_PROTOCOL_VERSION = 2;
+export const MC_PROTOCOL_VERSION = 3;
 
 /* Allowed range for a neutral set from this page — the full 1–2 ms RC window.
  * Mirrors MC_NEUTRAL_TRIM_* in firmware/common/minicore_policy.h (policy, NOT

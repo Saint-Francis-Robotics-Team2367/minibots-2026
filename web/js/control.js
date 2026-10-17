@@ -114,6 +114,20 @@ let txCount = 0;
 /** Latched so a mismatched dongle logs once, not five times a second. */
 let warnedProtocolMismatch = false;
 
+/* Radio loss telemetry from dongle status v3. The dongle's counters are
+ * free-running and wrap at 16 bits, so each report is diffed against the last;
+ * null until the first report from this dongle. */
+let prevTxFail = null;
+let prevSyncErr = 0;
+let prevFaultSlots = 0;
+/** Frames lost per slot so far this second, and over the last full second. */
+const slotLost = new Array(MC_MAX_ROBOTS).fill(0);
+const slotLostShown = new Array(MC_MAX_ROBOTS).fill(0);
+/** Dongle-side refusals (queue full, peer table) this second; and whether the
+ * previous second had any, so a persistent problem logs once, not every second. */
+let syncErrThisSec = 0;
+let syncErrLastSec = false;
+
 const BROADCAST_MAC = new Uint8Array(6).fill(0xff);
 const STALE_MS = 2500;
 const DROP_MS = 5000;
@@ -243,6 +257,9 @@ async function disconnectDongle() {
   // Stop the control loop before anything else, so it can't race a send against
   // the closing device.
   stopGamepadLoop();
+  // The next dongle's counters start from its own zero.
+  prevTxFail = null;
+  prevFaultSlots = 0;
   // Never leave robots enabled behind a closing link. Sent unconditionally: a
   // robot may be latched enabled from an earlier session even when armed is
   // false here. Awaited, because device.close() would abort it in flight.
@@ -255,6 +272,13 @@ async function disconnectDongle() {
   setDongleUi(false);
   renderSlots();
   log("Dongle disconnected");
+}
+
+/** The robot paired to a slot, by name if it has reported one. */
+function slotRobotName(i) {
+  const mac = pairMac[i];
+  const rec = mac ? discovered.get(macKey(mac)) : null;
+  return `${rec?.id || (mac ? macKey(mac) : "an empty slot")} (slot ${i})`;
 }
 
 /** Bound to this page's single device slot; hid.js holds the wire logic. */
@@ -456,12 +480,41 @@ function onInputReport(e) {
           "err",
         );
       }
-      // error_flags bit0 = ESP-NOW send failure on the dongle.
+      const v3 = s.protocol_version >= 3;
+      if (v3) {
+        if (prevTxFail) {
+          for (let i = 0; i < MC_MAX_ROBOTS; i++) {
+            slotLost[i] += (s.tx_fail[i] - prevTxFail[i]) & 0xffff;
+          }
+          syncErrThisSec += (s.tx_sync_err - prevSyncErr) & 0xffff;
+        }
+        prevTxFail = s.tx_fail;
+        prevSyncErr = s.tx_sync_err;
+        // Name the robot. fault_slots only sets once a robot has had nothing
+        // through for 250 ms -- its motor failsafe -- so each of these is a
+        // stop the driver saw, not an isolated dropped frame.
+        const rising = s.fault_slots & ~prevFaultSlots;
+        prevFaultSlots = s.fault_slots;
+        for (let i = 0; i < MC_MAX_ROBOTS; i++) {
+          if (rising & (1 << i)) {
+            log(`Radio: nothing reaching ${slotRobotName(i)} for 250 ms — it stopped`, "err");
+          }
+        }
+      }
+      // error_flags bit0 = ESP-NOW send failure on the dongle. From v3 it is a
+      // sustained per-robot outage (logged by name above) or a failed broadcast.
       const fault = (s.error_flags & 1) !== 0;
       const chip = $("faultChip");
       if (fault !== !chip.hidden) {
         chip.hidden = !fault;
-        if (fault) log("Dongle reports ESP-NOW send failure", "err");
+        if (fault && !(v3 && s.fault_slots)) {
+          log(
+            v3
+              ? "Dongle could not send a broadcast (enable, speed limit or scan)"
+              : "Dongle reports ESP-NOW send failure",
+            "err",
+          );
+        }
       }
     }
   }
@@ -764,6 +817,12 @@ function renderSlots() {
         state = "standby";
         label = `Standby · ${batteryText(rec.battery)}`;
       }
+    }
+    // Frames the dongle sent this robot that it never acknowledged. Isolated
+    // losses are harmless (the next frame is 20-100 ms behind); a steady count
+    // is the early sign of a robot about to stutter.
+    if (mac && slotLostShown[i] > 0) {
+      label += ` · ${slotLostShown[i]} lost/s`;
     }
     slot.dataset.state = state;
     slot.dataset.live = String(state === "live");
@@ -1107,6 +1166,17 @@ setInterval(() => {
   }
   $("txRate").textContent = String(txCount);
   txCount = 0;
+  for (let i = 0; i < MC_MAX_ROBOTS; i++) {
+    slotLostShown[i] = slotLost[i];
+    slotLost[i] = 0;
+  }
+  // Refusals mean the dongle itself is overloaded, not the air -- a different
+  // fix, so it gets its own line.
+  if (syncErrThisSec > 0 && !syncErrLastSec) {
+    log(`Dongle refused ${syncErrThisSec} sends in the last second (radio queue full)`, "warn");
+  }
+  syncErrLastSec = syncErrThisSec > 0;
+  syncErrThisSec = 0;
   renderSlots();
 
   // Chase the calibration of any robot that hasn't reported one. Covers the ack

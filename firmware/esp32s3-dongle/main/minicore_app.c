@@ -34,6 +34,12 @@ static void dongle_status_task(void *arg)
         st.global_enabled = minicore_global_enabled() ? 1u : 0u;
         st.error_flags = minicore_error_flags();
         st.protocol_version = MC_PROTOCOL_VERSION;
+        st.fault_slots = minicore_fault_slots();
+        uint16_t fail_n[MC_MAX_ROBOTS];
+        uint16_t sync_err_n;
+        minicore_tx_stats(fail_n, &sync_err_n);
+        memcpy(st.tx_fail, fail_n, sizeof(st.tx_fail)); /* packed: no direct pointer */
+        st.tx_sync_err = sync_err_n;
         if (tud_mounted()) {
             tud_hid_report(MC_HID_RID_DONGLE_STATUS, &st, sizeof(st));
         }

@@ -180,6 +180,10 @@ export function decodeDongleStatus(buf) {
     global_enabled: v.getUint8(2),
     error_flags: v.getUint8(3),
     protocol_version: v.getUint8(4),
+    // v3+; zero from an older dongle, which only matters after the version check.
+    fault_slots: v.getUint8(5),
+    tx_fail: Array.from({ length: C.MC_MAX_ROBOTS }, (_, i) => v.getUint16(6 + 2 * i, true)),
+    tx_sync_err: v.getUint16(6 + 2 * C.MC_MAX_ROBOTS, true),
   };
 }
 

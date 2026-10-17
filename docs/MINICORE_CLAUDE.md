@@ -337,13 +337,20 @@ The browser communicates with the ESP32-S3 dongle over USB HID. This requires de
 | `0x03` | Heartbeat from robot | heartbeat_packet_t data |
 | `0x05` | Discovery response | discovery_response_t data |
 | `0x06` | Neutral calibration echo | neutral_ack_packet_t data |
-| `0xFE` | Dongle status | Channel, paired count, global enable, error flags, `protocol_version` |
+| `0xFE` | Dongle status | Channel, paired count, global enable, error flags, `protocol_version`; v3+: `fault_slots`, per-slot `tx_fail[4]`, `tx_sync_err` |
 
 **`error_flags` bit 0 — ESP-NOW send failure.** The browser mirrors this bit
 straight onto the "Radio send failing" chip, so the dongle is responsible for
-making it steady. It is derived from recent send history, not set as a raw flag:
-a failure reads as set for up to `MC_SEND_ERR_HOLD_US` (1 s) and is cleared early
-by the next success on the same peer. Two details matter if you touch it:
+making it steady. It is derived from recent send history, not set as a raw flag.
+Since protocol v3 a robot only counts as failing once **nothing has been
+acknowledged for `MC_SEND_FAULT_US` (250 ms)**, the robot's motor failsafe, and
+`fault_slots` says which robot. Before that, any single lost frame set the bit
+until the next success, which logged warnings for drops the robot never felt.
+Isolated losses are still visible: `tx_fail[i]` counts unacknowledged unicasts
+per slot (RF loss) and `tx_sync_err` counts sends the dongle couldn't even queue
+(dongle overload). Both are wrapping uint16s the page diffs and shows as
+"N lost/s" per slot. Broadcast send failures still set the bit for
+`MC_SEND_ERR_HOLD_US` (1 s). Two details matter if you touch it:
 
 - The history is **per paired slot**. Unicast joystick traffic runs at up to
   50 Hz per robot, so one shared flag would interleave a dead robot's failures with a live

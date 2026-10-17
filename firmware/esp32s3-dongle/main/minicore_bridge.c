@@ -37,12 +37,30 @@ static volatile bool s_global_enabled;
  * failing rather than blinking, and a recovered link clears on its next success.
  *
  * The history is per paired slot, not global. Joystick traffic is unicast per
- * robot at ~60 Hz, so with one robot dead and another alive a single shared pair
- * of timestamps would interleave successes and failures and flicker exactly as
- * the old single bit did. */
+ * robot at up to 50 Hz, so with one robot dead and another alive a single shared
+ * pair of timestamps would interleave successes and failures and flicker exactly
+ * as the old single bit did.
+ *
+ * A slot is only in fault once nothing has got through to it for
+ * MC_SEND_FAULT_US. A single lost frame is superseded by the next one 20-100 ms
+ * later and the robot never notices, so reporting it -- which "most recent
+ * outcome was a failure" did -- raised warnings for drops nobody could act on.
+ * The threshold matches the robot's MC_MOTOR_TIMEOUT_MS failsafe
+ * (minicore_policy.h, not included here because the dongle must not depend on
+ * policy): past it the robot has stopped its motors, so the driver felt it.
+ * Isolated drops still show up, as counts in dongle_status_t.tx_fail[]. */
 #define MC_SEND_ERR_HOLD_US 1000000 /* 1 s */
+#define MC_SEND_FAULT_US 250000     /* 250 ms, = robot MC_MOTOR_TIMEOUT_MS */
 static volatile int64_t s_slot_err_us[MC_MAX_ROBOTS];
 static volatile int64_t s_slot_ok_us[MC_MAX_ROBOTS];
+/* Start of the slot's current run of failures, 0 = not failing. */
+static volatile int64_t s_slot_fail_since_us[MC_MAX_ROBOTS];
+/* Free-running, wrapping counters for the station: unicast frames a robot never
+ * acknowledged, and sends the dongle could not even queue (peer table full,
+ * radio busy). The two point at different causes -- RF versus the dongle
+ * itself -- which is the whole reason to report them separately. */
+static volatile uint16_t s_slot_fail_n[MC_MAX_ROBOTS];
+static volatile uint16_t s_sync_err_n;
 /* Failures on the broadcast paths (enable, discovery), which esp_now_send()
  * reports synchronously. Broadcasts have no meaningful completion status, so
  * nothing ever arrives to clear this; it ages out on the same hold instead. A
@@ -83,6 +101,43 @@ static int64_t s_tx_inflight_us[MC_MAX_ROBOTS];
  * unicast with its full retry budget takes. */
 #define MC_TX_INFLIGHT_TIMEOUT_US 100000 /* 100 ms */
 static TaskHandle_t s_tx_task;
+
+/* Record a unicast outcome for a slot. Called from the Wi-Fi task (completions)
+ * and the tx and USB tasks (synchronous failures), hence the lock: the 64-bit
+ * stamps are not atomic on this core. */
+static void slot_note_ok(int slot, int64_t now)
+{
+    taskENTER_CRITICAL(&s_tx_lock);
+    s_slot_ok_us[slot] = now;
+    s_slot_fail_since_us[slot] = 0;
+    taskEXIT_CRITICAL(&s_tx_lock);
+}
+
+static void slot_note_fail(int slot, int64_t now)
+{
+    taskENTER_CRITICAL(&s_tx_lock);
+    /* A run that went quiet for longer than the hold (the field was disabled,
+     * so nothing was sent) is over; don't let it make the next failure look
+     * like an instant 250 ms outage. */
+    if (s_slot_fail_since_us[slot] == 0 || now - s_slot_err_us[slot] > MC_SEND_ERR_HOLD_US) {
+        s_slot_fail_since_us[slot] = now;
+    }
+    s_slot_err_us[slot] = now;
+    taskEXIT_CRITICAL(&s_tx_lock);
+}
+
+/* A send that failed before reaching the air: counted apart from NAKs. */
+static void slot_note_sync_fail(int slot, int64_t now)
+{
+    s_sync_err_n++;
+    slot_note_fail(slot, now);
+}
+
+static void bcast_note_sync_fail(void)
+{
+    s_sync_err_n++;
+    s_bcast_err_us = esp_timer_get_time();
+}
 
 static void discovery_timer_cb(void *arg)
 {
@@ -162,9 +217,10 @@ static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status
     }
     int64_t now = esp_timer_get_time();
     if (status == ESP_NOW_SEND_SUCCESS) {
-        s_slot_ok_us[slot] = now;
+        slot_note_ok(slot, now);
     } else {
-        s_slot_err_us[slot] = now;
+        s_slot_fail_n[slot]++;
+        slot_note_fail(slot, now);
     }
     /* The radio is free for this slot; send its newest frame if one is waiting. */
     if (s_tx_task) {
@@ -228,7 +284,7 @@ static void joystick_tx_task(void *arg)
                 taskENTER_CRITICAL(&s_tx_lock);
                 s_tx_inflight_us[i] = 0;
                 taskEXIT_CRITICAL(&s_tx_lock);
-                s_slot_err_us[i] = esp_timer_get_time();
+                slot_note_sync_fail(i, esp_timer_get_time());
             }
         }
     }
@@ -326,33 +382,46 @@ bool minicore_global_enabled(void)
     return s_global_enabled;
 }
 
-/* True while `err_us` is a failure that is both recent and not yet superseded by
- * a success. `ok_us` may be 0 for paths that never report success (broadcasts). */
-static bool fault_recent(int64_t now, int64_t err_us, int64_t ok_us)
+/* True while a broadcast failure is recent. Broadcasts never report success, so
+ * the hold is the only thing that ends it. */
+static bool bcast_fault_recent(int64_t now)
 {
-    if (err_us == 0) {
-        return false; /* nothing has failed yet */
+    int64_t err_us = s_bcast_err_us;
+    return err_us != 0 && (now - err_us) < MC_SEND_ERR_HOLD_US;
+}
+
+uint8_t minicore_fault_slots(void)
+{
+    int64_t now = esp_timer_get_time();
+    uint8_t mask = 0;
+    taskENTER_CRITICAL(&s_tx_lock);
+    for (int i = 0; i < (int)MC_MAX_ROBOTS; i++) {
+        int64_t since = s_slot_fail_since_us[i];
+        /* Failing without a success for the threshold, and still failing now:
+         * a slot that stopped sending (field disabled) ages out on the hold. */
+        if (s_paired_valid[i] && since != 0 && now - since >= MC_SEND_FAULT_US &&
+            now - s_slot_err_us[i] < MC_SEND_ERR_HOLD_US) {
+            mask |= (uint8_t)(1u << i);
+        }
     }
-    if (ok_us > err_us) {
-        /* The link recovered. Clear straight away rather than making the driver
-         * wait out the hold window staring at a fault that is already over. */
-        return false;
-    }
-    return (now - err_us) < MC_SEND_ERR_HOLD_US;
+    taskEXIT_CRITICAL(&s_tx_lock);
+    return mask;
 }
 
 uint8_t minicore_error_flags(void)
 {
-    int64_t now = esp_timer_get_time();
-    if (fault_recent(now, s_bcast_err_us, 0)) {
+    if (bcast_fault_recent(esp_timer_get_time())) {
         return 1u;
     }
+    return minicore_fault_slots() != 0 ? 1u : 0u;
+}
+
+void minicore_tx_stats(uint16_t fail_n[MC_MAX_ROBOTS], uint16_t *sync_err_n)
+{
     for (int i = 0; i < (int)MC_MAX_ROBOTS; i++) {
-        if (s_paired_valid[i] && fault_recent(now, s_slot_err_us[i], s_slot_ok_us[i])) {
-            return 1u;
-        }
+        fail_n[i] = s_slot_fail_n[i];
     }
-    return 0u;
+    *sync_err_n = s_sync_err_n;
 }
 
 void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t len)
@@ -401,11 +470,11 @@ void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t le
             }
         }
         if (ensure_broadcast_peer() != ESP_OK) {
-            s_bcast_err_us = esp_timer_get_time();
+            bcast_note_sync_fail();
         }
         esp_err_t e = esp_now_send(k_broadcast_mac, (uint8_t *)&ep, sizeof(ep));
         if (e != ESP_OK) {
-            s_bcast_err_us = esp_timer_get_time();
+            bcast_note_sync_fail();
         }
         break;
     }
@@ -434,11 +503,11 @@ void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t le
          * stood down is the normal way to set it, and this frame only narrows a
          * clamp. It cannot start a motor. */
         if (ensure_broadcast_peer() != ESP_OK) {
-            s_bcast_err_us = esp_timer_get_time();
+            bcast_note_sync_fail();
         }
         esp_err_t e = esp_now_send(k_broadcast_mac, (uint8_t *)&sl, sizeof(sl));
         if (e != ESP_OK) {
-            s_bcast_err_us = esp_timer_get_time();
+            bcast_note_sync_fail();
         }
         break;
     }
@@ -457,11 +526,11 @@ void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t le
         esp_timer_stop(s_disc_timer);
         ESP_ERROR_CHECK(esp_timer_start_once(s_disc_timer, (uint64_t)MC_DISCOVERY_COLLECT_MS * 1000ULL));
         if (ensure_broadcast_peer() != ESP_OK) {
-            s_bcast_err_us = esp_timer_get_time();
+            bcast_note_sync_fail();
         }
         esp_err_t e = esp_now_send(k_broadcast_mac, (uint8_t *)&dr, sizeof(dr));
         if (e != ESP_OK) {
-            s_bcast_err_us = esp_timer_get_time();
+            bcast_note_sync_fail();
         }
         break;
     }
@@ -480,6 +549,7 @@ void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t le
          * or the previous occupant's waiting frame. */
         s_slot_err_us[idx] = 0;
         s_slot_ok_us[idx] = 0;
+        s_slot_fail_since_us[idx] = 0;
         s_tx_pending_valid[idx] = false;
         s_tx_inflight_us[idx] = 0;
         s_paired_valid[idx] = true;
@@ -552,12 +622,12 @@ void minicore_bridge_hid_output(uint8_t report_id, const uint8_t *buf, size_t le
          * the robot armed, and you also want to set values before arming. This
          * changes what "stopped" means; it does not drive anything. */
         if (ensure_unicast_peer(s_paired_mac[idx]) != ESP_OK) {
-            s_slot_err_us[idx] = esp_timer_get_time();
+            slot_note_sync_fail(idx, esp_timer_get_time());
             return;
         }
         esp_err_t e = esp_now_send(s_paired_mac[idx], (uint8_t *)&sn, sizeof(sn));
         if (e != ESP_OK) {
-            s_slot_err_us[idx] = esp_timer_get_time();
+            slot_note_sync_fail(idx, esp_timer_get_time());
         }
         ESP_LOGI(TAG, "set neutral slot %u: %u/%u us", (unsigned)idx, (unsigned)sn.neutral_left_us,
                  (unsigned)sn.neutral_right_us);

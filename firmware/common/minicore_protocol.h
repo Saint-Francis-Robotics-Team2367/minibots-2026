@@ -38,7 +38,7 @@ extern "C" {
  * dongle_status_t so the web app can tell the driver their dongle firmware is
  * older than the page, rather than leaving them to debug a silent mismatch --
  * which is exactly what a stale trim clamp cost us once already. */
-#define MC_PROTOCOL_VERSION 2u
+#define MC_PROTOCOL_VERSION 3u
 
 /* --- USB HID identity (Espressif VID, project-specific PID) --- */
 #define MINICORE_USB_VID 0x303Au
@@ -199,7 +199,15 @@ typedef struct {
     uint8_t global_enabled; /* 0/1 */
     uint8_t error_flags;    /* bit0: espnow send err */
     uint8_t protocol_version; /* MC_PROTOCOL_VERSION the dongle was built with */
-    uint8_t reserved[11];
+    /* v3+. Bit i: paired slot i has had nothing acknowledged for >= 250 ms, the
+     * robot's motor failsafe -- i.e. that robot has stopped. error_flags bit0 is
+     * set whenever this is non-zero. */
+    uint8_t fault_slots;
+    /* v3+. Free-running uint16 counters that wrap; the station diffs successive
+     * reports. tx_fail[i]: unicasts slot i's robot never acknowledged (RF loss).
+     * tx_sync_err: sends the dongle could not queue at all, any path. */
+    uint16_t tx_fail[MC_MAX_ROBOTS];
+    uint16_t tx_sync_err;
 } dongle_status_t;
 
 #pragma pack(pop)
