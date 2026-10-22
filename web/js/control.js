@@ -52,7 +52,7 @@ let loopTimer = 0;
 /** Bumped to retire a running control loop. See startGamepadLoop(). */
 let loopGen = 0;
 let armed = false;
-let wifiChannel = 3;
+let wifiChannel = 11;
 /**
  * Cleared by the Disconnect button so the automatic path can't immediately undo
  * a deliberate disconnect. Set again by Connect, or by a physical unplug.
@@ -377,12 +377,18 @@ function touchRobot(mac, id, extra) {
   const k = macKey(mac);
   const prev = discovered.get(k);
   const rec = prev || { mac, id, battery: 0xff, flags: 0 };
+  const prevId = prev ? prev.id : undefined;
   rec.id = id || rec.id;
   rec.lastSeen = Date.now();
   Object.assign(rec, extra);
   discovered.set(k, rec);
   if (!prev) {
     log(`Robot ${rec.id || "(unnamed)"} found — ${k}`, "go");
+    renderRobots();
+  } else if (rec.id !== prevId) {
+    // Neutral and speed-limit acks carry no name, and a robot's power-up
+    // announce can beat its first heartbeat. Repaint once the name arrives, or
+    // the list and pairing menus keep showing the MAC in its place.
     renderRobots();
   }
   return rec;

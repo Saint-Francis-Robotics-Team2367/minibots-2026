@@ -150,7 +150,7 @@
                 <tr>
                   <td><strong>Channel</strong></td>
                   <td>
-                    The Wi-Fi channel the dongle is using — normally <code>3</code>. Your
+                    The Wi-Fi channel the dongle is using — normally <code>11</code>. Your
                     robots must be on this same number or they will never appear.
                   </td>
                 </tr>
@@ -180,9 +180,9 @@
           <div class="alert" data-kind="warn">
             <strong>A robot on the wrong channel never appears at all</strong> — no error,
             no warning, just an empty list. This is the most common reason a robot seems
-            dead. Check that <code>channel=</code> in your <code>main.py</code> matches the
-            <strong>Channel</strong> readout at the top of the page, then power-cycle the
-            robot.
+            dead. The robot library picks the channel, so a robot that reads a different
+            <strong>Channel</strong> from the top of the page has an old library: re-upload it
+            from <a href="/code-robot">Code a robot</a>, then power-cycle the robot.
           </div>
 
           <p>

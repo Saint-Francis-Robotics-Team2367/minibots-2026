@@ -201,7 +201,7 @@
 from minibot_config import MinibotConfig
 
 # Your robot's name, its motor pins, and the radio channel.
-config = MinibotConfig("MiniBot1", left_motor_pin=16, right_motor_pin=17, channel=3)
+config = MinibotConfig("MiniBot1", left_motor_pin=16, right_motor_pin=17, channel=11)
 
 bot = Minibot(config)
 bot.begin()
@@ -274,10 +274,10 @@ while True:
                 </tr>
                 <tr>
                   <td><code>channel</code></td>
-                  <td><code>3</code></td>
+                  <td><code>11</code></td>
                   <td>
                     Ignored. The library always puts the robot on the dongle's channel
-                    (<code>3</code>), whatever this says, so an old <code>main.py</code>
+                    (<code>11</code>), whatever this says, so an old <code>main.py</code>
                     with a different channel still shows up in the driver station.
                   </td>
                 </tr>

@@ -29,7 +29,7 @@ class MinibotConfig:
         *,
         left_motor_pin: int,
         right_motor_pin: int,
-        channel: int = 3,
+        channel: int = 11,
         neutral_left_us: int = 1500,
         neutral_right_us: int = 1500,
         display_enabled: bool = True,
@@ -41,7 +41,7 @@ class MinibotConfig:
             robot_id: Unique identifier for the robot (max 16 characters)
             left_motor_pin: GPIO pin for left motor
             right_motor_pin: GPIO pin for right motor
-            channel: Ignored -- robots always use the dongle's channel (3). Kept so
+            channel: Ignored -- robots always use the dongle's channel (11). Kept so
                 older main.py files still load.
             neutral_left_us: Neutral pulse width for left motor (default: 1500 us)
             neutral_right_us: Neutral pulse width for right motor (default: 1500 us)

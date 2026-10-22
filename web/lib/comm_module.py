@@ -43,7 +43,7 @@ _BROADCAST = b"\xff\xff\xff\xff\xff\xff"
 # --- Several dongles on one channel ---
 # A room can hold more than one driver station, and every dongle is on the same
 # channel, so a robot hears all of them. Two things follow:
-#   * Heartbeats go to every dongle heard recently, not just the first one. A
+#   * Heartbeats go to every dongle we have heard, not just the first one. A
 #     robot that latched onto one dongle was invisible to the others: it still
 #     answered their scans, but its heartbeats never reached them.
 #   * Enable and speed limit are broadcasts, so each dongle's applies to every
@@ -51,11 +51,12 @@ _BROADCAST = b"\xff\xff\xff\xff\xff\xff"
 #     "owner", the one sending it joystick frames); otherwise station B, stood
 #     down, would keep disabling a robot station A is driving, and station A
 #     armed would enable robots that belong to B.
-# Long enough to ride out several missed 500 ms enable broadcasts; a dongle
-# that goes quiet for this long stops receiving our heartbeats.
-_DONGLE_EXPIRE_MS = 10000
-# ESP-NOW's unencrypted peer table holds 20; leave plenty for other uses.
-_MAX_DONGLES = 4
+# Dongles are never forgotten for going quiet: a disarmed station sends nothing
+# on a timer (the enable re-broadcast runs only while armed), and a station
+# sitting disarmed after a scan must keep receiving heartbeats or its robot list
+# empties. One leaves only when a newer one needs its slot, least recently heard
+# first. ESP-NOW's unencrypted peer table holds 20; leave plenty for other uses.
+_MAX_DONGLES = 6
 
 # Message types only a dongle sends. Everything else on the channel is another
 # robot talking to the station.
@@ -155,9 +156,9 @@ class CommModule:
     _sta: object
     _espnow: espnow.ESPNow | None
     _mac: bytes
-    # Every dongle heard recently -> ticks of the last frame from it.
+    # Every dongle heard -> ticks of the last frame from it.
     _dongles: dict
-    # Dongle that is driving us, or None. See _DONGLE_EXPIRE_MS above.
+    # Dongle that is driving us, or None. See "Several dongles" above.
     _owner_mac: bytes | None
     # Dongle -> ticks of its last enable=1 aimed at us. Absent = not enabling us.
     _enabled_by: dict
@@ -287,7 +288,7 @@ class CommModule:
                 self._handle(mac, bytes(msg))
 
         now = time.ticks_ms()
-        self._expire_dongles(now)
+        self._expire_enables(now)
         # Recomputed every pass, so an enable lapses if its station goes quiet.
         self._enabled = self._compute_enabled(now)
 
@@ -322,7 +323,7 @@ class CommModule:
         return self._enabled
 
     def is_connected_to_dongle(self) -> bool:
-        """Check if we have heard from a dongle recently."""
+        """Check if we have heard from a dongle (learned its MAC)."""
         return len(self._dongles) > 0
 
     def is_joystick_stale(self) -> bool:
@@ -481,9 +482,7 @@ class CommModule:
         except OSError:
             pass
 
-    def _expire_dongles(self, now):
-        for m in [m for m, t in self._dongles.items() if time.ticks_diff(now, t) > _DONGLE_EXPIRE_MS]:
-            self._forget_dongle(m)
+    def _expire_enables(self, now):
         for m in [m for m, t in self._enabled_by.items() if time.ticks_diff(now, t) > MC_ENABLE_TIMEOUT_MS]:
             del self._enabled_by[m]
 
@@ -603,7 +602,7 @@ class CommModule:
             return False
 
     def _link_targets(self):
-        """Where robot -> station frames go: every dongle heard recently, else
+        """Where robot -> station frames go: every dongle we have heard, else
         broadcast. Unicast rather than one broadcast so each gets the MAC-level
         retries a broadcast does not."""
         return list(self._dongles) if self._dongles else [_BROADCAST]

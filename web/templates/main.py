@@ -45,13 +45,13 @@ from minibot_config import MinibotConfig
 
 # Create your robot. Put YOUR robot's name in the quotes so it shows up in the
 # driver station. Change the pins if your motors are wired differently.
-# (`channel` is ignored: the library always uses the dongle's channel, 3.)
+# (`channel` is ignored: the library always uses the dongle's channel, 11.)
 #
 # If your wheels creep or spin while the sticks are centered, adjust the motor
 # neutral pulse widths (1500 is the RC standard; try 20-30 us at a time).
 # Motors always have ±300 us swing centered on their neutral.
 
-config = MinibotConfig("MiniBot1", left_motor_pin=16, right_motor_pin=17, channel=3)
+config = MinibotConfig("MiniBot1", left_motor_pin=16, right_motor_pin=17, channel=11)
 
 bot = Minibot(config)
 bot.begin()
