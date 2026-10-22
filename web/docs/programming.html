@@ -274,11 +274,11 @@ while True:
                 </tr>
                 <tr>
                   <td><code>channel</code></td>
-                  <td>required</td>
+                  <td><code>3</code></td>
                   <td>
-                    Wi-Fi channel for the radio. <strong>Must match the dongle</strong> —
-                    normally <code>3</code>. Get this wrong and the robot never appears in
-                    the driver station at all, with no error anywhere.
+                    Ignored. The library always puts the robot on the dongle's channel
+                    (<code>3</code>), whatever this says, so an old <code>main.py</code>
+                    with a different channel still shows up in the driver station.
                   </td>
                 </tr>
                 <tr>

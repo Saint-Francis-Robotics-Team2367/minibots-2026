@@ -40,6 +40,23 @@ MC_ENABLE_TIMEOUT_MS = 3000
 
 _BROADCAST = b"\xff\xff\xff\xff\xff\xff"
 
+# --- Several dongles on one channel ---
+# A room can hold more than one driver station, and every dongle is on the same
+# channel, so a robot hears all of them. Two things follow:
+#   * Heartbeats go to every dongle heard recently, not just the first one. A
+#     robot that latched onto one dongle was invisible to the others: it still
+#     answered their scans, but its heartbeats never reached them.
+#   * Enable and speed limit are broadcasts, so each dongle's applies to every
+#     robot in the room. A robot obeys only the dongle that is driving it (its
+#     "owner", the one sending it joystick frames); otherwise station B, stood
+#     down, would keep disabling a robot station A is driving, and station A
+#     armed would enable robots that belong to B.
+# Long enough to ride out several missed 500 ms enable broadcasts; a dongle
+# that goes quiet for this long stops receiving our heartbeats.
+_DONGLE_EXPIRE_MS = 10000
+# ESP-NOW's unencrypted peer table holds 20; leave plenty for other uses.
+_MAX_DONGLES = 4
+
 # Message types only a dongle sends. Everything else on the channel is another
 # robot talking to the station.
 _FROM_DONGLE = (
@@ -138,7 +155,12 @@ class CommModule:
     _sta: object
     _espnow: espnow.ESPNow | None
     _mac: bytes
-    _dongle_mac: bytes | None
+    # Every dongle heard recently -> ticks of the last frame from it.
+    _dongles: dict
+    # Dongle that is driving us, or None. See _DONGLE_EXPIRE_MS above.
+    _owner_mac: bytes | None
+    # Dongle -> ticks of its last enable=1 aimed at us. Absent = not enabling us.
+    _enabled_by: dict
     _enabled: bool
     # No annotation on the tick fields: time.ticks_ms() returns an opaque
     # counter, not an int (it is free to wrap), so only ticks_diff() may be
@@ -187,7 +209,6 @@ class CommModule:
 
         self._enabled = False
         now = time.ticks_ms()
-        self._last_enable_ms = now
         self._last_joystick_ms = now
         self._last_hb_ms = now
         self._joystick_stale = False
@@ -202,7 +223,9 @@ class CommModule:
         self._sta = None
         self._espnow = None
         self._mac = b"\x00" * 6
-        self._dongle_mac = None  # learned lazily from first received frame
+        self._dongles = {}  # learned from received frames
+        self._owner_mac = None
+        self._enabled_by = {}
 
         # Speed limit (unrestricted until a station says otherwise)
         self._speed_limit = _SPEED_LIMIT_MAX
@@ -243,7 +266,6 @@ class CommModule:
 
         now = time.ticks_ms()
         self._last_joystick_ms = now
-        self._last_enable_ms = now
         self._last_hb_ms = now
 
     def update(self) -> None:
@@ -264,10 +286,10 @@ class CommModule:
             if msg:
                 self._handle(mac, bytes(msg))
 
-        # Let the enable flag lapse if the station has gone quiet.
         now = time.ticks_ms()
-        if self._enabled and time.ticks_diff(now, self._last_enable_ms) > MC_ENABLE_TIMEOUT_MS:
-            self._enabled = False
+        self._expire_dongles(now)
+        # Recomputed every pass, so an enable lapses if its station goes quiet.
+        self._enabled = self._compute_enabled(now)
 
         # Check if joystick input is stale
         self._joystick_stale = time.ticks_diff(now, self._last_joystick_ms) > MC_MOTOR_TIMEOUT_MS
@@ -284,11 +306,14 @@ class CommModule:
         # Heartbeat so the dongle/web UI knows we're alive.
         if time.ticks_diff(now, self._last_hb_ms) >= MC_HEARTBEAT_INTERVAL_MS:
             self._last_hb_ms = now
-            self._send_heartbeat()
             # Ride the first few heartbeats with our calibration
-            if self._calib_announce_left > 0:
+            announce = self._calib_announce_left > 0
+            if announce:
                 self._calib_announce_left -= 1
-                self._send_neutral_ack(self._link_target())
+            for target in self._link_targets():
+                self._send_heartbeat(target)
+                if announce:
+                    self._send_neutral_ack(target)
 
     # --- Getters -----------------------------------------------------------------
 
@@ -297,8 +322,8 @@ class CommModule:
         return self._enabled
 
     def is_connected_to_dongle(self) -> bool:
-        """Check if we have heard from the dongle (discovered its MAC)."""
-        return self._dongle_mac is not None
+        """Check if we have heard from a dongle recently."""
+        return len(self._dongles) > 0
 
     def is_joystick_stale(self) -> bool:
         """Check if joystick input is stale (link loss or no recent packets)."""
@@ -406,14 +431,13 @@ class CommModule:
         # Frames from other robots (their heartbeats and acks) are not for us.
         if msg_type not in _FROM_DONGLE:
             return
-        # Learn the dongle's MAC from the first frame only a dongle sends. Learning
-        # it from *any* first frame let a robot lock onto another robot: until it
-        # hears a dongle, a robot broadcasts its heartbeats, so a second robot
-        # powered up before the station armed or scanned would adopt the first
-        # robot's MAC and send its heartbeats there for the rest of its uptime.
-        if self._dongle_mac is None:
-            self._dongle_mac = bytes(mac)
-            self._calib_announce_left = _CALIB_ANNOUNCE_COUNT
+        # Learn dongle MACs only from frames only a dongle sends. Learning from
+        # *any* frame let a robot lock onto another robot: until it hears a
+        # dongle, a robot broadcasts its heartbeats, so a second robot powered up
+        # before the station armed or scanned would adopt the first robot's MAC
+        # and send its heartbeats there for the rest of its uptime.
+        mac = bytes(mac)
+        self._note_dongle(mac)
 
         if msg_type == MC_MSG_SET_NEUTRAL:
             self._handle_set_neutral(mac, data)
@@ -424,22 +448,90 @@ class CommModule:
             self._send_neutral_ack(mac)
             self._send_speed_limit_ack(mac)
         elif msg_type == MC_MSG_ENABLE:
-            self._handle_enable(data)
+            self._handle_enable(mac, data)
         elif msg_type == MC_MSG_JOYSTICK:
-            self._handle_joystick(data)
+            self._handle_joystick(mac, data)
 
-    def _handle_enable(self, data):
+    def _note_dongle(self, mac):
+        now = time.ticks_ms()
+        if mac not in self._dongles:
+            if len(self._dongles) >= _MAX_DONGLES:
+                # Drop the one heard from longest ago, never our owner.
+                oldest = None
+                for m, t in self._dongles.items():
+                    if m == self._owner_mac:
+                        continue
+                    if oldest is None or time.ticks_diff(t, self._dongles[oldest]) < 0:
+                        oldest = m
+                if oldest is None:
+                    return
+                self._forget_dongle(oldest)
+            # A station that just appeared has not seen our calibration yet.
+            self._calib_announce_left = _CALIB_ANNOUNCE_COUNT
+        self._dongles[mac] = now
+
+    def _forget_dongle(self, mac):
+        self._dongles.pop(mac, None)
+        self._enabled_by.pop(mac, None)
+        if mac == self._owner_mac:
+            self._owner_mac = None
+        try:
+            assert self._espnow
+            self._espnow.del_peer(mac)
+        except OSError:
+            pass
+
+    def _expire_dongles(self, now):
+        for m in [m for m, t in self._dongles.items() if time.ticks_diff(now, t) > _DONGLE_EXPIRE_MS]:
+            self._forget_dongle(m)
+        for m in [m for m, t in self._enabled_by.items() if time.ticks_diff(now, t) > MC_ENABLE_TIMEOUT_MS]:
+            del self._enabled_by[m]
+
+    def _compute_enabled(self, now) -> bool:
+        if self._owner_mac is not None:
+            # Driven by one station: only its enable counts.
+            return self._owner_mac in self._enabled_by
+        # Not driven by anyone yet (fresh boot, or no controller assigned):
+        # any station enabling us counts, as with a single dongle. Without
+        # joystick frames the motors stay at neutral regardless.
+        return len(self._enabled_by) > 0
+
+    def _obeys(self, mac) -> bool:
+        """Whether a field-wide broadcast from this dongle applies to us."""
+        return self._owner_mac is None or mac == self._owner_mac
+
+    def _handle_enable(self, mac, data):
         if len(data) < struct.calcsize(_FMT_ENABLE):
             return
         _, enabled, target_mac = struct.unpack(_FMT_ENABLE, data[: struct.calcsize(_FMT_ENABLE)])
         if target_mac == _BROADCAST or target_mac == self._mac:
-            self._enabled = enabled != 0
-            if self._enabled:
-                self._last_enable_ms = time.ticks_ms()
+            # Recorded per dongle, so one station's disable cannot cancel
+            # another's enable; _compute_enabled() decides whose counts.
+            if enabled != 0:
+                self._enabled_by[mac] = time.ticks_ms()
+            else:
+                self._enabled_by.pop(mac, None)
+            # Apply now rather than at the next update(), so a disable from
+            # the owner stops the robot before any later frame in this drain.
+            self._enabled = self._compute_enabled(time.ticks_ms())
+            if not self._enabled:
+                self._zero_inputs()
 
-    def _handle_joystick(self, data):
+    def _handle_joystick(self, mac, data):
         n = struct.calcsize(_FMT_JOYSTICK)
         if len(data) < n:
+            return
+        # A dongle only sends joystick to a robot it has paired, so the sender
+        # is driving us. If two stations have both paired this robot, the one
+        # already driving keeps it; the other takes over once it goes stale or
+        # stops enabling us.
+        if self._owner_mac != mac:
+            owner = self._owner_mac
+            if owner is not None and not self._joystick_stale and owner in self._enabled_by:
+                return
+            self._owner_mac = mac
+            self._enabled = self._compute_enabled(time.ticks_ms())
+        if not self._enabled:
             return
         (_, _seq, lx, ly, rx, ry, lt, rt, buttons, _aux) = struct.unpack(_FMT_JOYSTICK, data[:n])
         self._axis_lx = lx
@@ -478,6 +570,11 @@ class CommModule:
             return
         _, limit_milli = struct.unpack(_FMT_SET_SPEED_LIMIT, data[:n])
 
+        # Another station's field-wide cap is not ours to follow. Still ack, so
+        # that station sees the limit actually in force here.
+        if not self._obeys(mac):
+            self._send_speed_limit_ack(mac)
+            return
         self._speed_limit = _clamp(limit_milli / 1000.0, _SPEED_LIMIT_MIN, _SPEED_LIMIT_MAX)
         self._send_speed_limit_ack(mac)
 
@@ -505,10 +602,11 @@ class CommModule:
         except OSError:
             return False
 
-    def _link_target(self) -> bytes:
-        """Where robot -> station frames go: the dongle once we have heard from
-        it, else broadcast."""
-        return self._dongle_mac if self._dongle_mac is not None else _BROADCAST
+    def _link_targets(self):
+        """Where robot -> station frames go: every dongle heard recently, else
+        broadcast. Unicast rather than one broadcast so each gets the MAC-level
+        retries a broadcast does not."""
+        return list(self._dongles) if self._dongles else [_BROADCAST]
 
     def _send_neutral_ack(self, target):
         """Report the neutrals actually in force (post-clamp) to the station."""
@@ -543,7 +641,7 @@ class CommModule:
         )
         self._send(mac, resp)
 
-    def _send_heartbeat(self):
+    def _send_heartbeat(self, target):
         name = self._robot_id.encode()[:MC_ROBOT_ID_MAX]
         hb = struct.pack(
             _FMT_HEARTBEAT,
@@ -554,4 +652,4 @@ class CommModule:
             0xFF,  # battery unknown
             1 if self._enabled else 0,
         )
-        self._send(self._link_target(), hb)
+        self._send(target, hb)

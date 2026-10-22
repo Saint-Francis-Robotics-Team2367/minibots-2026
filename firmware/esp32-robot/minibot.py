@@ -98,6 +98,17 @@ _SLEW_MAX_DT_MS = 50
 # The global speed limit that bounds every motor command lives in comm_module.py
 # (_SPEED_LIMIT_MIN/_MAX); _slew() reads it through self.comm.get_speed_limit().
 
+# --- Radio channel ---
+# Every robot runs on the dongle's channel, whatever main.py asks for. The
+# channel used to be a main.py setting, and robots still carrying an old main.py
+# with channel=6 sat on a channel no dongle listens on: invisible to every
+# driver station, with nothing on the robot saying why. A channel is a property
+# of the field, not of one robot, so it is fixed here in the library -- the same
+# reasoning as _SLEW_PER_S. MinibotConfig.channel is accepted and ignored.
+# Keep in sync with CONFIG_MINICORE_WIFI_CHANNEL in
+# firmware/esp32s3-dongle/main/minicore_app.c.
+_CHANNEL = 3
+
 
 def _clamp(v, lo, hi):
     return lo if v < lo else hi if v > hi else v
@@ -134,10 +145,13 @@ class Minibot:
         self._left_pin = config.left_motor_pin
         self._right_pin = config.right_motor_pin
 
+        if config.channel != _CHANNEL:
+            print("main.py asks for channel %d; using channel %d (the dongle's)" % (config.channel, _CHANNEL))
+
         # Create the communication module to handle WiFi, ESP-NOW, and protocol
         self.comm = CommModule(
             config.robot_id,
-            config.channel,
+            _CHANNEL,
             config.neutral_left_us,
             config.neutral_right_us,
         )

@@ -99,9 +99,10 @@ Open `main.py`. The `Minibot` object gives you everything:
 | Motors (−1.0..1.0) | `drive_left_motor(v)`, `drive_right_motor(v)`, `stop_all_motors()` |
 | Forget saved trim | **Clear saved calibration** button at <https://minibots.team2367.org/code-robot>, or `clear_calibration()` from the REPL — see below |
 
-Set your robot's **name**, **motor pins**, and **Wi-Fi channel** in the
-`Minibot(...)` line at the top of `main.py`. The channel must match the dongle
-(default `3`).
+Set your robot's **name** and **motor pins** in the `MinibotConfig(...)` line
+at the top of `main.py`. The Wi-Fi channel is fixed at `3` by `minibot.py`
+(`_CHANNEL`) to match the dongle; a `channel=` in `main.py` is ignored, so old
+robots still carrying `channel=6` come up on the right channel.
 
 ### Setting neutral from the driver station
 
