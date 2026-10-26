@@ -181,20 +181,31 @@ async function mount(el) {
     { capture: true },
   );
 
+  // At most one frame is ever queued. update() inside draw() fires "change"
+  // whenever the camera moves, so a change listener that queued a frame of its
+  // own on top of draw()'s re-queue scheduled two frames per frame: the queue
+  // doubled every tick until the browser was rendering thousands of frames a
+  // second and the whole machine lagged. Changes raised by draw() itself are
+  // ignored here; only the user's own input (start of a drag, a wheel) queues.
   let visible = true;
   let frame = 0;
-  const draw = () => {
-    frame = 0;
-    // update() returns true while damping or the turntable is still moving.
-    const moving = controls.update();
-    renderer.render(scene, camera);
-    if ((moving || controls.autoRotate) && visible) frame = requestAnimationFrame(draw);
-  };
+  let drawing = false;
   const request = () => {
     if (!frame) frame = requestAnimationFrame(draw);
   };
+  const draw = () => {
+    frame = 0;
+    drawing = true;
+    // update() returns true while damping or the turntable is still moving.
+    const moving = controls.update();
+    drawing = false;
+    renderer.render(scene, camera);
+    if ((moving || controls.autoRotate) && visible) request();
+  };
 
-  controls.addEventListener("change", request);
+  controls.addEventListener("change", () => {
+    if (!drawing) request();
+  });
   controls.addEventListener("start", () => {
     controls.autoRotate = false;
     el.dataset.touched = "true";
