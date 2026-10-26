@@ -7,7 +7,7 @@
     <title>MiniCore — Wiring the robot</title>
     <meta
       name="description"
-      content="How to wire a Minibot: the Rev A wiring diagram for battery, breaker, power distribution, SPARK controllers, motors and the MiniCore, plus a 3D model of the board."
+      content="How to wire a Minibot: power flow from battery to breaker, fuse block, SPARK controllers and motors; the MiniCore PCB; which port drives which wheel; grounds, first power-on checks, brownouts and the parts list."
     />
     <link rel="canonical" href="https://minibots.team2367.org/docs/wiring" />
 
@@ -112,22 +112,20 @@
         <main class="doc__body">
           <h1>Wiring the robot</h1>
           <p class="doc__lead">
-            Connecting it all up: the battery, the ESCs, the motors and the ESP32 — and
-            which GPIO pin ends up driving which wheel.
+            Connecting it all up: the batteries, the breaker, the power distribution
+            board, the SPARK motor controllers, the motors and the MiniCore — and which
+            port ends up driving which wheel.
           </p>
 
-          <!-- Still no pin numbers in the prose: a guessed pinout on a wiring page
-               is the one kind of wrong that destroys a board. The only port
-               numbers on this page are the ones the team's own Rev A diagram
-               shows, and the caveat it prints about pin order is repeated here
-               rather than left in small type inside the image. -->
-          <div class="alert" data-kind="info">
-            <strong>The written guide isn't finished yet.</strong> The diagram below is the
-            team's Rev A drawing, redrawn from the whiteboard sketch. Its signal pin order
-            (red / black / blue) is as sketched: confirm it against the SPARK signal header
-            before you crimp anything, and ask a mentor if your parts don't match.
-            <a href="/docs/programming">Programming the robot</a> explains how ports are
-            named in code once yours are wired.
+          <!-- Every fact below comes from the team's Rev A diagram, the MiniCore
+               board model, the library code, or a mentor's answer. Anything none of
+               them settles is a .gap note in place, not a guess: a guessed
+               pinout or polarity on a wiring page is the one kind of wrong that
+               destroys a board. Delete each note once a mentor has answered it. -->
+          <div class="gap">
+            <span class="gap__tag">To fill in</span>Dashed notes like this one mark what
+            the diagram, the board model and the library code don't say. Each needs a
+            mentor's answer before this guide is complete.
           </div>
 
           <h2>Wiring diagram</h2>
@@ -148,7 +146,7 @@
                   height="2480"
                   loading="lazy"
                   decoding="async"
-                  alt="Wiring diagram. Two 7.6 V LiPo batteries in parallel run through the main breaker into the power distribution board's 7.6 V input. Its 5 A slot powers the MiniCore; two 20 A slots power SPARK A and SPARK B. MiniCore port 17 carries signal to SPARK A, which drives motor A; port 16 carries signal to SPARK B, which drives motor B. Ports 18 and 19 are open, and the antenna connects to the MiniCore's ANT port. Red wires are positive, black negative, blue signal."
+                  alt="Wiring diagram. Two 7.6 V LiPo batteries in parallel run through the main breaker into the 7.6 V IN terminal on top of the power distribution board. Its 5 A slot powers the MiniCore; two 20 A slots power SPARK A and SPARK B. The battery negative and every device's ground meet on the board's GND OUT terminals along the bottom. MiniCore port 16 carries signal to SPARK B, which drives motor B; port 17 carries signal to SPARK A, which drives motor A. Each signal port's pins are GND, +5 V and signal, left to right. Ports 18 and 19 are open, and the antenna connects to the ANT connector on the ESP32 module. Red wires are positive, black negative, blue signal."
                 />
               </picture>
             </a>
@@ -162,12 +160,30 @@
             </figcaption>
           </figure>
 
-          <h2>The MiniCore board in 3D</h2>
+          <h2>The MiniCore board</h2>
           <p>
-            The ESP32 controller everything above connects to. Turn it to find the power
-            input, the antenna connector and the signal header ports before you plug
-            anything in.
+            The controller everything above connects to: a carrier PCB that an ESP32-32U
+            board plugs into, inside a printed case. Turn the model to find, before you plug
+            anything in:
           </p>
+          <ul>
+            <li>
+              <strong>Four 3-pin signal ports</strong> along one edge, labelled
+              <strong>16, 17, 18, 19</strong> on the lid. These are where the SPARK signal
+              cables plug in.
+            </li>
+            <li>
+              <strong>The power input</strong>, the slot marked <strong>+ −</strong> on the
+              lid. This is where the 5&nbsp;A feed from the fuse block lands, on the
+              buck converter's <strong>IN+</strong> and <strong>IN−</strong>.
+            </li>
+            <li>
+              <strong>The round window and the button</strong> in its centre. The library
+              runs a 12-LED NeoPixel ring on GPIO&nbsp;14 and reads a push button on
+              GPIO&nbsp;13; the ring shows connection status, and the button switches the
+              OLED's display mode.
+            </li>
+          </ul>
 
           <figure class="fig">
             <div
@@ -185,68 +201,528 @@
             </figcaption>
           </figure>
 
-          <h2>What this page will cover</h2>
-          <p>The outline below is what the finished guide will walk through.</p>
+          <h3>On the PCB</h3>
+          <p>
+            Everything on the MiniCore runs from one on-board <strong>DC-DC buck
+            converter</strong>, an LM2596S module with screw terminals and a small
+            7-segment display. It takes the 7.6&nbsp;V battery feed on IN+ / IN− and turns
+            it down to 5.5&nbsp;V on OUT+ / OUT−, which powers the ESP32, the OLED, the
+            NeoPixel ring and the +5&nbsp;V pin of every signal port.
+          </p>
+          <ul>
+            <li>
+              <strong>ESP32</strong> — the ESP32-32U board sits on the two long header
+              rows, with its USB port on the left edge of the case.
+            </li>
+            <li>
+              <strong>OLED</strong> — a 4-pin header in the top-left corner. The screen
+              plugs straight onto the PCB; there's nothing to wire.
+            </li>
+            <li>
+              <strong>NeoPixels</strong> — the ring's VIN, GND, DIN and DOUT pads, with the
+              button (S1) in its centre.
+            </li>
+            <li><strong>Ports 16–19</strong> — along the bottom edge.</li>
+          </ul>
 
-          <ul class="plan">
+          <figure class="fig">
+            <a class="fig__plate" href="/assets/diagrams/pcb-render.png">
+              <picture>
+                <source srcset="/assets/diagrams/pcb-render.webp" type="image/webp" />
+                <img
+                  src="/assets/diagrams/pcb-render.png"
+                  width="1236"
+                  height="1180"
+                  loading="lazy"
+                  decoding="async"
+                  alt="Rendered top view of the MiniCore PCB. The DC-DC buck converter footprint fills the top right, with IN− and IN+ on its right edge and OUT− and OUT+ on its left. The OLED screen's 4-pin header is in the top-left corner. The ESP32 sits on two long header rows across the middle, its USB port on the left side. The NeoPixel ring, with VIN, GND, DIN and DOUT pads and the S1 button in its centre, is in the bottom right. Signal ports 16, 17, 18 and 19 run along the bottom edge."
+                />
+              </picture>
+            </a>
+            <figcaption class="fig__cap">
+              <span class="fig__name">MiniCore PCB · v1</span>
+              <span class="fig__what">Top view, silkscreen labels only.</span>
+              <a class="fig__act" href="/assets/diagrams/pcb-render.png">Open full size</a>
+            </figcaption>
+          </figure>
+
+          <figure class="fig">
+            <a class="fig__plate" href="/assets/diagrams/pcb-layout.png">
+              <picture>
+                <source srcset="/assets/diagrams/pcb-layout.webp" type="image/webp" />
+                <img
+                  src="/assets/diagrams/pcb-layout.png"
+                  width="980"
+                  height="954"
+                  loading="lazy"
+                  decoding="async"
+                  alt="PCB layout view of the MiniCore with copper traces shown. Red top-layer traces run from the buck converter's OUT+ to the ESP32 header, the OLED header, the NeoPixel VIN pad and the middle pin of each signal port 16 to 19. Thinner traces connect the ESP32 header to the outer pin of each port and to the NeoPixel DIN pad. The board is marked MiniCore (developed for Minibots), v1, August 10, 2026."
+                />
+              </picture>
+            </a>
+            <figcaption class="fig__cap">
+              <span class="fig__name">MiniCore PCB · v1 layout</span>
+              <span class="fig__what">Copper traces: the thick red ones carry the buck converter's output.</span>
+              <a class="fig__act" href="/assets/diagrams/pcb-layout.png">Open full size</a>
+            </figcaption>
+          </figure>
+
+          <h3>The antenna</h3>
+          <p>
+            The ESP32-32U has no antenna on the board itself. It has a
+            <strong>u.FL connector</strong> instead, and the external antenna plugs into
+            that. A u.FL connector is tiny and only clicks on when pressed squarely down,
+            so seat it before you close the case.
+          </p>
+          <p>
+            Run the antenna cable <strong>out of the thin slot in the side of the
+            case</strong>. Don't run it through the hole above the connector: that hole is
+            for pushing a tool through to check the u.FL is seated while you debug.
+          </p>
+
+          <h2>How power flows</h2>
+          <p>
+            Have this path in your head before you connect anything. Power goes one way,
+            from the batteries outward, and every black wire comes back to the same place:
+          </p>
+          <ol>
+            <li>Two 7.6&nbsp;V LiPo packs, joined in parallel.</li>
+            <li>The <strong>main breaker</strong> — the robot's power switch.</li>
             <li>
-              <span class="plan__name">How power flows</span>
-              <span class="plan__what"
-                >Battery to ESCs to motors, and where the ESP32 gets its supply — the map
-                to have in your head before you connect anything.</span
-              >
+              The <strong>power distribution board</strong> (PDB), at its 7.6&nbsp;V input.
+              It's a basic 12&nbsp;V fuse block; 7.6&nbsp;V is well inside what it
+              takes.
             </li>
             <li>
-              <span class="plan__name">Battery and connectors</span>
-              <span class="plan__what"
-                >Which connector goes where, polarity, and the switch.</span
-              >
+              Out of the PDB through one fused slot per device: a <strong>5&nbsp;A</strong>
+              fuse to the MiniCore, a <strong>20&nbsp;A</strong> fuse to each SPARK.
+            </li>
+            <li>Each SPARK to its own motor.</li>
+          </ol>
+          <p>
+            The MiniCore never powers a motor. It only sends each SPARK a signal saying how
+            fast to turn, and the SPARK takes the current it needs from its own 20&nbsp;A
+            slot. All power wiring — battery, breaker, PDB, SPARKs and motors — is
+            <strong>12–14&nbsp;AWG</strong>.
+          </p>
+
+          <div class="doc__scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>From</th>
+                  <th>To</th>
+                  <th>Wire</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Battery packs <strong>+</strong> (joined)</td>
+                  <td>Main breaker <strong>IN</strong></td>
+                  <td>Red</td>
+                </tr>
+                <tr>
+                  <td>Main breaker <strong>OUT</strong></td>
+                  <td>PDB <strong>7.6&nbsp;V IN</strong> (top edge)</td>
+                  <td>Red</td>
+                </tr>
+                <tr>
+                  <td>Battery packs <strong>−</strong> (joined)</td>
+                  <td>PDB <strong>GND OUT</strong> (bottom edge)</td>
+                  <td>Black</td>
+                </tr>
+                <tr>
+                  <td>PDB slot 2 (5&nbsp;A) and GND OUT</td>
+                  <td>MiniCore <strong>+ −</strong></td>
+                  <td>Red and black</td>
+                </tr>
+                <tr>
+                  <td>PDB slot 3 (20&nbsp;A) and GND OUT</td>
+                  <td>SPARK A <strong>V+</strong> and <strong>GND</strong></td>
+                  <td>Red and black</td>
+                </tr>
+                <tr>
+                  <td>PDB slot 6 (20&nbsp;A) and GND OUT</td>
+                  <td>SPARK B <strong>V+</strong> and <strong>GND</strong></td>
+                  <td>Red and black</td>
+                </tr>
+                <tr>
+                  <td>SPARK A <strong>M+</strong> / <strong>M−</strong></td>
+                  <td>Motor A</td>
+                  <td>Red and black</td>
+                </tr>
+                <tr>
+                  <td>SPARK B <strong>M+</strong> / <strong>M−</strong></td>
+                  <td>Motor B</td>
+                  <td>Red and black</td>
+                </tr>
+                <tr>
+                  <td>MiniCore port 17</td>
+                  <td>SPARK A <strong>SIG</strong></td>
+                  <td>Signal cable</td>
+                </tr>
+                <tr>
+                  <td>MiniCore port 16</td>
+                  <td>SPARK B <strong>SIG</strong></td>
+                  <td>Signal cable</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>PDB slots 1, 4 and 5 are empty on this robot.</p>
+
+          <h2>Battery and connectors</h2>
+          <p>
+            The two packs sit side by side in <strong>parallel</strong>: + to +, − to −.
+            That keeps the robot at 7.6&nbsp;V and doubles how long it runs, rather than
+            doubling the voltage. A <strong>2-to-1 parallel T-plug harness</strong> does
+            the joining: both packs plug into its two inputs, and its single output's + goes
+            to the breaker and − to the PDB's GND OUT.
+          </p>
+          <ul>
+            <li>
+              <strong>Only join packs at the same charge.</strong> Two packs at different
+              voltages, connected in parallel, push current into each other with nothing
+              to limit it. Charge both fully, or check them with a meter, before you
+              connect them.
             </li>
             <li>
-              <span class="plan__name">ESCs to motors</span>
-              <span class="plan__what"
-                >The three-wire motor connections, and what to do when a wheel turns the
-                wrong way.</span
-              >
+              <strong>Keep the joined voltage above 7&nbsp;V.</strong> Measure it at the
+              harness output. Below 7&nbsp;V the motors are short of power and the robot is
+              more likely to brown out: charge the packs before you drive.
             </li>
             <li>
-              <span class="plan__name">ESC signal wires to the ESP32</span>
-              <span class="plan__what"
-                >Which GPIO pins carry the signal, and how they line up with the
-                <code>left_motor_pin</code> and <code>right_motor_pin</code> settings in
-                your code.</span
-              >
+              <strong>The breaker is the switch.</strong> It's rated to 120&nbsp;A, so it
+              protects the wiring as a whole; the fuses protect each device. Leave it off
+              whenever you are wiring, and flip it on only once the checks at the end of this page pass.
             </li>
             <li>
-              <span class="plan__name">Grounds</span>
-              <span class="plan__what"
-                >Where they tie together, and why a missing one gives you a robot that
-                twitches for no visible reason.</span
-              >
-            </li>
-            <li>
-              <span class="plan__name">The optional OLED</span>
-              <span class="plan__what"
-                >Its two I²C wires, and how to turn it off in code if you aren't fitting
-                one.</span
-              >
-            </li>
-            <li>
-              <span class="plan__name">Check before first power-on</span>
-              <span class="plan__what"
-                >What to inspect and measure before the battery goes in — the step that
-                catches the mistakes that let smoke out.</span
-              >
-            </li>
-            <li>
-              <span class="plan__name">When it browns out</span>
-              <span class="plan__what"
-                >Bulk capacitance across the ESC supply and battery connector checks. The
-                library already ramps the motors to bound current draw, but that cannot fix
-                wiring that couldn't supply it.</span
-              >
+              <strong>Polarity is red&nbsp;+, black&nbsp;−, everywhere.</strong> Reversing
+              it at the MiniCore or a SPARK can destroy it the moment the breaker closes.
             </li>
           </ul>
+
+          <h2>Motor controllers to motors</h2>
+          <p>
+            Each SPARK has two motor outputs, <strong>M+</strong> and <strong>M−</strong>,
+            that go to its motor's two leads. SPARK&nbsp;A drives motor&nbsp;A; SPARK&nbsp;B
+            drives motor&nbsp;B. On the input side, <strong>V+</strong> and
+            <strong>GND</strong> come from the PDB and <strong>SIG</strong> comes from the
+            MiniCore.
+          </p>
+          <p>
+            <strong>If a wheel turns the wrong way</strong>, there are two fixes, and you
+            only need one of them:
+          </p>
+          <ul>
+            <li>
+              Swap that motor's two leads at the SPARK's M+ and M− (breaker off first).
+            </li>
+            <li>
+              Or leave the wires alone and flip the sign in your code: change
+              <code>bot.drive_left_motor(-bot.get_left_y())</code> to
+              <code>bot.drive_left_motor(bot.get_left_y())</code>, and the same for the
+              right side.
+            </li>
+          </ul>
+          <p>
+            If a wheel creeps while the sticks are centred, that is neutral calibration,
+            not wiring: <a href="/docs/programming">Programming the robot</a> covers
+            <code>neutral_left_us</code> and <code>neutral_right_us</code>.
+          </p>
+
+          <h2 id="signal">Signal wires to the MiniCore</h2>
+          <p>
+            Each SPARK gets one 3-wire signal cable from a MiniCore port to its
+            <strong>SIG</strong> header. Each port has three pins, left to right:
+          </p>
+          <ol>
+            <li><strong>GND</strong> — ground, shared with the SPARK.</li>
+            <li><strong>+5&nbsp;V</strong> — power out of the MiniCore.</li>
+            <li><strong>Signal</strong> — the PWM pulse that sets the motor's speed.</li>
+          </ol>
+          <p>
+            "Left to right" is the way the diagram's signal detail draws the header.
+            The SPARK only needs <strong>GND</strong> and <strong>signal</strong>: the
+            +5&nbsp;V pin is there for servo motors, which take their power from the
+            port. The diagram draws all three wires, but you can leave +5&nbsp;V off a
+            SPARK's cable.
+          </p>
+          <p>
+            Ports 16, 17, 18 and 19 are GPIO&nbsp;16, 17, 18 and 19: the number on the lid
+            is the number you put in your code. The diagram's wiring lines up with the
+            starter <code>main.py</code> like this:
+          </p>
+
+          <div class="doc__scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Port</th>
+                  <th>Controller</th>
+                  <th>Motor</th>
+                  <th>Setting in the starter code</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>16</td>
+                  <td>SPARK B</td>
+                  <td>Motor B</td>
+                  <td><code>left_motor_pin=16</code></td>
+                </tr>
+                <tr>
+                  <td>17</td>
+                  <td>SPARK A</td>
+                  <td>Motor A</td>
+                  <td><code>right_motor_pin=17</code></td>
+                </tr>
+                <tr>
+                  <td>18</td>
+                  <td colspan="3">Open</td>
+                </tr>
+                <tr>
+                  <td>19</td>
+                  <td colspan="3">Open</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            So with the starter code, motor&nbsp;B drives as the left side and
+            motor&nbsp;A as the right. Which side of the chassis each motor sits on doesn't
+            matter: if the robot steers the wrong way, swap the two numbers in
+            <code>MinibotConfig(...)</code> rather than the cables. A robot can
+            use ports 18 and 19 instead — set the pins to match whichever ports you used.
+          </p>
+          <p>
+            The library drives exactly two motors, so the open ports have nothing to
+            control yet. Don't move a motor to GPIO&nbsp;13, 14, 21 or 22 either: the
+            library already uses those for the button, the LED ring and the OLED.
+          </p>
+
+          <p>
+            The SPARK's own signal header has its own pin order, which isn't necessarily
+            the MiniCore's. Look it up in the REV SPARK user manual — or the manual for
+            whichever motor controller you're using — and land GND and signal on the
+            matching pins at that end.
+          </p>
+
+          <h2>Grounds</h2>
+          <p>
+            Every black wire returns to the PDB's <strong>GND OUT</strong> terminals
+            along its bottom edge: the batteries', the MiniCore's, and each SPARK's. The signal cable carries a ground too, on the port's
+            <strong>GND</strong> pin, and that wire matters as much as the signal.
+          </p>
+          <p>
+            A SPARK reads the signal as a voltage <em>relative to its ground</em>. If the
+            MiniCore and the SPARK don't share a ground, the SPARK has nothing solid to
+            measure against, and electrical noise from the motors reads as a command. The
+            result is a robot that twitches or creeps for no reason you can see. Check
+            every ground connection before you go looking in the code.
+          </p>
+
+          <h2>The OLED</h2>
+          <p>
+            The OLED plugs straight onto its 4-pin header on the MiniCore PCB, so there is
+            nothing to wire. The library drives it as an SSD1306 over I²C: clock on
+            <strong>GPIO&nbsp;22</strong> and data on <strong>GPIO&nbsp;21</strong>, at
+            address <code>0x3C</code>, 128 × 32 pixels. Its first line always shows the
+            robot's name; <a href="/docs/programming">Programming the robot</a> covers
+            writing the second.
+          </p>
+          <p>
+            If you aren't fitting one, pass <code>display_enabled=False</code> to
+            <code>MinibotConfig(...)</code>. The robot drives either way; the setting just
+            stops the library looking for a screen.
+          </p>
+
+          <h2>Check before first power-on</h2>
+          <p>
+            With the breaker <strong>off</strong> and the wheels off the ground, go through
+            this list. It catches the mistakes that let smoke out.
+          </p>
+          <ol>
+            <li>
+              Trace every red wire against the table above. Each one ends on a
+              <strong>+</strong>, <strong>V+</strong> or <strong>M+</strong>.
+            </li>
+            <li>
+              With a multimeter on continuity, check there is <strong>no</strong>
+              connection between + and − at the PDB input, at the MiniCore's power input,
+              and at each SPARK's V+ and GND. A beep there is a short: find it before you
+              go on.
+            </li>
+            <li>
+              Check the MiniCore is on the <strong>5&nbsp;A</strong> fuse and each SPARK on
+              a <strong>20&nbsp;A</strong> fuse.
+            </li>
+            <li>
+              Pull gently on every crimp and screw terminal. Nothing comes loose, and no
+              bare strands stick out to touch a neighbour.
+            </li>
+            <li>
+              Check each signal cable is in the right port, the right way round, and fully
+              seated at both ends.
+            </li>
+            <li>
+              Measure both battery packs, and check they read the same before you join
+              them. Joined, they should read above 7&nbsp;V.
+            </li>
+            <li>
+              Check the MiniCore's buck converter is set to <strong>5.5&nbsp;V</strong>
+              (see <a href="#brownout">When it browns out</a>).
+            </li>
+            <li>
+              Flip the breaker on. The motors should stay still: the library starts the
+              signals at neutral, and the starter code keeps them there until the driver
+              station enables the robot. If a wheel spins now, flip the breaker off and
+              recheck the signal cables.
+            </li>
+          </ol>
+
+          <h2 id="brownout">When it browns out</h2>
+          <p>
+            A brownout is the supply sagging so far that the ESP32 resets. From the driver
+            station it doesn't look like a reset — it looks like the robot dropping its
+            connection, because a reboot takes about three seconds. It usually happens on
+            a hard reversal or when both motors start at once.
+          </p>
+          <p>
+            <strong>The fix is the buck converter's output voltage.</strong> Set it to
+            <strong>5.5&nbsp;V</strong> rather than 5&nbsp;V. That extra half volt is
+            headroom: when the motors pull the battery down, the ESP32's supply dips
+            without dropping low enough to reset it. To set it, measure across the buck
+            converter's OUT+ and OUT− with a multimeter while the robot is powered, and
+            turn the <strong>gold screw</strong> on the module until it reads
+            5.5&nbsp;V. Use the meter, not the module's 7-segment display: the display
+            shows the <em>input</em> voltage.
+          </p>
+          <p>
+            The library helps too: it ramps the motors toward the speed you ask for, so a
+            stick slammed from full forward to full reverse doesn't draw twice the stall
+            current. If the robot still drops out under load, check:
+          </p>
+          <ul>
+            <li>the packs are charged, and the joined voltage is above 7&nbsp;V;</li>
+            <li>both packs are plugged into the T-plug harness;</li>
+            <li>
+              the battery connector and every PDB terminal are tight — a loose one drops
+              voltage only under load;
+            </li>
+            <li>the power wiring is 12–14&nbsp;AWG, not thinner.</li>
+          </ul>
+
+          <h2>Parts list</h2>
+          <p>
+            Everything one robot's wiring uses, as drawn on this page. Most of it comes
+            from Amazon.
+          </p>
+
+          <div class="doc__scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Part</th>
+                  <th>Qty</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>MiniCore PCB and printed case</td>
+                  <td>1</td>
+                  <td>Case, board and lid as in the 3D model.</td>
+                </tr>
+                <tr>
+                  <td>ESP32-32U board</td>
+                  <td>1</td>
+                  <td>The u.FL antenna connector is on this board.</td>
+                </tr>
+                <tr>
+                  <td>u.FL antenna</td>
+                  <td>1</td>
+                  <td>Cable leaves through the thin slot in the side of the case.</td>
+                </tr>
+                <tr>
+                  <td>LM2596S buck converter module, with display</td>
+                  <td>1</td>
+                  <td>Mounts on the MiniCore PCB. Set to 5.5&nbsp;V with the gold screw.</td>
+                </tr>
+                <tr>
+                  <td>SSD1306 OLED, 128 × 32, I²C</td>
+                  <td>1</td>
+                  <td>Plugs onto the PCB's OLED header.</td>
+                </tr>
+                <tr>
+                  <td>NeoPixel ring, 12 LEDs</td>
+                  <td>1</td>
+                  <td>Mounts on the PCB.</td>
+                </tr>
+                <tr>
+                  <td>Push button</td>
+                  <td>1</td>
+                  <td>S1, in the centre of the ring.</td>
+                </tr>
+                <tr>
+                  <td>REV SPARK motor controller</td>
+                  <td>2</td>
+                  <td>Or another PWM motor controller; check its signal pin order.</td>
+                </tr>
+                <tr>
+                  <td>Drive motor</td>
+                  <td>2</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>7.6&nbsp;V LiPo pack</td>
+                  <td>2</td>
+                  <td>Wired in parallel.</td>
+                </tr>
+                <tr>
+                  <td>2-to-1 parallel T-plug harness</td>
+                  <td>1</td>
+                  <td>Joins the two packs.</td>
+                </tr>
+                <tr>
+                  <td>Main breaker, 120&nbsp;A</td>
+                  <td>1</td>
+                  <td>The robot's power switch.</td>
+                </tr>
+                <tr>
+                  <td>12&nbsp;V fuse block</td>
+                  <td>1</td>
+                  <td>The power distribution board.</td>
+                </tr>
+                <tr>
+                  <td>5&nbsp;A fuse</td>
+                  <td>1</td>
+                  <td>MiniCore slot.</td>
+                </tr>
+                <tr>
+                  <td>20&nbsp;A fuse</td>
+                  <td>2</td>
+                  <td>One per SPARK.</td>
+                </tr>
+                <tr>
+                  <td>12–14&nbsp;AWG wire, red and black</td>
+                  <td>—</td>
+                  <td>All power wiring.</td>
+                </tr>
+                <tr>
+                  <td>3-wire signal cable</td>
+                  <td>2</td>
+                  <td>MiniCore port to SPARK signal header.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="gap">
+            <span class="gap__tag">To fill in</span>Amazon links and exact part numbers
+            for each row, the drive motor model, the signal-cable
+            connector type, and the wire length to buy per robot.
+          </div>
 
           <h2>Next</h2>
           <p>

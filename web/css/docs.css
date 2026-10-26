@@ -460,6 +460,35 @@
   color: var(--ink-dim);
 }
 
+/* ── Gap notes ──────────────────────────────────────────────────────────── */
+/* Something the guide needs and its sources (the Rev A diagram, the MiniCore
+   model, the library) don't settle. Each one sits where a student would hit
+   the question, and stays until a mentor answers it and deletes the note. A
+   dashed frame reads as "unfinished" without the alarm of a warn alert, which
+   on this page is kept for the things that break hardware. The text is a
+   sentence, so --ink-dim rather than --ink-mute, for the same 4.5:1 reason as
+   .plan__what. */
+.gap {
+  max-width: 78ch;
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: 0.76rem;
+  line-height: 1.55;
+  color: var(--ink-dim);
+  border: 1px dashed var(--line-bright);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--r);
+}
+
+.gap__tag {
+  margin-right: 0.4rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--warn-text);
+}
+
 /* ── Figures: 3D models and diagrams ────────────────────────────────────── */
 /* A figure is a framed plate with a caption strip under a hairline — the same
    1px-over-ground idiom as .idx, so a figure reads as part of the page rather
