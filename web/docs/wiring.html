@@ -7,7 +7,7 @@
     <title>MiniCore — Wiring the robot</title>
     <meta
       name="description"
-      content="How to wire a Minibot: battery, ESCs, motors and the ESP32. Not yet written."
+      content="How to wire a Minibot: the Rev A wiring diagram for battery, breaker, power distribution, SPARK controllers, motors and the MiniCore, plus a 3D model of the board."
     />
     <link rel="canonical" href="https://minibots.team2367.org/docs/wiring" />
 
@@ -34,6 +34,17 @@
          absolute, so they do not care how deep this file sits. -->
     <link rel="stylesheet" href="../css/core.css" />
     <link rel="stylesheet" href="../css/docs.css" />
+
+    <!-- Resolves the bare "three" specifiers inside the vendored addons. Absolute
+         paths, so it holds wherever the page sits. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/vendor/three/three.module.min.js",
+          "three/addons/": "/vendor/three/addons/"
+        }
+      }
+    </script>
   </head>
   <body data-armed="false" data-link="down">
     <div class="bezel">
@@ -105,17 +116,74 @@
             which GPIO pin ends up driving which wheel.
           </p>
 
-          <!-- Deliberately empty, and it has to read that way rather than as thin
-               content. Explicitly NO pin numbers here: a guessed pinout on a
-               wiring page is the one kind of wrong that destroys a board. The
-               numbers in the template are that robot's config, not a spec. -->
+          <!-- Still no pin numbers in the prose: a guessed pinout on a wiring page
+               is the one kind of wrong that destroys a board. The only port
+               numbers on this page are the ones the team's own Rev A diagram
+               shows, and the caveat it prints about pin order is repeated here
+               rather than left in small type inside the image. -->
           <div class="alert" data-kind="info">
-            <strong>This guide isn't written yet,</strong> and wiring is the wrong place to
-            guess. A pinout invented here could cost you a board, so there are no pin
-            numbers on this page until the real ones are confirmed. Ask a mentor for the
-            current wiring diagram. <a href="/docs/programming">Programming the robot</a> is
-            complete and explains how pins are named in code once yours are wired.
+            <strong>The written guide isn't finished yet.</strong> The diagram below is the
+            team's Rev A drawing, redrawn from the whiteboard sketch. Its signal pin order
+            (red / black / blue) is as sketched: confirm it against the SPARK signal header
+            before you crimp anything, and ask a mentor if your parts don't match.
+            <a href="/docs/programming">Programming the robot</a> explains how ports are
+            named in code once yours are wired.
           </div>
+
+          <h2>Wiring diagram</h2>
+          <p>
+            Two 7.6&nbsp;V LiPo packs in parallel feed the main breaker, then the power
+            distribution board: a 5&nbsp;A slot for the MiniCore and a 20&nbsp;A slot for
+            each SPARK motor controller. Port 17 signals SPARK&nbsp;A (motor&nbsp;A), port
+            16 signals SPARK&nbsp;B (motor&nbsp;B), and ports 18 and 19 stay open.
+          </p>
+
+          <figure class="fig">
+            <a class="fig__plate" href="/assets/diagrams/wiring.png">
+              <picture>
+                <source srcset="/assets/diagrams/wiring.webp" type="image/webp" />
+                <img
+                  src="/assets/diagrams/wiring.png"
+                  width="3840"
+                  height="2480"
+                  loading="lazy"
+                  decoding="async"
+                  alt="Wiring diagram. Two 7.6 V LiPo batteries in parallel run through the main breaker into the power distribution board's 7.6 V input. Its 5 A slot powers the MiniCore; two 20 A slots power SPARK A and SPARK B. MiniCore port 17 carries signal to SPARK A, which drives motor A; port 16 carries signal to SPARK B, which drives motor B. Ports 18 and 19 are open, and the antenna connects to the MiniCore's ANT port. Red wires are positive, black negative, blue signal."
+                />
+              </picture>
+            </a>
+            <figcaption class="fig__cap">
+              <span class="fig__name">MiniCore robot wiring · Rev A</span>
+              <span class="fig__what"
+                >Red&nbsp;(+) and black&nbsp;(−) are 7.6&nbsp;V power; blue is signal. A
+                crossing without a dot is not a connection.</span
+              >
+              <a class="fig__act" href="/assets/diagrams/wiring.png">Open full size</a>
+            </figcaption>
+          </figure>
+
+          <h2>The MiniCore board in 3D</h2>
+          <p>
+            The ESP32 controller everything above connects to. Turn it to find the power
+            input, the antenna connector and the signal header ports before you plug
+            anything in.
+          </p>
+
+          <figure class="fig">
+            <div
+              class="viewer"
+              data-model="/assets/models/minicore.glb"
+              data-label="3D model of the MiniCore controller board. Drag to rotate."
+            >
+              <p class="viewer__status">3D model</p>
+              <span class="viewer__hint" aria-hidden="true">Drag to turn · Ctrl/⌘ + scroll to zoom</span>
+            </div>
+            <figcaption class="fig__cap">
+              <span class="fig__name">MiniCore controller</span>
+              <span class="fig__what">Enclosure, board and lid, drawn apart so the headers and ports are visible.</span>
+              <button type="button" class="fig__act" data-model-reset hidden>Reset view</button>
+            </figcaption>
+          </figure>
 
           <h2>What this page will cover</h2>
           <p>The outline below is what the finished guide will walk through.</p>
@@ -191,5 +259,6 @@
     </div>
 
     <script type="module" src="../js/docs.js"></script>
+    <script type="module" src="../js/model-viewer.js"></script>
   </body>
 </html>

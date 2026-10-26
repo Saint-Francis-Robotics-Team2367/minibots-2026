@@ -50,6 +50,16 @@
         ]
       },
       {
+        "comment": "3D models and diagrams on the docs pages, and the vendored three.js (its LICENSE has no extension for the html|css|js glob to catch). Not content-hashed either, and a revised wiring diagram served an hour stale is a student wiring to the old revision. no-cache still revalidates by ETag, so an unchanged 1 MB model costs a 304, not a re-download.",
+        "source": "/@(assets|vendor)/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
         "source": "/",
         "headers": [
           {

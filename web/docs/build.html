@@ -7,7 +7,7 @@
     <title>MiniCore — Building the robot</title>
     <meta
       name="description"
-      content="How to assemble a Minibot: chassis, drivetrain and mounting. Not yet written."
+      content="How to assemble a Minibot: chassis, drivetrain and mounting, with an interactive 3D model of the chassis assembly."
     />
     <link rel="canonical" href="https://minibots.team2367.org/docs/build" />
 
@@ -34,6 +34,17 @@
          absolute, so they do not care how deep this file sits. -->
     <link rel="stylesheet" href="../css/core.css" />
     <link rel="stylesheet" href="../css/docs.css" />
+
+    <!-- Resolves the bare "three" specifiers inside the vendored addons. Absolute
+         paths, so it holds wherever the page sits. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/vendor/three/three.module.min.js",
+          "three/addons/": "/vendor/three/addons/"
+        }
+      }
+    </script>
   </head>
   <body data-armed="false" data-link="down">
     <div class="bezel">
@@ -117,6 +128,28 @@
             three tools all work. Ask a mentor for the current build instructions.
           </div>
 
+          <h2>The chassis in 3D</h2>
+          <p>
+            The full chassis assembly from the CAD model. Turn it to see how the frame,
+            drivetrain and mounts fit together before you start on the real parts.
+          </p>
+
+          <figure class="fig">
+            <div
+              class="viewer"
+              data-model="/assets/models/chassis.glb"
+              data-label="3D model of the Minibot chassis assembly. Drag to rotate."
+            >
+              <p class="viewer__status">3D model</p>
+              <span class="viewer__hint" aria-hidden="true">Drag to turn · Ctrl/⌘ + scroll to zoom</span>
+            </div>
+            <figcaption class="fig__cap">
+              <span class="fig__name">Chassis assembly</span>
+              <span class="fig__what">Frame, drivetrain and mounts from the CAD assembly.</span>
+              <button type="button" class="fig__act" data-model-reset hidden>Reset view</button>
+            </figcaption>
+          </figure>
+
           <h2>What this page will cover</h2>
           <p>The outline below is what the finished guide will walk through.</p>
 
@@ -173,5 +206,6 @@
     </div>
 
     <script type="module" src="../js/docs.js"></script>
+    <script type="module" src="../js/model-viewer.js"></script>
   </body>
 </html>
