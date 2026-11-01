@@ -17,6 +17,9 @@ import {
   MC_SPEED_LIMIT_MIN,
   MC_SPEED_LIMIT_MAX,
   MC_PROTOCOL_VERSION,
+  MC_HB_FLAG_ENABLED,
+  MC_HB_FLAG_OWNED,
+  MC_HB_FLAG_OWNED_BY_YOU,
 } from "./constants.js";
 import {
   encodeJoystickOut,
@@ -34,7 +37,7 @@ import {
   gamepadToJoystick,
 } from "./protocol.js";
 import { $, log, clearLog } from "./dom.js";
-import { local } from "./store.js";
+import { local, session } from "./store.js";
 import {
   hasWebHID,
   isDongle,
@@ -63,6 +66,16 @@ let attaching = false;
 /** Last discovery request we sent, for the calibration chase's rate limit. */
 let lastDiscoveryMs = 0;
 const SPEED_LIMIT_KEY = "minicore.speedLimit";
+/**
+ * Product name of the dongle this tab last used. Per tab (sessionStorage), so a
+ * reload reconnects each station's window to its own dongle rather than to
+ * whichever one the browser lists first.
+ */
+const DONGLE_PREF_KEY = "minicore.dongle";
+/** Every dongle before protocol v4 reported this exact name (and serial "01"). */
+const LEGACY_DONGLE_NAME = "MiniCore Dongle";
+/** Releases this tab's claim on the open dongle; see claimDongle(). */
+let releaseClaim = null;
 
 /**
  * Cap on normalized motor output, field-wide. Same -1..1 units the robot's
@@ -145,7 +158,58 @@ function batteryText(pct) {
   return pct === undefined || pct === 0xff ? "battery n/a" : `battery ${pct}%`;
 }
 
+/* ── Who is driving a robot ───────────────────────────────────────────────── */
+// Robots fill in status_flags per dongle (MC_HB_FLAG_*). A robot older than the
+// ownership bits sends them as 0, which reads as "nobody is driving me" -- what
+// this page assumed of every robot before the bits existed.
+
+/** This station's dongle is the one driving the robot. */
+const isOurs = (rec) => (rec.flags & MC_HB_FLAG_OWNED_BY_YOU) !== 0;
+/** Some other station is driving it; its enable and limit are not ours to manage. */
+const isForeign = (rec) => (rec.flags & MC_HB_FLAG_OWNED) !== 0 && !isOurs(rec);
+
 /* ── Dongle connection ────────────────────────────────────────────────────── */
+
+function isLegacyDongle(dev) {
+  return (dev.productName || "") === LEGACY_DONGLE_NAME;
+}
+
+/**
+ * Claim a dongle for this tab, so a second tab's auto-connect cannot grab the
+ * same one. A Web Lock rather than a localStorage flag: the browser releases it
+ * when the tab closes or crashes, so a dead tab can never strand a dongle.
+ *
+ * Keyed by product name, which carries the dongle's MAC from v4 firmware on.
+ * Older dongles all share one name, so for them the claim only means "some tab
+ * has a legacy dongle open".
+ *
+ * @returns {Promise<(() => void) | null>} a release function, or null if
+ *   another tab holds it.
+ */
+function claimDongle(dev) {
+  if (typeof navigator === "undefined" || !navigator.locks) {
+    return Promise.resolve(() => {});
+  }
+  return new Promise((resolve) => {
+    navigator.locks
+      .request(`minicore-dongle:${dev.productName || "?"}`, { ifAvailable: true }, (lock) => {
+        if (!lock) {
+          resolve(null);
+          return undefined;
+        }
+        // Held until the returned promise settles, i.e. until release() runs.
+        return new Promise((release) => resolve(release));
+      })
+      .catch(() => resolve(() => {}));
+  });
+}
+
+function dropClaim() {
+  if (releaseClaim) {
+    releaseClaim();
+    releaseClaim = null;
+  }
+}
 
 function setDongleUi(connected) {
   document.body.dataset.link = connected ? "up" : "down";
@@ -171,7 +235,7 @@ function setDongleUi(connected) {
  *
  * @returns {Promise<boolean>} false when a link was already up or coming up.
  */
-async function attachDongle(dev) {
+async function attachDongle(dev, { manual = false } = {}) {
   // The load-time scan and the `connect` event can both fire for one plug-in,
   // and `await dev.open()` is long enough for the second to arrive mid-flight.
   // Without this guard the loser overwrites `device`, leaking the winner's open
@@ -181,16 +245,47 @@ async function attachDongle(dev) {
   }
   attaching = true;
   try {
-    device = await openDongle(dev, onInputReport);
+    const release = await claimDongle(dev);
+    if (!release) {
+      if (!manual) {
+        return false;
+      }
+      if (!isLegacyDongle(dev)) {
+        log(`${dev.productName} is already open in another tab — pick a different dongle`, "err");
+        return false;
+      }
+      // Legacy dongles all share one name, so the claim cannot tell this one
+      // from the dongle the other tab holds. The driver picked it by hand.
+      log("Another tab has a dongle with the same name open — make sure this is a different one", "warn");
+    }
+    releaseClaim = release;
+    try {
+      device = await openDongle(dev, onInputReport);
+    } catch (err) {
+      dropClaim();
+      throw err;
+    }
   } finally {
     attaching = false;
   }
+  session.set(DONGLE_PREF_KEY, device.productName || "");
   setDongleUi(true);
   log(`Dongle connected — ${device.productName || "MiniCore"}`, "go");
+  if (isLegacyDongle(device)) {
+    log(
+      "This dongle's firmware gives every dongle the same name, so two on one computer " +
+        "cannot be told apart — reflash it (scripts/flash-dongle)",
+      "warn",
+    );
+  }
   // This page starts disarmed, but a robot that stayed powered through a reload
   // is still latched enabled from the previous session. Push our state onto the
   // field before the control loop starts, so the UI and the robots agree.
   await broadcastDisable("link opened");
+  // A page that died without releasing its slots (reload, crash, closed tab)
+  // left them paired on the dongle. Start from an empty table so the dongle's
+  // pairings match the slots this page shows: all empty.
+  await unpairAll();
   // A robot that has already met this dongle will not re-announce its
   // calibration on its own, so ask instead of waiting for an announce that is
   // never coming. See requestCalibration().
@@ -215,7 +310,7 @@ async function connectDongle() {
   }
   // Picking a dongle by hand is also how you undo an earlier Disconnect.
   autoReconnect = true;
-  await attachDongle(dev);
+  await attachDongle(dev, { manual: true });
 }
 
 /**
@@ -227,7 +322,8 @@ async function connectDongle() {
  * leaves the first costing exactly one click: requestDevice() is the only call
  * that can create the grant, and it requires a gesture by design.
  *
- * @returns {Promise<"connected" | "none" | "failed">}
+ * @returns {Promise<"connected" | "none" | "busy" | "failed">} "busy": every
+ *   remembered dongle is claimed by another tab.
  */
 async function autoConnect() {
   if (!hasWebHID() || !autoReconnect || (device && device.opened)) {
@@ -240,17 +336,39 @@ async function autoConnect() {
     log(`Could not list remembered devices: ${err}`, "warn");
     return "failed";
   }
-  const dev = devs[0];
-  if (!dev) {
-    return "none";
+  // The dongle this tab used last goes first, so with two stations on one
+  // computer a reload puts each window back on its own dongle. Every other
+  // candidate is tried after it; claimDongle() skips any another tab holds.
+  const pref = session.get(DONGLE_PREF_KEY, "", (raw) => raw);
+  const ordered = [...devs].sort(
+    (a, b) => Number((b.productName || "") === pref) - Number((a.productName || "") === pref),
+  );
+  let failed = false;
+  for (const dev of ordered) {
+    // Another attach (the `connect` event racing the load-time scan) is in
+    // flight; it owns the outcome, and its refusals are not "another tab".
+    if (attaching || (device && device.opened)) {
+      return "none";
+    }
+    try {
+      if (await attachDongle(dev)) {
+        return "connected";
+      }
+    } catch (err) {
+      log(`Auto-connect to ${dev.productName || "dongle"} failed: ${err}`, "warn");
+      failed = true;
+    }
   }
-  try {
-    return (await attachDongle(dev)) ? "connected" : "none";
-  } catch (err) {
-    // Usually another tab already holds it — WebHID allows a single opener.
-    log(`Auto-connect failed: ${err} — use Connect dongle`, "warn");
-    return "failed";
+  if (devs.length && !failed) {
+    log(
+      devs.length === 1
+        ? "The remembered dongle is open in another tab — plug in another and click Connect dongle"
+        : "Every remembered dongle is open in another tab — click Connect dongle to grant another",
+      "warn",
+    );
+    return "busy";
   }
+  return failed ? "failed" : "none";
 }
 
 async function disconnectDongle() {
@@ -264,8 +382,15 @@ async function disconnectDongle() {
   // robot may be latched enabled from an earlier session even when armed is
   // false here. Awaited, because device.close() would abort it in flight.
   await broadcastDisable("link closing");
-  await closeDongle(device, onInputReport);
-  device = null;
+  // Leave the dongle's pairing table empty, as the next page to open it will
+  // expect. A no-op on an unplugged dongle, which is gone with its table.
+  await unpairAll();
+  try {
+    await closeDongle(device, onInputReport);
+  } finally {
+    device = null;
+    dropClaim();
+  }
   for (let i = 0; i < MC_MAX_ROBOTS; i++) {
     pairMac[i] = null;
   }
@@ -284,6 +409,17 @@ function slotRobotName(i) {
 /** Bound to this page's single device slot; hid.js holds the wire logic. */
 async function sendReport(reportId, data) {
   await hidSendReport(device, reportId, data);
+}
+
+/** Clear every slot on the dongle. Failures are ignored: this is housekeeping. */
+async function unpairAll() {
+  for (let i = 0; i < MC_MAX_ROBOTS; i++) {
+    try {
+      await sendReport(MC_HID_RID_UNPAIR, encodeUnpairOut(i));
+    } catch (err) {
+      return;
+    }
+  }
 }
 
 /**
@@ -324,19 +460,50 @@ async function pushSpeedLimit() {
   }
 }
 
-/** Robots whose last ack does not match the limit we are asking for. */
+/**
+ * Robots not known to be holding our limit, among the ones that are our
+ * business. Every robot in the room heartbeats to every dongle it has heard, so
+ * `discovered` holds other stations' robots too; counting them meant nagging
+ * and re-broadcasting forever at robots that, correctly, ignore us.
+ *
+ *   driven by us             must match our limit exactly
+ *   driven by nobody         must be at or under our limit. An undriven robot
+ *                            runs the strictest limit any station asked for, so
+ *                            a lower number is another station's stricter cap,
+ *                            not a missed push, and demanding an exact match
+ *                            would re-push at it forever. It cannot move until a
+ *                            station drives it, and the moment we do it switches
+ *                            to our limit and becomes "driven by us".
+ *   driven by another        not ours to manage; skipped
+ *
+ * A robot older than the ownership bits always reads as "driven by nobody".
+ * The cost is that one left slower than asked is not flagged; faster still is.
+ */
 function robotsOffLimit() {
   const out = [];
   for (const v of discovered.values()) {
+    if (isForeign(v)) {
+      continue;
+    }
     // A robot that has never acked counts. It is either running firmware with
     // no speed limit at all or it has not heard us yet, and both mean "not
     // known to be capped" — which is the thing the driver needs told.
-    if (v.speedLimit === undefined || Math.abs(v.speedLimit - speedLimit) > 0.001) {
+    if (v.speedLimit === undefined) {
+      out.push(v);
+      continue;
+    }
+    const off = isOurs(v)
+      ? Math.abs(v.speedLimit - speedLimit) > 0.001
+      : v.speedLimit > speedLimit + 0.001;
+    if (off) {
       out.push(v);
     }
   }
   return out;
 }
+
+/** Quickest re-push after an ack shows a robot off our limit. */
+const LIMIT_FAST_REASSERT_MS = 500;
 
 function renderSpeedLimit() {
   const capped = speedLimit < MC_SPEED_LIMIT_MAX;
@@ -464,6 +631,17 @@ function onInputReport(e) {
         log(`${rec.id || macKey(sl.mac)}: speed limit ${sl.limit.toFixed(2)}`);
       }
       renderSpeedLimit();
+      // A robot that just rebooted announces itself back at full speed. Cap it
+      // now rather than at the next 2 s re-assert: it can be driven the moment
+      // an armed station's joystick frames reach it.
+      const now = Date.now();
+      if (
+        speedLimit < MC_SPEED_LIMIT_MAX &&
+        now - lastLimitPushMs >= LIMIT_FAST_REASSERT_MS &&
+        robotsOffLimit().includes(rec)
+      ) {
+        pushSpeedLimit();
+      }
     }
   } else if (reportId === MC_HID_RID_DISCOVERY_IN) {
     const d = decodeDiscoveryIn(buf);
@@ -530,6 +708,11 @@ function onInputReport(e) {
 
 function renderArm() {
   const connected = !!(device && device.opened);
+  if (!armed) {
+    // Nothing is at risk any more; the warning has done its job.
+    const warn = document.getElementById("hiddenWarn");
+    if (warn) warn.hidden = true;
+  }
   const pairedCount = pairMac.filter(Boolean).length;
   document.body.dataset.armed = String(armed);
   $("armState").textContent = armed ? "Enabled" : "Disabled";
@@ -801,11 +984,18 @@ function renderSlots() {
     let label = "Empty";
     if (mac) {
       const age = rec ? now - rec.lastSeen : Infinity;
-      // status_flags bit0 is the robot's own view of being enabled.
-      const robotEnabled = !!rec && (rec.flags & 1) !== 0;
+      // The robot's own view of being enabled -- by whoever is driving it,
+      // which is only us when isOurs() says so.
+      const robotEnabled = !!rec && (rec.flags & MC_HB_FLAG_ENABLED) !== 0;
       if (!rec || age > STALE_MS) {
         state = "stale";
         label = "No heartbeat";
+      } else if (isForeign(rec)) {
+        // Our frames reach it but it ignores them: another station's joystick
+        // is driving it. Without saying so, this slot read "Live" (or, while
+        // disarmed, "Still enabled", as if our own disable had failed).
+        state = "stale";
+        label = `Driven by another station · ${batteryText(rec.battery)}`;
       } else if (armed) {
         state = "live";
         label = robotEnabled
@@ -1109,6 +1299,32 @@ window.addEventListener("pagehide", () => {
   renderArm();
   if (wasLive) {
     sendReport(MC_HID_RID_ENABLE, encodeEnable(false, BROADCAST_MAC)).catch(() => {});
+    // Best effort, like the disable: attachDongle() clears the table again
+    // whatever survives, so a page that dies first leaves no lasting ghost.
+    unpairAll().catch(() => {});
+  }
+});
+
+// A hidden tab is a degraded driver station. Chrome throttles its timers to
+// about 1 Hz, so the 100 ms joystick keepalive misses the robot's 250 ms
+// failsafe and the robots stutter, and it may stop delivering gamepad input
+// altogether. With two stations on one computer, the one in the background is
+// the one this bites. Say so loudly, and keep saying so on return.
+const baseTitle = document.title;
+document.addEventListener("visibilitychange", () => {
+  const warn = $("hiddenWarn");
+  if (document.hidden) {
+    if (armed) {
+      document.title = `⚠ HIDDEN while enabled — ${baseTitle}`;
+      warn.hidden = false;
+      log(
+        "This tab was hidden while robots were enabled — background tabs are throttled, " +
+          "so robots stutter or stop. Keep each station's window visible.",
+        "err",
+      );
+    }
+  } else {
+    document.title = baseTitle;
   }
 });
 
@@ -1142,6 +1358,8 @@ if ("hid" in navigator) {
 
 // How long to wait before re-asking a robot that owes us its calibration.
 const CALIB_CHASE_MS = 3000;
+// How often to re-scan for a slot's robot that has gone quiet.
+const QUIET_SCAN_MS = 5000;
 
 // How long to wait before re-broadcasting the speed limit to robots that are not
 // holding it. Slower than the enable re-assert (500 ms) because the limit does
@@ -1185,18 +1403,30 @@ setInterval(() => {
   syncErrThisSec = 0;
   renderSlots();
 
-  // Chase the calibration of any robot that hasn't reported one. Covers the ack
-  // being lost (ESP-NOW does not retry), and a robot that powers up into an
-  // already-running station. Stops asking the moment every robot has answered.
+  // Scan again when one of these is true, at most every CALIB_CHASE_MS:
+  //  - a robot that is our business has not reported its calibration. Covers
+  //    the ack being lost, and a robot powering up into a running station.
+  //    Other stations' robots are skipped; they are not ours to calibrate.
+  //  - a slot's robot has gone quiet. After a reboot a robot only heartbeats to
+  //    dongles that have sent it something, and a disarmed station sends
+  //    nothing on a timer, so without this the slot would sit at "No
+  //    heartbeat" for a robot that is powered and fine. A scan reintroduces us.
   if (device && device.opened && now - lastDiscoveryMs >= CALIB_CHASE_MS) {
     let missing = false;
     for (const v of discovered.values()) {
-      if (v.neutralLeft === undefined) {
+      if (v.neutralLeft === undefined && !isForeign(v)) {
         missing = true;
         break;
       }
     }
-    if (missing) {
+    const quiet = pairMac.some((m) => {
+      const rec = m ? discovered.get(macKey(m)) : null;
+      return m && (!rec || now - rec.lastSeen > STALE_MS);
+    });
+    // A quiet slot may simply be a robot that is switched off, so it is asked
+    // after less often than a missing calibration: every scan is airtime for
+    // every station in the room.
+    if (missing || (quiet && now - lastDiscoveryMs >= QUIET_SCAN_MS)) {
       requestCalibration();
     }
   }

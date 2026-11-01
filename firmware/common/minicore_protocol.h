@@ -38,7 +38,12 @@ extern "C" {
  * dongle_status_t so the web app can tell the driver their dongle firmware is
  * older than the page, rather than leaving them to debug a silent mismatch --
  * which is exactly what a stale trim clamp cost us once already. */
-#define MC_PROTOCOL_VERSION 3u
+#define MC_PROTOCOL_VERSION 4u
+/* v4: no layout changes. Bumped because the station's multi-dongle handling
+ * depends on v4 dongle behaviour: robot reports are queued instead of dropped
+ * when several arrive within one USB poll, the IN endpoint polls at 1 ms, and
+ * each dongle reports a per-chip USB serial and product name. A v3 dongle still
+ * works but loses most scan answers, so the station tells the driver to reflash. */
 
 /* --- USB HID identity (Espressif VID, project-specific PID) --- */
 #define MINICORE_USB_VID 0x303Au
@@ -113,8 +118,19 @@ typedef struct {
     uint8_t robot_id_len;
     char robot_id[MC_ROBOT_ID_MAX];
     uint8_t battery_pct;    /* 0-100 or 0xFF unknown */
-    uint8_t status_flags;
+    uint8_t status_flags;   /* MC_HB_FLAG_*; forwarded by the dongle untouched */
 } heartbeat_packet_t;
+
+/* heartbeat_packet_t.status_flags. Heartbeats are unicast per dongle, so the
+ * robot fills these in for the station it is sending to.
+ *
+ * The dongle never looks at this byte, so adding a bit is a robot upload plus a
+ * web change, never a reflash. A robot that predates bits 1-2 sends them as 0,
+ * which reads as "nobody is driving me" -- the same thing the station assumed
+ * before the bits existed. */
+#define MC_HB_FLAG_ENABLED 0x01u   /* robot is enabled (by its owner, if it has one) */
+#define MC_HB_FLAG_OWNED_BY_YOU 0x02u /* the dongle this heartbeat is addressed to drives me */
+#define MC_HB_FLAG_OWNED 0x04u     /* some dongle is actively driving me */
 
 typedef struct {
     uint8_t type;    /* MC_MSG_DISCOVERY_REQ */

@@ -48,7 +48,13 @@ export const MC_HID_IN_STATUS_LEN = 16;
  * reports the value it was BUILT with; if it differs from this, the dongle is
  * running firmware that predates (or postdates) this page and needs reflashing.
  * Surfacing that beats debugging a silent mismatch. */
-export const MC_PROTOCOL_VERSION = 3;
+export const MC_PROTOCOL_VERSION = 4;
+
+/* heartbeat status_flags — mirrors MC_HB_FLAG_* in minicore_protocol.h. The
+ * robot fills these in per dongle, so OWNED_BY_YOU is about *this* station. */
+export const MC_HB_FLAG_ENABLED = 0x01;
+export const MC_HB_FLAG_OWNED_BY_YOU = 0x02;
+export const MC_HB_FLAG_OWNED = 0x04;
 
 /* Allowed range for a neutral set from this page — the full 1–2 ms RC window.
  * Mirrors MC_NEUTRAL_TRIM_* in firmware/common/minicore_policy.h (policy, NOT

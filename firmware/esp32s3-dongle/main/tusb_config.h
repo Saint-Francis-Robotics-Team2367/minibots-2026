@@ -17,7 +17,8 @@ extern "C" {
 #endif
 
 #define CFG_TUD_HID_EP_BUFSIZE 64
-#define CFG_TUD_HID_EP_INTERVAL 10
+/* 1 ms: see minicore_usb.c. Full-speed interrupt endpoints allow 1-255 ms. */
+#define CFG_TUD_HID_EP_INTERVAL 1
 
 #ifdef __cplusplus
 }

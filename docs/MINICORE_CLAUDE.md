@@ -267,7 +267,7 @@ typedef struct {
     uint8_t robot_id_len;   // Length of robot name/ID string
     char robot_id[16];      // Robot name/ID (null-terminated)
     uint8_t battery_pct;    // Battery percentage (0-100, or 0xFF if unknown)
-    uint8_t status_flags;   // Bit flags: bit 0 = motors active, bit 1 = ESC connected, etc.
+    uint8_t status_flags;   // bit0 enabled, bit1 "you (this dongle) drive me", bit2 "some dongle drives me"
 } __attribute__((packed)) heartbeat_packet_t;
 ```
 
@@ -359,6 +359,22 @@ per slot (RF loss) and `tx_sync_err` counts sends the dongle couldn't even queue
   and always reports them `SUCCESS`, even with every robot on the field powered
   off — and the station broadcasts an enable re-assert about every 500 ms while
   armed. Counting those would permanently mask real failures.
+
+**Inbound reports are queued (v4).** The dongle has one HID IN endpoint, and
+`tud_hid_report()` refuses a report while the previous one is still waiting to
+be polled. Robots answer a scan with three frames about 1 ms apart, so sending
+straight from the ESP-NOW receive callback dropped most of every burst. Every
+robot-originated report now goes through a FIFO in `minicore_usb.c`, drained one
+at a time on `tud_hid_report_complete_cb`; the status report is latest-only and
+fills the gaps. The endpoint polls at 1 ms. Never call `tud_hid_report()` from
+anywhere else.
+
+**Ownership bits in `status_flags`.** Heartbeats are unicast per dongle, so the
+robot sets bit1 (`MC_HB_FLAG_OWNED_BY_YOU`) only in the copy addressed to the
+dongle actively driving it, and bit2 (`MC_HB_FLAG_OWNED`) in every copy while
+anyone is. That lets each station tell "I am driving this robot" from "someone
+else is", and limit its speed-limit and calibration chasing to robots that are
+its business. The dongle forwards the byte untouched.
 
 Don't reintroduce a "clear the flag on each inbound report" reset. Send outcomes
 arrive asynchronously in the ESP-NOW send callback, well after `esp_now_send()`

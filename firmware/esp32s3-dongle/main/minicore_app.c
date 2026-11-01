@@ -12,8 +12,6 @@
 #include "minicore_protocol.h"
 #include "minicore_usb.h"
 #include "nvs_flash.h"
-#include "class/hid/hid_device.h"
-#include "tusb.h"
 #include "waveshare_s3_lcd147_ui.h"
 
 static const char *TAG = "mc_dongle";
@@ -40,9 +38,9 @@ static void dongle_status_task(void *arg)
         minicore_tx_stats(fail_n, &sync_err_n);
         memcpy(st.tx_fail, fail_n, sizeof(st.tx_fail)); /* packed: no direct pointer */
         st.tx_sync_err = sync_err_n;
-        if (tud_mounted()) {
-            tud_hid_report(MC_HID_RID_DONGLE_STATUS, &st, sizeof(st));
-        }
+        /* Through the USB sender, not tud_hid_report() directly: from here it
+         * raced the robot reports for the one IN endpoint and either side lost. */
+        minicore_usb_set_status(&st, sizeof(st));
         waveshare_s3_lcd147_ui_poll();
     }
 }

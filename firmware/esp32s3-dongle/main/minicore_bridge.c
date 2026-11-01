@@ -17,7 +17,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "minicore_protocol.h"
-#include "tusb.h"
+#include "minicore_usb.h"
 
 static const char *TAG = "mc_bridge";
 
@@ -290,21 +290,26 @@ static void joystick_tx_task(void *arg)
     }
 }
 
+/* Everything here is queued (minicore_usb_send_in), never sent directly: this
+ * runs in the Wi-Fi task, robots answer in back-to-back bursts, and a direct
+ * tud_hid_report() fails whenever the endpoint still holds the previous report.
+ * The status_flags byte of a heartbeat is forwarded untouched -- its meaning is
+ * the robot's and the station's business, so new bits need no reflash. */
 static void espnow_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int len)
 {
     (void)info;
-    if (len < 1 || !tud_mounted()) {
+    if (len < 1) {
         return;
     }
     switch (data[0]) {
     case MC_MSG_HEARTBEAT:
         if (len >= (int)sizeof(heartbeat_packet_t)) {
-            tud_hid_report(MC_HID_RID_HEARTBEAT_IN, data, sizeof(heartbeat_packet_t));
+            minicore_usb_send_in(MC_HID_RID_HEARTBEAT_IN, data, sizeof(heartbeat_packet_t));
         }
         break;
     case MC_MSG_DISCOVERY_RESP:
         if (s_discovery_active && len >= (int)sizeof(discovery_response_t)) {
-            tud_hid_report(MC_HID_RID_DISCOVERY_IN, data, sizeof(discovery_response_t));
+            minicore_usb_send_in(MC_HID_RID_DISCOVERY_IN, data, sizeof(discovery_response_t));
         }
         break;
     case MC_MSG_NEUTRAL_ACK:
@@ -312,7 +317,7 @@ static void espnow_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data,
          * unprompted at power-up as well as in answer to a scan, and the station
          * needs those to fill its fields whichever came up first. */
         if (len >= (int)sizeof(neutral_ack_packet_t)) {
-            tud_hid_report(MC_HID_RID_NEUTRAL_IN, data, sizeof(neutral_ack_packet_t));
+            minicore_usb_send_in(MC_HID_RID_NEUTRAL_IN, data, sizeof(neutral_ack_packet_t));
         }
         break;
     case MC_MSG_SPEED_LIMIT_ACK:
@@ -320,7 +325,7 @@ static void espnow_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data,
          * limit it asked for -- a robot that rebooted back to unrestricted is
          * exactly the case worth hearing about, and it will not be mid-scan. */
         if (len >= (int)sizeof(speed_limit_ack_packet_t)) {
-            tud_hid_report(MC_HID_RID_SPEED_LIMIT_IN, data, sizeof(speed_limit_ack_packet_t));
+            minicore_usb_send_in(MC_HID_RID_SPEED_LIMIT_IN, data, sizeof(speed_limit_ack_packet_t));
         }
         break;
     default:
