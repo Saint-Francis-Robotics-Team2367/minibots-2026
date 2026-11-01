@@ -133,8 +133,11 @@ typedef struct {
  * the robot was ignoring them. Older robots send 0 in bits 1-2, which reads as
  * "nobody owns me" -- what every page assumed before. */
 #define MC_HB_FLAG_ENABLED 0x01u      /* enabled by the station that owns it */
-#define MC_HB_FLAG_OWNER_IS_YOU 0x02u /* the receiving dongle is its owner */
-#define MC_HB_FLAG_OWNED 0x04u        /* some dongle owns it (maybe not you) */
+#define MC_HB_FLAG_OWNER_IS_YOU 0x02u /* the receiving dongle is driving it */
+#define MC_HB_FLAG_OWNED 0x04u        /* some dongle is driving it (maybe not you) */
+/* "Driving" = owner, still enabling it, joystick within the last second
+ * (_OWNER_HOLD_MS in comm_module.py). Ownership itself is sticky; reporting it
+ * that way would keep a station that disarmed or left shown as driving. */
 
 typedef struct {
     uint8_t type;    /* MC_MSG_DISCOVERY_REQ */
@@ -202,7 +205,7 @@ typedef struct {
  * receiving station (post-clamp).
  *
  * A robot remembers one limit per station and runs its owner's (the most
- * restrictive held, while nobody owns it -- it is not being driven then). So
+ * restrictive held, while nobody is driving it -- it cannot move then). So
  * the ack answers "what applies when YOU drive me". That is what keeps two
  * stations with different limits from fighting over unowned robots: each sees
  * its own value confirmed instead of re-broadcasting at the other's.

@@ -281,7 +281,10 @@ typedef struct {
 it), bit 2 `MC_HB_FLAG_OWNED` (some dongle is driving it). The robot sends each
 dongle its own heartbeat, so bit 1 is answered per recipient. The dongle forwards
 the byte untouched, so new bits need no dongle reflash. Older robots leave bits
-1-2 clear, which reads as "unowned".
+1-2 clear, which reads as "unowned". "Driving" means the owner is still enabling
+the robot and sent joystick within the last second (`_OWNER_HOLD_MS`); a station
+that disarmed or left stops being reported as driving it, even though it stays
+the owner until someone else's frames take over.
 
 ### Discovery Request Packet (0x04)
 
@@ -442,10 +445,11 @@ without speed-limit support never acks, and so is correctly listed as
 unconfirmed rather than silently assumed safe.
 
 **It is held per station.** The robot keeps the last limit from every dongle it
-has heard and runs its owner's (or the lowest held, while nobody owns it, since
-nothing is driving it then). A takeover switches to the new owner's limit on the
-first joystick frame, and each ack reports the limit held for the station that
-receives it. Two stations with different limits used to flip unowned robots
+has heard and runs the driving station's (or the lowest held, while nobody is
+driving it, since it cannot move then). A takeover switches to the new owner's
+limit on the first joystick frame, and each ack reports the limit that applies
+when the receiving station drives it: its own, or the lowest held if it never
+sent one. Two stations with different limits used to flip unowned robots
 between them every 2 s, each re-pushing at the other's value.
 
 ### Several stations in one room
@@ -455,8 +459,8 @@ apart:
 
 - **Ownership.** A robot obeys enable and speed limit only from its owner, the
   dongle sending it joystick frames (`_handle_joystick` in `comm_module.py`). An
-  owner keeps it while its stream is fresh and it is still enabling; otherwise the
-  next station's frames take it over.
+  owner keeps it while it is still enabling and has sent joystick within
+  `_OWNER_HOLD_MS` (1 s); otherwise the next station's frames take it over.
 - **Stations know.** Each heartbeat says whether its recipient is the owner
   (`status_flags` above). The page shows "Driven by another station" on a slot
   whose robot is busy elsewhere, and leaves those robots out of its speed-limit
@@ -473,7 +477,9 @@ apart:
   MAC ("MiniCore Dongle A1B2", also shown on its LCD), and a tab claims its
   dongle with a Web Lock, so two tabs on one computer cannot drive through the
   same dongle. A hidden tab is throttled by Chrome below the 250 ms failsafe, so
-  each station needs its own visible window; the page warns when that is broken.
+  each station needs its own visible window. The page warns when an armed tab is
+  hidden: an error in the log, a marked tab title, and a banner that stays until
+  the field is disarmed.
 
 ### Implementation Notes
 

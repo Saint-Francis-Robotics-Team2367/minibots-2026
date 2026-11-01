@@ -671,6 +671,11 @@ function onInputReport(e) {
 
 function renderArm() {
   const connected = !!(device && device.opened);
+  if (!armed) {
+    // Nothing is at risk once disarmed; the hidden-tab warning has done its job.
+    const warn = document.getElementById("hiddenWarn");
+    if (warn) warn.hidden = true;
+  }
   const pairedCount = pairMac.filter(Boolean).length;
   document.body.dataset.armed = String(armed);
   $("armState").textContent = armed ? "Enabled" : "Disabled";
@@ -1262,13 +1267,23 @@ window.addEventListener("pagehide", () => {
 // after a few minutes), and may stop giving it gamepad input. The control loop's
 // 100 ms keepalive then misses the robot's 250 ms failsafe, so a hidden station's
 // robots stutter or stop. Nothing here can prevent that; say so while it matters.
+// A log line written while hidden is easy to miss on return, so also mark the
+// tab title (visible in the tab strip while hidden) and leave a banner that
+// stays up until the field is disarmed.
+const baseTitle = document.title;
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden && armed) {
-    log(
-      "This tab is hidden while robots are enabled — its robots will stutter or stop. " +
-        "Keep each driver station in its own visible window.",
-      "warn",
-    );
+  if (document.hidden) {
+    if (armed) {
+      document.title = `⚠ HIDDEN while enabled — ${baseTitle}`;
+      $("hiddenWarn").hidden = false;
+      log(
+        "This tab is hidden while robots are enabled — its robots will stutter or stop. " +
+          "Keep each driver station in its own visible window.",
+        "err",
+      );
+    }
+  } else {
+    document.title = baseTitle;
   }
 });
 

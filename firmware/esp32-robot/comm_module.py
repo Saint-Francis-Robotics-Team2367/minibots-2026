@@ -71,6 +71,19 @@ _BROADCAST = b"\xff\xff\xff\xff\xff\xff"
 # first. ESP-NOW's unencrypted peer table holds 20; leave plenty for other uses.
 _MAX_DONGLES = 6
 
+# Owning us is sticky (_owner_mac stays set until another station takes over),
+# but *driving* us is not. A dongle counts as our active owner only while it is
+# enabling us and has sent joystick within this window. The heartbeat ownership
+# bits, the takeover test and whose speed limit applies all use that, so a
+# station that disarmed or left stops showing up as "driving" this robot on
+# every other station.
+#
+# Longer than the 250 ms motor failsafe on purpose: that one stops the motors on
+# a short radio gap, but a short gap is not the owner leaving, and ownership (and
+# the limit in force with it) should not flap on every lost burst. A disable from
+# the owner ends it at once, through _enabled_by.
+_OWNER_HOLD_MS = 1000
+
 # Message types only a dongle sends. Everything else on the channel is another
 # robot talking to the station.
 _FROM_DONGLE = (
@@ -324,6 +337,10 @@ class CommModule:
         if not self._enabled or self._joystick_stale:
             self._zero_inputs()
 
+        # Whether the owner is still driving us changes with time alone, with no
+        # frame arriving to trigger a recompute, so re-resolve every pass.
+        self._refresh_speed_limit()
+
         # Heartbeat so the dongle/web UI knows we're alive.
         if time.ticks_diff(now, self._last_hb_ms) >= MC_HEARTBEAT_INTERVAL_MS:
             self._last_hb_ms = now
@@ -532,25 +549,41 @@ class CommModule:
         # joystick frames the motors stay at neutral regardless.
         return len(self._enabled_by) > 0
 
+    def _active_owner(self):
+        """The dongle driving us right now, or None. See _OWNER_HOLD_MS."""
+        owner = self._owner_mac
+        if (
+            owner is not None
+            and owner in self._enabled_by
+            and time.ticks_diff(time.ticks_ms(), self._last_joystick_ms) <= _OWNER_HOLD_MS
+        ):
+            return owner
+        return None
+
+    def _strictest_limit(self) -> float:
+        return min(self._limit_by.values()) if self._limit_by else _SPEED_LIMIT_MAX
+
     def _limit_for(self, mac) -> float:
-        """The limit held for one station; unrestricted if it never sent one."""
-        return self._limit_by.get(mac, _SPEED_LIMIT_MAX)
+        """The limit that applies when this station drives us: its own if it
+        sent one. One that never did (an older page) gets the strictest limit
+        any station holds rather than unrestricted, so driving through it is
+        not a way around another station's cap. With nothing held at all --
+        a robot that just rebooted -- that is unrestricted, which is how a
+        station learns of the reboot."""
+        held = self._limit_by.get(mac)
+        return held if held is not None else self._strictest_limit()
 
     def _refresh_speed_limit(self):
         """Put the right station's limit in force.
 
-        Owned: the owner's, and only the owner's -- another station's cap is
-        not ours to follow. Unowned: the most restrictive any station holds.
-        Nothing is driving us then, so this only decides what applies in the
-        instant before the first joystick frame names an owner, and erring low
-        is the safe way to be wrong.
+        Driven: the driving station's, and only its -- another station's cap
+        is not ours to follow. Not driven: the most restrictive any station
+        holds. Nothing is moving us then, so this only decides what applies
+        in the instant before a station's joystick frames take over, and
+        erring low is the safe way to be wrong.
         """
-        if self._owner_mac is not None:
-            self._speed_limit = self._limit_for(self._owner_mac)
-        elif self._limit_by:
-            self._speed_limit = min(self._limit_by.values())
-        else:
-            self._speed_limit = _SPEED_LIMIT_MAX
+        owner = self._active_owner()
+        self._speed_limit = self._limit_for(owner) if owner is not None else self._strictest_limit()
 
     def _handle_enable(self, mac, data):
         if len(data) < struct.calcsize(_FMT_ENABLE):
@@ -575,15 +608,13 @@ class CommModule:
             return
         # A dongle only sends joystick to a robot it has paired, so the sender
         # is driving us. If two stations have both paired this robot, the one
-        # already driving keeps it; the other takes over once it goes stale or
-        # stops enabling us.
+        # already driving keeps it; the other takes over once the first has
+        # been quiet for _OWNER_HOLD_MS or stops enabling us.
         if self._owner_mac != mac:
-            owner = self._owner_mac
-            if owner is not None and not self._joystick_stale and owner in self._enabled_by:
+            if self._active_owner() is not None:
                 return
             self._owner_mac = mac
             self._enabled = self._compute_enabled(time.ticks_ms())
-            self._refresh_speed_limit()
         if not self._enabled:
             return
         (_, _seq, lx, ly, rx, ry, lt, rt, buttons, _aux) = struct.unpack(_FMT_JOYSTICK, data[:n])
@@ -595,6 +626,8 @@ class CommModule:
         self._axis_rt = rt
         self._buttons = buttons
         self._last_joystick_ms = time.ticks_ms()
+        # This frame may be what makes its sender the active owner.
+        self._refresh_speed_limit()
 
     def _handle_set_neutral(self, mac, data):
         n = struct.calcsize(_FMT_SET_NEUTRAL)
@@ -673,10 +706,9 @@ class CommModule:
         self._send(target, ack)
 
     def _send_speed_limit_ack(self, target):
-        """Report the limit held for this station (post-clamp) -- what applies
-        when it drives us. For the owner that is the limit in force. A station
-        we have never heard a limit from reads unrestricted, which is the truth
-        about what it would get, and is how it learns we rebooted."""
+        """Report the limit that applies when this station drives us
+        (post-clamp; see _limit_for). For the driving station that is the limit
+        in force."""
         held = self._speed_limit if target == _BROADCAST else self._limit_for(target)
         ack = struct.pack(
             _FMT_SPEED_LIMIT_ACK,
@@ -699,9 +731,10 @@ class CommModule:
 
     def _heartbeat_flags(self, target) -> int:
         flags = _HB_FLAG_ENABLED if self._enabled else 0
-        if self._owner_mac is not None:
+        owner = self._active_owner()
+        if owner is not None:
             flags |= _HB_FLAG_OWNED
-            if target == self._owner_mac:
+            if target == owner:
                 flags |= _HB_FLAG_OWNER_IS_YOU
         return flags
 
