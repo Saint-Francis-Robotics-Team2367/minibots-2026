@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 #define CFG_TUD_HID_EP_BUFSIZE 64
-#define CFG_TUD_HID_EP_INTERVAL 10
+#define CFG_TUD_HID_EP_INTERVAL 1 /* keep in step with MC_HID_IN_INTERVAL_MS in minicore_usb.c */
 
 #ifdef __cplusplus
 }

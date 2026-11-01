@@ -19,6 +19,7 @@
 #include "lvgl.h"
 #include "minicore_bridge.h"
 #include "minicore_protocol.h"
+#include "minicore_usb.h"
 
 static const char *TAG = "lcd147";
 
@@ -248,7 +249,11 @@ void waveshare_s3_lcd147_ui_init(void)
     lv_obj_set_style_pad_row(scr, 0, LV_PART_MAIN);
 
     lv_obj_t *title = lv_label_create(scr);
-    lv_label_set_text(title, "MiniCore");
+    /* Same tag as the USB product name the browser shows, so with several
+     * dongles on one table you can tell which tab is driving through which. */
+    char tbuf[24];
+    snprintf(tbuf, sizeof(tbuf), "MiniCore %s", minicore_usb_dongle_tag());
+    lv_label_set_text(title, tbuf);
     lv_obj_set_width(title, LV_PCT(100));
     lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(C_TITLE), 0);

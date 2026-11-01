@@ -259,17 +259,29 @@ broadcast until the dongle is known — repeating because ESP-NOW broadcasts are
 unacknowledged. `stored` answers "will this survive a reset?", letting a failed
 flash write show up as a warning rather than being silently lost.
 
+The speed-limit ack (`0x09`) rides the same announce. Robots boot unrestricted,
+so this is the only way a station that capped a robot before it rebooted finds
+out the cap is gone; the station re-pushes as soon as a mismatched ack arrives.
+
 ### Heartbeat/Status Packet (0x03)
 
 ```c
 typedef struct {
     uint8_t type;           // 0x03
+    uint8_t mac[6];         // Robot's own MAC
     uint8_t robot_id_len;   // Length of robot name/ID string
     char robot_id[16];      // Robot name/ID (null-terminated)
     uint8_t battery_pct;    // Battery percentage (0-100, or 0xFF if unknown)
-    uint8_t status_flags;   // Bit flags: bit 0 = motors active, bit 1 = ESC connected, etc.
+    uint8_t status_flags;   // MC_HB_FLAG_*, below
 } __attribute__((packed)) heartbeat_packet_t;
 ```
+
+`status_flags`: bit 0 `MC_HB_FLAG_ENABLED` (enabled by its owner), bit 1
+`MC_HB_FLAG_OWNER_IS_YOU` (the dongle receiving this heartbeat is the one driving
+it), bit 2 `MC_HB_FLAG_OWNED` (some dongle is driving it). The robot sends each
+dongle its own heartbeat, so bit 1 is answered per recipient. The dongle forwards
+the byte untouched, so new bits need no dongle reflash. Older robots leave bits
+1-2 clear, which reads as "unowned".
 
 ### Discovery Request Packet (0x04)
 
@@ -428,6 +440,40 @@ That ack is the only evidence a robot is actually capped, so the arm band names
 any robot that has not confirmed the current limit. A robot running firmware
 without speed-limit support never acks, and so is correctly listed as
 unconfirmed rather than silently assumed safe.
+
+**It is held per station.** The robot keeps the last limit from every dongle it
+has heard and runs its owner's (or the lowest held, while nobody owns it, since
+nothing is driving it then). A takeover switches to the new owner's limit on the
+first joystick frame, and each ack reports the limit held for the station that
+receives it. Two stations with different limits used to flip unowned robots
+between them every 2 s, each re-pushing at the other's value.
+
+### Several stations in one room
+
+Every dongle is on channel 11 and every robot hears all of them. What keeps them
+apart:
+
+- **Ownership.** A robot obeys enable and speed limit only from its owner, the
+  dongle sending it joystick frames (`_handle_joystick` in `comm_module.py`). An
+  owner keeps it while its stream is fresh and it is still enabling; otherwise the
+  next station's frames take it over.
+- **Stations know.** Each heartbeat says whether its recipient is the owner
+  (`status_flags` above). The page shows "Driven by another station" on a slot
+  whose robot is busy elsewhere, and leaves those robots out of its speed-limit
+  confirmation and calibration chase, which otherwise nagged and re-sent forever.
+- **Reports up to the browser are queued** (`minicore_usb.c`). The single
+  interrupt-IN endpoint polls at 1 ms and holds one report; robots answer a scan
+  three frames at a time, all at once. Before v4 the dongle called
+  `tud_hid_report()` directly and lost everything that arrived while the endpoint
+  was busy, so with several robots, scans missed robots and acks never arrived.
+- **Robot sends do not block.** `_send` uses `sync=False`. Dongles are never
+  forgotten for going quiet, and a blocking send to an unplugged one stalled the
+  robot's loop every heartbeat.
+- **One dongle per tab.** Each dongle's USB product name ends in a tag from its
+  MAC ("MiniCore Dongle A1B2", also shown on its LCD), and a tab claims its
+  dongle with a Web Lock, so two tabs on one computer cannot drive through the
+  same dongle. A hidden tab is throttled by Chrome below the 250 ms failsafe, so
+  each station needs its own visible window; the page warns when that is broken.
 
 ### Implementation Notes
 
