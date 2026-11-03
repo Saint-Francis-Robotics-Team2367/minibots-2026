@@ -112,16 +112,23 @@
                a fixed window that scrolls inside itself, and "Open full page" is
                the way to read it full screen or print it. -->
           <figure class="fig">
-            <iframe
-              class="fig__frame"
-              src="https://docs.google.com/document/d/e/2PACX-1vSS_wn_wWr0zO_sTt7XBRTAowAXoMOsohNdluSTQceT5gwLw-WuRjksilJmeB8yPJ6LDYdr0gLEKrqm/pub?embedded=true"
-              title="Minibots rulebook"
-            ></iframe>
+            <div class="fig__window">
+              <!-- data-fit-width is the published document's own layout width,
+                   measured: a 624px page inside 96px side margins, plus the
+                   scrollbar. js/fit-frame.js scales the frame down from it on
+                   anything narrower. Re-measure if the doc's page size changes. -->
+              <iframe
+                class="fig__frame"
+                src="https://docs.google.com/document/d/e/2PACX-1vSS_wn_wWr0zO_sTt7XBRTAowAXoMOsohNdluSTQceT5gwLw-WuRjksilJmeB8yPJ6LDYdr0gLEKrqm/pub?embedded=true"
+                title="Minibots rulebook"
+                data-fit-width="725"
+              ></iframe>
+            </div>
             <figcaption class="fig__cap">
               <span class="fig__name">Minibots rulebook</span>
               <span class="fig__what"
-                >Scrolls inside the frame. Open the full page to read it larger or print
-                it.</span
+                >Scrolls inside the frame. On a small screen, open the full page to read
+                it larger or print it.</span
               >
               <a
                 class="fig__act"
@@ -144,5 +151,6 @@
     </div>
 
     <script type="module" src="../js/docs.js"></script>
+    <script type="module" src="../js/fit-frame.js"></script>
   </body>
 </html>

@@ -749,14 +749,30 @@
 /* An embedded document, such as the published rulebook. A cross-origin frame
    cannot report its own height, so this is a fixed window that scrolls inside
    itself — tall enough to read a page at a time, short enough that the caption
-   and its "Open full page" link stay reachable below it. White ground because
-   Google Docs paints a white page, and a dark flash before it loads reads as a
-   broken embed. */
+   and its "Open full page" link stay reachable below it.
+
+   The height is a share of the viewport with no rem floor: a fixed minimum made
+   the frame taller than a landscape phone's screen, and a frame that fills the
+   screen captures every swipe, so the page could not be scrolled past it.
+   dvh, with vh as the fallback, so mobile browser toolbars sliding in and out
+   do not leave it oversized.
+
+   White ground because Google Docs paints a white page, and a dark flash before
+   it loads reads as a broken embed. */
+.fig__window {
+  height: min(75vh, 60rem);
+  height: min(75dvh, 60rem);
+  overflow: hidden;
+  background: #fff;
+}
+
+/* js/fit-frame.js overrides width, height and transform when the window is
+   narrower than the document; scaled from the top-left so it stays anchored to
+   the window's corner. */
 .fig__frame {
   display: block;
   width: 100%;
-  height: min(80vh, 60rem);
-  min-height: 24rem;
+  height: 100%;
   border: 0;
-  background: #fff;
+  transform-origin: 0 0;
 }
