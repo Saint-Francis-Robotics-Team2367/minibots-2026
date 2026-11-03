@@ -1,6 +1,7 @@
 /**
- * Documentation pages — Home and everything under /docs. One job: say so when
- * the browser cannot do what the tools need.
+ * Documentation pages — Home and everything under /docs. Two jobs: say so when
+ * the browser cannot do what the tools need, and keep the sidebar open on wide
+ * screens in browsers too old for the CSS that does it.
  *
  * Everything else on these pages is static HTML and links — documentation
  * touches no hardware, so this imports none of the transport modules. Checking
@@ -29,4 +30,19 @@ if (!hasHid || !hasSerial) {
       : "This browser can't reach USB devices, so none of the three tools will work. Reading these pages is fine anywhere — to use the tools, open the site in Chrome or Edge.";
     notice.hidden = false;
   }
+}
+
+// The sidebar is a <details>, closed in the markup so a phone shows one
+// "Contents" line instead of the whole list. Wide screens show it open through
+// ::details-content in docs.css; this covers browsers without that, where a
+// closed <details> would hide the desktop sidebar. Only ever opens: closing it
+// when a window narrows would throw away a choice the reader just made.
+const toc = document.querySelector(".doc__toc");
+if (toc instanceof HTMLDetailsElement) {
+  const narrow = matchMedia("(max-width: 52rem)");
+  const sync = () => {
+    if (!narrow.matches) toc.open = true;
+  };
+  sync();
+  narrow.addEventListener("change", sync);
 }

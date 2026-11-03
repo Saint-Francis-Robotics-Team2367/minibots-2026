@@ -75,39 +75,48 @@
              the host redirect above are duplicated the same way (no backend, no
              build step), and this nav has to exist with JavaScript off. -->
         <nav class="doc__side" aria-label="Documentation">
-          <div class="doc__nav">
-            <div class="doc__group">
-              <p class="hd" id="dgGuide">Guide</p>
-              <ul class="doc__list" aria-labelledby="dgGuide">
-                <li><a href="/">Overview</a></li>
-                <li><a href="/docs/build" aria-current="page">Building the robot</a></li>
-                <li><a href="/docs/wiring">Wiring the robot</a></li>
-                <li><a href="/docs/driving">Driving the robot</a></li>
-                <li><a href="/docs/programming">Programming the robot</a></li>
-              </ul>
-            </div>
+          <!-- Closed in the markup so a phone never paints the whole list first.
+               On a wide screen CSS shows the contents and hides the summary, and
+               js/docs.js opens it for browsers too old for that CSS. With
+               JavaScript off it is still a working disclosure. -->
+          <details class="doc__toc">
+            <summary class="doc__sum">
+              Contents <span class="doc__here">· Building the robot</span>
+            </summary>
+            <div class="doc__nav">
+              <div class="doc__group">
+                <p class="hd" id="dgGuide">Guide</p>
+                <ul class="doc__list" aria-labelledby="dgGuide">
+                  <li><a href="/">Overview</a></li>
+                  <li><a href="/docs/build" aria-current="page">Building the robot</a></li>
+                  <li><a href="/docs/wiring">Wiring the robot</a></li>
+                  <li><a href="/docs/driving">Driving the robot</a></li>
+                  <li><a href="/docs/programming">Programming the robot</a></li>
+                </ul>
+              </div>
 
-            <div class="doc__group">
-              <p class="hd" id="dgTools">Tools</p>
-              <ul class="doc__list" aria-labelledby="dgTools">
-                <li><a href="/control">Driver station</a></li>
-                <li><a href="/code-robot">Robot code</a></li>
-                <li><a href="/flash-dongle">Dongle firmware</a></li>
-              </ul>
-            </div>
+              <div class="doc__group">
+                <p class="hd" id="dgTools">Tools</p>
+                <ul class="doc__list" aria-labelledby="dgTools">
+                  <li><a href="/control">Driver station</a></li>
+                  <li><a href="/code-robot">Robot code</a></li>
+                  <li><a href="/flash-dongle">Dongle firmware</a></li>
+                </ul>
+              </div>
 
-            <div class="doc__group">
-              <p class="hd" id="dgRef">Reference</p>
-              <ul class="doc__list" aria-labelledby="dgRef">
-                <li><a href="/docs/rulebook">Rulebook</a></li>
-                <li>
-                  <a href="https://github.com/Saint-Francis-Robotics-Team2367/minibots-2026"
-                    >Source on GitHub</a
-                  >
-                </li>
-              </ul>
+              <div class="doc__group">
+                <p class="hd" id="dgRef">Reference</p>
+                <ul class="doc__list" aria-labelledby="dgRef">
+                  <li><a href="/docs/rulebook">Rulebook</a></li>
+                  <li>
+                    <a href="https://github.com/Saint-Francis-Robotics-Team2367/minibots-2026"
+                      >Source on GitHub</a
+                    >
+                  </li>
+                </ul>
+              </div>
             </div>
-          </div>
+          </details>
         </nav>
 
         <main class="doc__body">

@@ -32,9 +32,84 @@
 /* Sticky inside its own pane: the programming page runs several screens, and a
    nav tree you have to scroll back up to reach is a nav tree nobody uses. The
    pane itself stays full height because the grid stretches it. */
-.doc__nav {
+.doc__toc {
   position: sticky;
   top: var(--sp-4);
+}
+
+/* The one-line Contents control on a phone. Same type as the .hd group labels
+   so it reads as part of the nav, with the current page alongside it — that is
+   the wayfinding the expanded sidebar gave, in one line. 44px tall: it is the
+   main thing a thumb reaches for on these pages. */
+.doc__sum {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 44px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink);
+  cursor: pointer;
+  list-style: none;
+}
+
+.doc__sum::-webkit-details-marker {
+  display: none;
+}
+
+/* A drawn chevron rather than the UA marker, which ignores letter-spacing and
+   sits on a different baseline in every engine. Points right when closed and
+   down when open — the shape carries the state, not a colour. */
+.doc__sum::before {
+  content: "";
+  flex: none;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin: 0 0.15rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+}
+
+.doc__toc[open] > .doc__sum::before {
+  transform: rotate(45deg);
+}
+
+.doc__sum:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+
+/* Sentence case and the dimmer ink: the page name is context for the label,
+   not a second label. */
+.doc__here {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--ink-dim);
+}
+
+/* The sidebar is a <details> so that on a phone it can collapse to one
+   "Contents" line (see the narrow-screen block below). On a wide screen it is
+   always open and the summary is never seen: ::details-content shows the list
+   whether or not [open] is set, so there is no closed-then-open flash on load.
+   Browsers without ::details-content ignore that rule; js/docs.js sets [open]
+   for them instead. After the .doc__sum rules on purpose: same specificity,
+   so the later display wins. */
+@media not all and (max-width: 52rem) {
+  .doc__sum {
+    display: none;
+  }
+
+  .doc__toc::details-content {
+    content-visibility: visible;
+  }
 }
 
 /* A group of links under one .hd label. */
@@ -684,7 +759,10 @@
   /* Sidebar above the body. Unsticks it too: pinned to the top of a stacked
      layout it would cover the prose it is meant to navigate.
 
-     Groups go side by side rather than stacking, and the minimum is 8rem rather
+     Collapsed behind the Contents summary by default (the <details> above):
+     even side by side, the groups put the page's <h1> 400-500px down on a
+     phone and off the first screen entirely in landscape. Opened, the groups
+     go side by side rather than stacking, and the minimum is 8rem rather
      than a comfortable 11rem for one reason: at 390px a single stacked column of
      eight links is ~370px tall, which puts the page's own <h1> below the fold. A
      reader arriving at a documentation page should see the documentation. 8rem
@@ -694,8 +772,11 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .doc__nav {
+  .doc__toc {
     position: static;
+  }
+
+  .doc__nav {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
     gap: var(--sp-3) var(--sp-4);
@@ -704,6 +785,17 @@
 
   .doc__group {
     margin-bottom: 0;
+  }
+
+  /* Collapsed, the pane is just the Contents line, so it drops the padding
+     sized for a column of links. */
+  .doc__side {
+    padding-top: var(--sp-1);
+    padding-bottom: var(--sp-1);
+  }
+
+  .doc__toc[open] > .doc__nav {
+    padding: var(--sp-2) 0 var(--sp-3);
   }
 }
 
