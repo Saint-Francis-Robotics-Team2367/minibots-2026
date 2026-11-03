@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>MiniCore — Rulebook</title>
+    <meta
+      name="description"
+      content="The Minibots competition rulebook: the game, the field, robot rules, and match play."
+    />
+    <link rel="canonical" href="https://minibots.team2367.org/docs/rulebook" />
+
+    <!-- Same host redirect as every page: it must run before render, and there
+         is no backend to do it centrally. -->
+    <script>
+      (function () {
+        var h = location.hostname;
+        // Only the two DEFAULT domains, anchored to the project name. A preview
+        // channel is also *.web.app (minibots-2367--<channel>-<hash>.web.app), and
+        // matching it here made every channel bounce to production — which is
+        // exactly where a deploy must be checked BEFORE it goes live. Found when a
+        // preview showed "Page Not Found" for /control while curl saw HTTP 200: the
+        // browser was following this redirect to the not-yet-deployed live site.
+        if (h === "minibots-2367.web.app" || h === "minibots-2367.firebaseapp.com") {
+          location.replace(
+            "https://minibots.team2367.org" + location.pathname + location.search + location.hash,
+          );
+        }
+      })();
+    </script>
+
+    <!-- ../ because this page lives in web/docs/. Links to other pages stay
+         absolute, so they do not care how deep this file sits. -->
+    <link rel="stylesheet" href="../css/core.css" />
+    <link rel="stylesheet" href="../css/docs.css" />
+  </head>
+  <body data-armed="false" data-link="down">
+    <div class="bezel">
+      <header class="rail">
+        <div class="rail__id">
+          <span class="rail__mark">MiniCore</span>
+          <span class="rail__sub">Rulebook · Team 2367</span>
+        </div>
+
+        <ul class="nav">
+          <li><a href="/">Home</a></li>
+          <li><a href="/control">Control</a></li>
+          <li><a href="/code-robot">Code</a></li>
+          <li><a href="/flash-dongle">Dongle</a></li>
+        </ul>
+
+        <div aria-hidden="true"></div>
+      </header>
+
+      <p class="notice" id="noSupport" hidden>
+        This browser can't reach USB devices, so none of the three tools will work.
+        Reading these pages is fine anywhere — to use the tools, open the site in Chrome
+        or Edge.
+      </p>
+
+      <div class="doc">
+        <!-- Copied verbatim from every other documentation page: the rail nav and
+             the host redirect above are duplicated the same way (no backend, no
+             build step), and this nav has to exist with JavaScript off. -->
+        <nav class="doc__side" aria-label="Documentation">
+          <div class="doc__nav">
+            <div class="doc__group">
+              <p class="hd" id="dgGuide">Guide</p>
+              <ul class="doc__list" aria-labelledby="dgGuide">
+                <li><a href="/">Overview</a></li>
+                <li><a href="/docs/build">Building the robot</a></li>
+                <li><a href="/docs/wiring">Wiring the robot</a></li>
+                <li><a href="/docs/driving">Driving the robot</a></li>
+                <li><a href="/docs/programming">Programming the robot</a></li>
+              </ul>
+            </div>
+
+            <div class="doc__group">
+              <p class="hd" id="dgTools">Tools</p>
+              <ul class="doc__list" aria-labelledby="dgTools">
+                <li><a href="/control">Driver station</a></li>
+                <li><a href="/code-robot">Robot code</a></li>
+                <li><a href="/flash-dongle">Dongle firmware</a></li>
+              </ul>
+            </div>
+
+            <div class="doc__group">
+              <p class="hd" id="dgRef">Reference</p>
+              <ul class="doc__list" aria-labelledby="dgRef">
+                <li><a href="/docs/rulebook" aria-current="page">Rulebook</a></li>
+                <li>
+                  <a href="https://github.com/Saint-Francis-Robotics-Team2367/minibots-2026"
+                    >Source on GitHub</a
+                  >
+                </li>
+              </ul>
+            </div>
+          </div>
+        </nav>
+
+        <main class="doc__body">
+          <h1>Rulebook</h1>
+          <p class="doc__lead">
+            The rules for Minibots competition. What is shown here is the published copy of
+            the rulebook, so it is always the current revision.
+          </p>
+
+          <!-- The rulebook is written in Google Docs and published from there, so it
+               updates without a deploy. That also means this page cannot know its
+               length: a cross-origin frame never reports its height, so the frame is
+               a fixed window that scrolls inside itself, and "Open full page" is
+               the way to read it full screen or print it. -->
+          <figure class="fig">
+            <iframe
+              class="fig__frame"
+              src="https://docs.google.com/document/d/e/2PACX-1vSS_wn_wWr0zO_sTt7XBRTAowAXoMOsohNdluSTQceT5gwLw-WuRjksilJmeB8yPJ6LDYdr0gLEKrqm/pub?embedded=true"
+              title="Minibots rulebook"
+            ></iframe>
+            <figcaption class="fig__cap">
+              <span class="fig__name">Minibots rulebook</span>
+              <span class="fig__what"
+                >Scrolls inside the frame. Open the full page to read it larger or print
+                it.</span
+              >
+              <a
+                class="fig__act"
+                href="https://docs.google.com/document/d/e/2PACX-1vSS_wn_wWr0zO_sTt7XBRTAowAXoMOsohNdluSTQceT5gwLw-WuRjksilJmeB8yPJ6LDYdr0gLEKrqm/pub"
+                >Open full page</a
+              >
+            </figcaption>
+          </figure>
+        </main>
+      </div>
+
+      <footer class="foot">
+        <div class="prose">
+          <p>
+            The rulebook is kept as a Google Doc. This page shows its published copy, so
+            an edit there appears here without a site deploy.
+          </p>
+        </div>
+      </footer>
+    </div>
+
+    <script type="module" src="../js/docs.js"></script>
+  </body>
+</html>

@@ -745,3 +745,18 @@
     border: 1px solid CanvasText;
   }
 }
+
+/* An embedded document, such as the published rulebook. A cross-origin frame
+   cannot report its own height, so this is a fixed window that scrolls inside
+   itself — tall enough to read a page at a time, short enough that the caption
+   and its "Open full page" link stay reachable below it. White ground because
+   Google Docs paints a white page, and a dark flash before it loads reads as a
+   broken embed. */
+.fig__frame {
+  display: block;
+  width: 100%;
+  height: min(80vh, 60rem);
+  min-height: 24rem;
+  border: 0;
+  background: #fff;
+}

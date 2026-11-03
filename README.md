@@ -226,7 +226,7 @@ over HTTPS or `http://localhost`: the tools talk to USB through WebHID and Web S
 which Safari and Firefox do not implement. Devices are granted once per browser, then
 reconnect on their own. The documentation pages read in any browser.
 
-**Documentation** — a wiki for students, with a sidebar nav shared by these four pages.
+**Documentation** — a wiki for students, with a sidebar nav shared by these pages.
 `/` is the landing page; the guides live under `/docs`.
 
 | Page | What it does |
@@ -235,6 +235,7 @@ reconnect on their own. The documentation pages read in any browser.
 | [`/docs/build`](https://minibots.team2367.org/docs/build) | Building the robot — **placeholder**, content pending |
 | [`/docs/wiring`](https://minibots.team2367.org/docs/wiring) | Wiring the robot — **placeholder**, content pending |
 | [`/docs/programming`](https://minibots.team2367.org/docs/programming) | Programming the robot — the loop, the full `Minibot` API, and the traps |
+| [`/docs/rulebook`](https://minibots.team2367.org/docs/rulebook) | Rulebook — the published Google Doc, embedded; edits there need no deploy |
 
 **Tools** — each needs different hardware plugged in.
 
