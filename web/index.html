@@ -83,40 +83,50 @@
              (no backend, no build step), and a documentation page's navigation
              has to exist with JavaScript off. -->
         <nav class="doc__side" aria-label="Documentation">
-          <div class="doc__nav">
-            <div class="doc__group">
-              <p class="hd" id="dgGuide">Guide</p>
-              <ul class="doc__list" aria-labelledby="dgGuide">
-                <li><a href="/" aria-current="page">Overview</a></li>
-                <li><a href="/docs/build">Building the robot</a></li>
-                <li><a href="/docs/wiring">Wiring the robot</a></li>
-                <li><a href="/docs/driving">Driving the robot</a></li>
-                <li><a href="/docs/programming">Programming the robot</a></li>
-              </ul>
-            </div>
+          <!-- Closed in the markup so a phone never paints the whole list first.
+               On a wide screen CSS shows the contents and hides the summary, and
+               js/docs.js opens it for browsers too old for that CSS. With
+               JavaScript off it is still a working disclosure. -->
+          <details class="doc__toc">
+            <summary class="doc__sum">
+              Contents <span class="doc__here">· Overview</span>
+            </summary>
+            <div class="doc__nav">
+              <div class="doc__group">
+                <p class="hd" id="dgGuide">Guide</p>
+                <ul class="doc__list" aria-labelledby="dgGuide">
+                  <li><a href="/" aria-current="page">Overview</a></li>
+                  <li><a href="/docs/build">Building the robot</a></li>
+                  <li><a href="/docs/wiring">Wiring the robot</a></li>
+                  <li><a href="/docs/driving">Driving the robot</a></li>
+                  <li><a href="/docs/programming">Programming the robot</a></li>
+                </ul>
+              </div>
 
-            <!-- The three tools. This group is what replaced the tool cards that
-                 used to be this page's body. -->
-            <div class="doc__group">
-              <p class="hd" id="dgTools">Tools</p>
-              <ul class="doc__list" aria-labelledby="dgTools">
-                <li><a href="/control">Driver station</a></li>
-                <li><a href="/code-robot">Robot code</a></li>
-                <li><a href="/flash-dongle">Dongle firmware</a></li>
-              </ul>
-            </div>
+              <!-- The three tools. This group is what replaced the tool cards that
+                   used to be this page's body. -->
+              <div class="doc__group">
+                <p class="hd" id="dgTools">Tools</p>
+                <ul class="doc__list" aria-labelledby="dgTools">
+                  <li><a href="/control">Driver station</a></li>
+                  <li><a href="/code-robot">Robot code</a></li>
+                  <li><a href="/flash-dongle">Dongle firmware</a></li>
+                </ul>
+              </div>
 
-            <div class="doc__group">
-              <p class="hd" id="dgRef">Reference</p>
-              <ul class="doc__list" aria-labelledby="dgRef">
-                <li>
-                  <a href="https://github.com/Saint-Francis-Robotics-Team2367/minibots-2026"
-                    >Source on GitHub</a
-                  >
-                </li>
-              </ul>
+              <div class="doc__group">
+                <p class="hd" id="dgRef">Reference</p>
+                <ul class="doc__list" aria-labelledby="dgRef">
+                  <li><a href="/docs/rulebook">Rulebook</a></li>
+                  <li>
+                    <a href="https://github.com/Saint-Francis-Robotics-Team2367/minibots-2026"
+                      >Source on GitHub</a
+                    >
+                  </li>
+                </ul>
+              </div>
             </div>
-          </div>
+          </details>
         </nav>
 
         <main class="doc__body">
@@ -194,6 +204,12 @@
               <span class="idx__what"
                 >Write <code>main.py</code>: the loop, the full list of things you can ask
                 the robot for, and the traps.</span
+              >
+            </li>
+            <li>
+              <a class="idx__name" href="/docs/rulebook">Rulebook</a>
+              <span class="idx__what"
+                >The rules for Minibots competition, always at the current revision.</span
               >
             </li>
           </ul>
