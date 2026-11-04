@@ -38,7 +38,13 @@ extern "C" {
  * dongle_status_t so the web app can tell the driver their dongle firmware is
  * older than the page, rather than leaving them to debug a silent mismatch --
  * which is exactly what a stale trim clamp cost us once already. */
-#define MC_PROTOCOL_VERSION 3u
+#define MC_PROTOCOL_VERSION 4u
+/* v4: no layout changes. The HID IN endpoint now polls at 1 ms and every report
+ * is queued instead of dropped when the endpoint is busy (minicore_usb.c), and
+ * the USB product name carries a per-dongle tag. Bumped anyway, because a v3
+ * dongle loses robots' burst replies (scan answers, acks) whenever several
+ * robots are on the field, and the version check is how the page gets a driver
+ * to reflash it. */
 
 /* --- USB HID identity (Espressif VID, project-specific PID) --- */
 #define MINICORE_USB_VID 0x303Au
@@ -113,8 +119,25 @@ typedef struct {
     uint8_t robot_id_len;
     char robot_id[MC_ROBOT_ID_MAX];
     uint8_t battery_pct;    /* 0-100 or 0xFF unknown */
-    uint8_t status_flags;
+    uint8_t status_flags;   /* MC_HB_FLAG_* */
 } heartbeat_packet_t;
+
+/* heartbeat_packet_t.status_flags. The robot sends a heartbeat to each dongle
+ * it has heard separately, so the ownership bits answer "is it YOU" for the
+ * dongle that receives it. The dongle forwards the byte untouched; only robot
+ * and page interpret it, so new bits need no dongle reflash.
+ *
+ * A robot obeys only the station driving it (its owner, the dongle sending it
+ * joystick frames). Without these bits a second station that had paired the
+ * same robot saw its frames acknowledged at the radio and had no way to learn
+ * the robot was ignoring them. Older robots send 0 in bits 1-2, which reads as
+ * "nobody owns me" -- what every page assumed before. */
+#define MC_HB_FLAG_ENABLED 0x01u      /* enabled by the station that owns it */
+#define MC_HB_FLAG_OWNER_IS_YOU 0x02u /* the receiving dongle is driving it */
+#define MC_HB_FLAG_OWNED 0x04u        /* some dongle is driving it (maybe not you) */
+/* "Driving" = owner, still enabling it, joystick within the last second
+ * (_OWNER_HOLD_MS in comm_module.py). Ownership itself is sticky; reporting it
+ * that way would keep a station that disarmed or left shown as driving. */
 
 typedef struct {
     uint8_t type;    /* MC_MSG_DISCOVERY_REQ */
@@ -178,10 +201,18 @@ typedef struct {
     uint16_t limit_milli;
 } set_speed_limit_packet_t;
 
-/** Robot -> dongle -> browser: the speed limit actually in force (post-clamp).
+/** Robot -> dongle -> browser: the speed limit the robot holds for the
+ * receiving station (post-clamp).
  *
- * Sent on applying a MC_MSG_SET_SPEED_LIMIT and in answer to a discovery
- * request. There is no `stored` flag because the robot deliberately does not
+ * A robot remembers one limit per station and runs its owner's (the most
+ * restrictive held, while nobody is driving it -- it cannot move then). So
+ * the ack answers "what applies when YOU drive me". That is what keeps two
+ * stations with different limits from fighting over unowned robots: each sees
+ * its own value confirmed instead of re-broadcasting at the other's.
+ *
+ * Sent on applying a MC_MSG_SET_SPEED_LIMIT, in answer to a discovery request,
+ * and with the unprompted calibration announce after boot -- the last is what
+ * tells a station that a robot rebooted back to unrestricted. There is no `stored` flag because the robot deliberately does not
  * persist this: a speed limit is event policy, not a property of the robot, and
  * one that survived a power cycle would silently cap a robot days later. The
  * station is the durable copy and re-sends to any robot whose ack does not match

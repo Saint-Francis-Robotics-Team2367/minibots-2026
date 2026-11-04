@@ -27,6 +27,13 @@ MC_MSG_SET_SPEED_LIMIT = 0x08
 MC_MSG_SPEED_LIMIT_ACK = 0x09
 
 MC_ROBOT_ID_MAX = 16
+
+# heartbeat status_flags (MC_HB_FLAG_* in minicore_protocol.h). Each dongle gets
+# its own heartbeat, so the ownership bits are answered per recipient.
+_HB_FLAG_ENABLED = 0x01
+_HB_FLAG_OWNER_IS_YOU = 0x02
+_HB_FLAG_OWNED = 0x04
+
 MC_HEARTBEAT_INTERVAL_MS = 1000
 MC_MOTOR_TIMEOUT_MS = 250
 
@@ -51,12 +58,31 @@ _BROADCAST = b"\xff\xff\xff\xff\xff\xff"
 #     "owner", the one sending it joystick frames); otherwise station B, stood
 #     down, would keep disabling a robot station A is driving, and station A
 #     armed would enable robots that belong to B.
+#   * Each heartbeat says whether its recipient is the owner, so a station that
+#     paired a robot someone else is driving can say so instead of showing it
+#     as fine while its sticks do nothing.
+#   * The speed limit is held per dongle and the owner's applies, so a takeover
+#     switches to the new owner's limit at once, and two stations with
+#     different limits do not flip an unowned robot between them.
 # Dongles are never forgotten for going quiet: a disarmed station sends nothing
 # on a timer (the enable re-broadcast runs only while armed), and a station
 # sitting disarmed after a scan must keep receiving heartbeats or its robot list
 # empties. One leaves only when a newer one needs its slot, least recently heard
 # first. ESP-NOW's unencrypted peer table holds 20; leave plenty for other uses.
 _MAX_DONGLES = 6
+
+# Owning us is sticky (_owner_mac stays set until another station takes over),
+# but *driving* us is not. A dongle counts as our active owner only while it is
+# enabling us and has sent joystick within this window. The heartbeat ownership
+# bits, the takeover test and whose speed limit applies all use that, so a
+# station that disarmed or left stops showing up as "driving" this robot on
+# every other station.
+#
+# Longer than the 250 ms motor failsafe on purpose: that one stops the motors on
+# a short radio gap, but a short gap is not the owner leaving, and ownership (and
+# the limit in force with it) should not flap on every lost burst. A disable from
+# the owner ends it at once, through _enabled_by.
+_OWNER_HOLD_MS = 1000
 
 # Message types only a dongle sends. Everything else on the channel is another
 # robot talking to the station.
@@ -162,6 +188,11 @@ class CommModule:
     _owner_mac: bytes | None
     # Dongle -> ticks of its last enable=1 aimed at us. Absent = not enabling us.
     _enabled_by: dict
+    # Dongle -> the speed limit (0.10-1.00) it last asked for. Absent = never.
+    _limit_by: dict
+    # MACs already in the ESP-NOW peer table, so a send need not try add_peer
+    # and swallow the "already exists" exception every time.
+    _peers: set
     _enabled: bool
     # No annotation on the tick fields: time.ticks_ms() returns an opaque
     # counter, not an int (it is free to wrap), so only ticks_diff() may be
@@ -227,6 +258,8 @@ class CommModule:
         self._dongles = {}  # learned from received frames
         self._owner_mac = None
         self._enabled_by = {}
+        self._limit_by = {}
+        self._peers = set()
 
         # Speed limit (unrestricted until a station says otherwise)
         self._speed_limit = _SPEED_LIMIT_MAX
@@ -304,6 +337,10 @@ class CommModule:
         if not self._enabled or self._joystick_stale:
             self._zero_inputs()
 
+        # Whether the owner is still driving us changes with time alone, with no
+        # frame arriving to trigger a recompute, so re-resolve every pass.
+        self._refresh_speed_limit()
+
         # Heartbeat so the dongle/web UI knows we're alive.
         if time.ticks_diff(now, self._last_hb_ms) >= MC_HEARTBEAT_INTERVAL_MS:
             self._last_hb_ms = now
@@ -315,6 +352,10 @@ class CommModule:
                 self._send_heartbeat(target)
                 if announce:
                     self._send_neutral_ack(target)
+                    # The speed limit too. Robots boot unrestricted, and
+                    # without this a station that capped us before a reboot
+                    # kept believing the cap held: nothing else tells it.
+                    self._send_speed_limit_ack(target)
 
     # --- Getters -----------------------------------------------------------------
 
@@ -387,7 +428,8 @@ class CommModule:
         self._on_neutral_change = callback
 
     def set_speed_limit(self, limit_milli: int) -> None:
-        """Update speed limit from driver station."""
+        """Override the limit in force until the next station frame recomputes
+        it (a limit arriving, or a change of owner). For bench tests only."""
         self._speed_limit = _clamp(limit_milli / 1000.0, _SPEED_LIMIT_MIN, _SPEED_LIMIT_MAX)
 
     def clear_calibration(self) -> bool:
@@ -410,18 +452,27 @@ class CommModule:
         self._buttons = 0
 
     def _add_peer(self, mac):
+        if mac in self._peers:
+            return
         try:
             assert self._espnow
             self._espnow.add_peer(mac, channel=self._channel)
         except OSError:
             # Already added — ESP-NOW raises if the peer exists.
             pass
+        self._peers.add(mac)
 
     def _send(self, mac, payload):
         self._add_peer(mac)
         try:
             assert self._espnow
-            self._espnow.send(mac, payload)
+            # sync=False: do not wait for the peer's ACK. The default blocks
+            # update() until the frame is acknowledged or every MAC retry is
+            # spent, and dongles are never forgotten for going quiet -- so a
+            # robot that had once heard a now-unplugged dongle stalled its loop
+            # on it every heartbeat, up to three frames at a time, against the
+            # 250 ms motor failsafe. Nothing here acts on the result anyway.
+            self._espnow.send(mac, payload, False)
         except OSError:
             pass
 
@@ -474,8 +525,11 @@ class CommModule:
     def _forget_dongle(self, mac):
         self._dongles.pop(mac, None)
         self._enabled_by.pop(mac, None)
+        self._limit_by.pop(mac, None)
         if mac == self._owner_mac:
             self._owner_mac = None
+        self._refresh_speed_limit()
+        self._peers.discard(mac)
         try:
             assert self._espnow
             self._espnow.del_peer(mac)
@@ -495,9 +549,41 @@ class CommModule:
         # joystick frames the motors stay at neutral regardless.
         return len(self._enabled_by) > 0
 
-    def _obeys(self, mac) -> bool:
-        """Whether a field-wide broadcast from this dongle applies to us."""
-        return self._owner_mac is None or mac == self._owner_mac
+    def _active_owner(self):
+        """The dongle driving us right now, or None. See _OWNER_HOLD_MS."""
+        owner = self._owner_mac
+        if (
+            owner is not None
+            and owner in self._enabled_by
+            and time.ticks_diff(time.ticks_ms(), self._last_joystick_ms) <= _OWNER_HOLD_MS
+        ):
+            return owner
+        return None
+
+    def _strictest_limit(self) -> float:
+        return min(self._limit_by.values()) if self._limit_by else _SPEED_LIMIT_MAX
+
+    def _limit_for(self, mac) -> float:
+        """The limit that applies when this station drives us: its own if it
+        sent one. One that never did (an older page) gets the strictest limit
+        any station holds rather than unrestricted, so driving through it is
+        not a way around another station's cap. With nothing held at all --
+        a robot that just rebooted -- that is unrestricted, which is how a
+        station learns of the reboot."""
+        held = self._limit_by.get(mac)
+        return held if held is not None else self._strictest_limit()
+
+    def _refresh_speed_limit(self):
+        """Put the right station's limit in force.
+
+        Driven: the driving station's, and only its -- another station's cap
+        is not ours to follow. Not driven: the most restrictive any station
+        holds. Nothing is moving us then, so this only decides what applies
+        in the instant before a station's joystick frames take over, and
+        erring low is the safe way to be wrong.
+        """
+        owner = self._active_owner()
+        self._speed_limit = self._limit_for(owner) if owner is not None else self._strictest_limit()
 
     def _handle_enable(self, mac, data):
         if len(data) < struct.calcsize(_FMT_ENABLE):
@@ -522,11 +608,10 @@ class CommModule:
             return
         # A dongle only sends joystick to a robot it has paired, so the sender
         # is driving us. If two stations have both paired this robot, the one
-        # already driving keeps it; the other takes over once it goes stale or
-        # stops enabling us.
+        # already driving keeps it; the other takes over once the first has
+        # been quiet for _OWNER_HOLD_MS or stops enabling us.
         if self._owner_mac != mac:
-            owner = self._owner_mac
-            if owner is not None and not self._joystick_stale and owner in self._enabled_by:
+            if self._active_owner() is not None:
                 return
             self._owner_mac = mac
             self._enabled = self._compute_enabled(time.ticks_ms())
@@ -541,6 +626,8 @@ class CommModule:
         self._axis_rt = rt
         self._buttons = buttons
         self._last_joystick_ms = time.ticks_ms()
+        # This frame may be what makes its sender the active owner.
+        self._refresh_speed_limit()
 
     def _handle_set_neutral(self, mac, data):
         n = struct.calcsize(_FMT_SET_NEUTRAL)
@@ -569,12 +656,11 @@ class CommModule:
             return
         _, limit_milli = struct.unpack(_FMT_SET_SPEED_LIMIT, data[:n])
 
-        # Another station's field-wide cap is not ours to follow. Still ack, so
-        # that station sees the limit actually in force here.
-        if not self._obeys(mac):
-            self._send_speed_limit_ack(mac)
-            return
-        self._speed_limit = _clamp(limit_milli / 1000.0, _SPEED_LIMIT_MIN, _SPEED_LIMIT_MAX)
+        # Recorded for this station whoever owns us, and applied only if it is
+        # the owner's (see _refresh_speed_limit). Holding it means a station
+        # that takes over later drives at its own limit from the first frame.
+        self._limit_by[mac] = _clamp(limit_milli / 1000.0, _SPEED_LIMIT_MIN, _SPEED_LIMIT_MAX)
+        self._refresh_speed_limit()
         self._send_speed_limit_ack(mac)
 
     def _load_calibration(self):
@@ -620,12 +706,15 @@ class CommModule:
         self._send(target, ack)
 
     def _send_speed_limit_ack(self, target):
-        """Report the speed limit actually in force (post-clamp) to the station."""
+        """Report the limit that applies when this station drives us
+        (post-clamp; see _limit_for). For the driving station that is the limit
+        in force."""
+        held = self._speed_limit if target == _BROADCAST else self._limit_for(target)
         ack = struct.pack(
             _FMT_SPEED_LIMIT_ACK,
             MC_MSG_SPEED_LIMIT_ACK,
             self._mac,
-            int(round(self._speed_limit * 1000.0)),
+            int(round(held * 1000.0)),
         )
         self._send(target, ack)
 
@@ -640,6 +729,15 @@ class CommModule:
         )
         self._send(mac, resp)
 
+    def _heartbeat_flags(self, target) -> int:
+        flags = _HB_FLAG_ENABLED if self._enabled else 0
+        owner = self._active_owner()
+        if owner is not None:
+            flags |= _HB_FLAG_OWNED
+            if target == owner:
+                flags |= _HB_FLAG_OWNER_IS_YOU
+        return flags
+
     def _send_heartbeat(self, target):
         name = self._robot_id.encode()[:MC_ROBOT_ID_MAX]
         hb = struct.pack(
@@ -649,6 +747,6 @@ class CommModule:
             len(name),
             name,
             0xFF,  # battery unknown
-            1 if self._enabled else 0,
+            self._heartbeat_flags(target),
         )
         self._send(target, hb)

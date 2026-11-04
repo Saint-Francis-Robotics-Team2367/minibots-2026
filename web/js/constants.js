@@ -44,11 +44,18 @@ export const MC_HID_IN_NEUTRAL_LEN = 12;
 export const MC_HID_IN_SPEED_LIMIT_LEN = 9;
 export const MC_HID_IN_STATUS_LEN = 16;
 
+/* heartbeat status_flags — MC_HB_FLAG_* in minicore_protocol.h. Each dongle gets
+ * its own copy of a robot's heartbeat, so the ownership bits mean "is it the
+ * dongle this page is on". Older robots leave bits 1-2 clear: "unowned". */
+export const MC_HB_FLAG_ENABLED = 0x01;
+export const MC_HB_FLAG_OWNER_IS_YOU = 0x02;
+export const MC_HB_FLAG_OWNED = 0x04;
+
 /* Bumped in lockstep with MC_PROTOCOL_VERSION in minicore_protocol.h. The dongle
  * reports the value it was BUILT with; if it differs from this, the dongle is
  * running firmware that predates (or postdates) this page and needs reflashing.
  * Surfacing that beats debugging a silent mismatch. */
-export const MC_PROTOCOL_VERSION = 3;
+export const MC_PROTOCOL_VERSION = 4;
 
 /* Allowed range for a neutral set from this page — the full 1–2 ms RC window.
  * Mirrors MC_NEUTRAL_TRIM_* in firmware/common/minicore_policy.h (policy, NOT

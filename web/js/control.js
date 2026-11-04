@@ -17,6 +17,9 @@ import {
   MC_SPEED_LIMIT_MIN,
   MC_SPEED_LIMIT_MAX,
   MC_PROTOCOL_VERSION,
+  MC_HB_FLAG_ENABLED,
+  MC_HB_FLAG_OWNER_IS_YOU,
+  MC_HB_FLAG_OWNED,
 } from "./constants.js";
 import {
   encodeJoystickOut,
@@ -34,7 +37,7 @@ import {
   gamepadToJoystick,
 } from "./protocol.js";
 import { $, log, clearLog } from "./dom.js";
-import { local } from "./store.js";
+import { local, session } from "./store.js";
 import {
   hasWebHID,
   isDongle,
@@ -77,6 +80,9 @@ const SPEED_LIMIT_KEY = "minicore.speedLimit";
 let speedLimit = loadSpeedLimit();
 /** Last time we pushed the limit, for the re-assert rate limit below. */
 let lastLimitPushMs = 0;
+/** Floor between pushes triggered by a mismatched ack, so a robot that cannot
+ * take the value (firmware with no speed limit) cannot turn acks into a loop. */
+const LIMIT_REPUSH_MIN_MS = 500;
 
 // NOTE: SPEED_LIMIT_KEY must be declared ABOVE the `let speedLimit` initializer
 // that calls this. It used to sit below, which put it in its temporal dead zone
@@ -132,6 +138,79 @@ const BROADCAST_MAC = new Uint8Array(6).fill(0xff);
 const STALE_MS = 2500;
 const DROP_MS = 5000;
 
+/**
+ * A robot another station is driving. Every robot in the room heartbeats to
+ * every dongle it has heard, so this page hears all of them — but one owned
+ * elsewhere ignores our sticks, enable and speed limit, and must not be judged
+ * against them: doing so meant a permanent "Not confirmed on" note, a speed
+ * limit re-broadcast every 2 s forever, and "Still enabled" on a slot whose
+ * robot was simply busy with someone else.
+ */
+function ownedByOther(rec) {
+  return (
+    !!rec &&
+    (rec.flags & MC_HB_FLAG_OWNED) !== 0 &&
+    (rec.flags & MC_HB_FLAG_OWNER_IS_YOU) === 0
+  );
+}
+
+/* ── One dongle per tab ───────────────────────────────────────────────────── */
+
+/** sessionStorage: the dongle this tab last used, by product name. */
+const DONGLE_KEY = "minicore.dongle";
+/** Releases this tab's claim on its dongle. See claimDongle(). */
+let releaseDongleLock = null;
+
+/**
+ * Lock name for a dongle, or null for one whose firmware predates per-dongle
+ * names — every such dongle is called "MiniCore Dongle", so they cannot be told
+ * apart and locking one would lock them all.
+ */
+function dongleLockName(dev) {
+  const m = /MiniCore Dongle ([0-9A-F]{4})$/.exec(dev.productName || "");
+  return m ? `minicore-dongle-${m[1]}` : null;
+}
+
+/**
+ * Take a dongle for this tab, across every tab of this origin.
+ *
+ * Two stations on one computer used to both auto-connect to the first dongle
+ * listed, and where the OS lets two pages open one HID device, they drove
+ * through it together — each one's pairings overwriting the other's slots. A
+ * Web Lock is per origin across tabs and is dropped when the tab goes away, so
+ * it is exactly "which tab owns this dongle".
+ *
+ * @returns {Promise<boolean>} false when another tab holds it.
+ */
+function claimDongle(dev) {
+  const name = dongleLockName(dev);
+  if (!name || !navigator.locks) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    navigator.locks
+      .request(name, { ifAvailable: true }, (lock) => {
+        if (!lock) {
+          resolve(false);
+          return undefined;
+        }
+        resolve(true);
+        // Held until releaseDongle() settles this.
+        return new Promise((release) => {
+          releaseDongleLock = release;
+        });
+      })
+      .catch(() => resolve(true));
+  });
+}
+
+function releaseDongle() {
+  if (releaseDongleLock) {
+    releaseDongleLock();
+    releaseDongleLock = null;
+  }
+}
+
 /* ── Formatting ───────────────────────────────────────────────────────────── */
 
 function macKey(mac) {
@@ -169,7 +248,8 @@ function setDongleUi(connected) {
  * as a hand-picked one — including the disable broadcast below, which is the
  * reason this is one function and not two.
  *
- * @returns {Promise<boolean>} false when a link was already up or coming up.
+ * @returns {Promise<boolean>} false when a link was already up or coming up, or
+ *   another tab has claimed this dongle.
  */
 async function attachDongle(dev) {
   // The load-time scan and the `connect` event can both fire for one plug-in,
@@ -181,16 +261,30 @@ async function attachDongle(dev) {
   }
   attaching = true;
   try {
-    device = await openDongle(dev, onInputReport);
+    if (!(await claimDongle(dev))) {
+      log(`${dev.productName} is in use by another tab — pick a different dongle`, "warn");
+      return false;
+    }
+    try {
+      device = await openDongle(dev, onInputReport);
+    } catch (err) {
+      releaseDongle();
+      throw err;
+    }
   } finally {
     attaching = false;
   }
+  session.set(DONGLE_KEY, device.productName || "");
   setDongleUi(true);
   log(`Dongle connected — ${device.productName || "MiniCore"}`, "go");
   // This page starts disarmed, but a robot that stayed powered through a reload
   // is still latched enabled from the previous session. Push our state onto the
   // field before the control loop starts, so the UI and the robots agree.
   await broadcastDisable("link opened");
+  // The dongle's pairing table outlives this page, and this page starts with
+  // every slot empty. Make the dongle agree, or it keeps robots paired from the
+  // last session that no slot here shows.
+  await unpairAllOnDongle();
   // A robot that has already met this dongle will not re-announce its
   // calibration on its own, so ask instead of waiting for an announce that is
   // never coming. See requestCalibration().
@@ -240,17 +334,34 @@ async function autoConnect() {
     log(`Could not list remembered devices: ${err}`, "warn");
     return "failed";
   }
-  const dev = devs[0];
-  if (!dev) {
+  if (!devs.length) {
     return "none";
   }
-  try {
-    return (await attachDongle(dev)) ? "connected" : "none";
-  } catch (err) {
-    // Usually another tab already holds it — WebHID allows a single opener.
-    log(`Auto-connect failed: ${err} — use Connect dongle`, "warn");
-    return "failed";
+  // This tab's own dongle first, so a reload with two plugged in comes back to
+  // the same one; then any other, skipping those another tab has claimed.
+  const preferred = session.get(DONGLE_KEY, "", (raw) => raw);
+  const ordered = [...devs].sort(
+    (a, b) => Number(b.productName === preferred) - Number(a.productName === preferred),
+  );
+  let failed = false;
+  for (const dev of ordered) {
+    try {
+      if (await attachDongle(dev)) {
+        return "connected";
+      }
+    } catch (err) {
+      // Usually another tab already holds it — WebHID allows a single opener.
+      log(`Auto-connect to ${dev.productName || "dongle"} failed: ${err}`, "warn");
+      failed = true;
+    }
+    if (attaching || (device && device.opened)) {
+      return "none";
+    }
   }
+  if (failed) {
+    log("Auto-connect failed — use Connect dongle", "warn");
+  }
+  return "failed";
 }
 
 async function disconnectDongle() {
@@ -264,8 +375,10 @@ async function disconnectDongle() {
   // robot may be latched enabled from an earlier session even when armed is
   // false here. Awaited, because device.close() would abort it in flight.
   await broadcastDisable("link closing");
+  await unpairAllOnDongle();
   await closeDongle(device, onInputReport);
   device = null;
+  releaseDongle();
   for (let i = 0; i < MC_MAX_ROBOTS; i++) {
     pairMac[i] = null;
   }
@@ -284,6 +397,19 @@ function slotRobotName(i) {
 /** Bound to this page's single device slot; hid.js holds the wire logic. */
 async function sendReport(reportId, data) {
   await hidSendReport(device, reportId, data);
+}
+
+/** Clear every slot in the dongle's pairing table. Best-effort: a failure here
+ * leaves stale pairings, which drive nothing, so it is a warning, not a stop. */
+async function unpairAllOnDongle() {
+  for (let i = 0; i < MC_MAX_ROBOTS; i++) {
+    try {
+      await sendReport(MC_HID_RID_UNPAIR, encodeUnpairOut(i));
+    } catch (err) {
+      log(`Could not clear the dongle's slots: ${err}`, "warn");
+      return;
+    }
+  }
 }
 
 /**
@@ -328,6 +454,10 @@ async function pushSpeedLimit() {
 function robotsOffLimit() {
   const out = [];
   for (const v of discovered.values()) {
+    // Driven by another station, so it runs that station's limit by design.
+    if (ownedByOther(v)) {
+      continue;
+    }
     // A robot that has never acked counts. It is either running firmware with
     // no speed limit at all or it has not heard us yet, and both mean "not
     // known to be capped" — which is the thing the driver needs told.
@@ -464,6 +594,17 @@ function onInputReport(e) {
         log(`${rec.id || macKey(sl.mac)}: speed limit ${sl.limit.toFixed(2)}`);
       }
       renderSpeedLimit();
+      // Not at our limit — most often a robot that rebooted and announced
+      // itself unrestricted. Fix it now rather than at the next re-assert.
+      if (
+        device &&
+        device.opened &&
+        !ownedByOther(rec) &&
+        Math.abs(sl.limit - speedLimit) > 0.001 &&
+        Date.now() - lastLimitPushMs >= LIMIT_REPUSH_MIN_MS
+      ) {
+        pushSpeedLimit();
+      }
     }
   } else if (reportId === MC_HID_RID_DISCOVERY_IN) {
     const d = decodeDiscoveryIn(buf);
@@ -530,6 +671,11 @@ function onInputReport(e) {
 
 function renderArm() {
   const connected = !!(device && device.opened);
+  if (!armed) {
+    // Nothing is at risk once disarmed; the hidden-tab warning has done its job.
+    const warn = document.getElementById("hiddenWarn");
+    if (warn) warn.hidden = true;
+  }
   const pairedCount = pairMac.filter(Boolean).length;
   document.body.dataset.armed = String(armed);
   $("armState").textContent = armed ? "Enabled" : "Disabled";
@@ -801,11 +947,16 @@ function renderSlots() {
     let label = "Empty";
     if (mac) {
       const age = rec ? now - rec.lastSeen : Infinity;
-      // status_flags bit0 is the robot's own view of being enabled.
-      const robotEnabled = !!rec && (rec.flags & 1) !== 0;
+      // The robot's own view of being enabled (by its owner).
+      const robotEnabled = !!rec && (rec.flags & MC_HB_FLAG_ENABLED) !== 0;
       if (!rec || age > STALE_MS) {
         state = "stale";
         label = "No heartbeat";
+      } else if (ownedByOther(rec)) {
+        // Another station is driving it: our frames reach it and it ignores
+        // them. Its enabled bit is about that station, not this one.
+        state = "stale";
+        label = `Driven by another station · ${batteryText(rec.battery)}`;
       } else if (armed) {
         state = "live";
         label = robotEnabled
@@ -870,7 +1021,7 @@ function renderRobots() {
     name.textContent = v.id || "(unnamed)";
     const mac = document.createElement("span");
     mac.className = "r-mac";
-    mac.textContent = k.slice(-8);
+    mac.textContent = ownedByOther(v) ? `${k.slice(-8)} · other station` : k.slice(-8);
     li.append(name, mac);
     ul.appendChild(li);
   }
@@ -884,7 +1035,7 @@ function renderRobots() {
     for (const [k, v] of discovered) {
       const opt = document.createElement("option");
       opt.value = k;
-      opt.textContent = v.id || k;
+      opt.textContent = ownedByOther(v) ? `${v.id || k} (driven elsewhere)` : v.id || k;
       sel.appendChild(opt);
     }
     sel.value = cur;
@@ -1112,6 +1263,30 @@ window.addEventListener("pagehide", () => {
   }
 });
 
+// Chrome throttles a hidden tab's timers to about once a second (and further
+// after a few minutes), and may stop giving it gamepad input. The control loop's
+// 100 ms keepalive then misses the robot's 250 ms failsafe, so a hidden station's
+// robots stutter or stop. Nothing here can prevent that; say so while it matters.
+// A log line written while hidden is easy to miss on return, so also mark the
+// tab title (visible in the tab strip while hidden) and leave a banner that
+// stays up until the field is disarmed.
+const baseTitle = document.title;
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    if (armed) {
+      document.title = `⚠ HIDDEN while enabled — ${baseTitle}`;
+      $("hiddenWarn").hidden = false;
+      log(
+        "This tab is hidden while robots are enabled — its robots will stutter or stop. " +
+          "Keep each driver station in its own visible window.",
+        "err",
+      );
+    }
+  } else {
+    document.title = baseTitle;
+  }
+});
+
 // A dongle unplugged mid-match must not leave the UI claiming robots are live.
 if ("hid" in navigator) {
   navigator.hid.addEventListener("disconnect", (e) => {
@@ -1188,15 +1363,24 @@ setInterval(() => {
   // Chase the calibration of any robot that hasn't reported one. Covers the ack
   // being lost (ESP-NOW does not retry), and a robot that powers up into an
   // already-running station. Stops asking the moment every robot has answered.
+  //
+  // Also scan for a slot whose robot has gone quiet. A robot that reboots only
+  // heartbeats to dongles that have sent it something since, and a disarmed
+  // station sends nothing on a timer — so without asking, its slot would read
+  // "No heartbeat" for a robot that is sitting there powered.
   if (device && device.opened && now - lastDiscoveryMs >= CALIB_CHASE_MS) {
     let missing = false;
     for (const v of discovered.values()) {
-      if (v.neutralLeft === undefined) {
+      if (v.neutralLeft === undefined && !ownedByOther(v)) {
         missing = true;
         break;
       }
     }
-    if (missing) {
+    const quietSlot = pairMac.some((m) => {
+      const rec = m ? discovered.get(macKey(m)) : null;
+      return !!m && (!rec || now - rec.lastSeen > STALE_MS);
+    });
+    if (missing || quietSlot) {
       requestCalibration();
     }
   }

@@ -17,6 +17,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "minicore_protocol.h"
+#include "minicore_usb.h"
 #include "tusb.h"
 
 static const char *TAG = "mc_bridge";
@@ -290,6 +291,9 @@ static void joystick_tx_task(void *arg)
     }
 }
 
+/* Robot -> browser frames are queued, never sent from here directly: the
+ * endpoint holds one report at a time, and robots answer in bursts. See the IN
+ * queue in minicore_usb.c. */
 static void espnow_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int len)
 {
     (void)info;
@@ -299,12 +303,12 @@ static void espnow_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data,
     switch (data[0]) {
     case MC_MSG_HEARTBEAT:
         if (len >= (int)sizeof(heartbeat_packet_t)) {
-            tud_hid_report(MC_HID_RID_HEARTBEAT_IN, data, sizeof(heartbeat_packet_t));
+            minicore_usb_send_in(MC_HID_RID_HEARTBEAT_IN, data, sizeof(heartbeat_packet_t));
         }
         break;
     case MC_MSG_DISCOVERY_RESP:
         if (s_discovery_active && len >= (int)sizeof(discovery_response_t)) {
-            tud_hid_report(MC_HID_RID_DISCOVERY_IN, data, sizeof(discovery_response_t));
+            minicore_usb_send_in(MC_HID_RID_DISCOVERY_IN, data, sizeof(discovery_response_t));
         }
         break;
     case MC_MSG_NEUTRAL_ACK:
@@ -312,7 +316,7 @@ static void espnow_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data,
          * unprompted at power-up as well as in answer to a scan, and the station
          * needs those to fill its fields whichever came up first. */
         if (len >= (int)sizeof(neutral_ack_packet_t)) {
-            tud_hid_report(MC_HID_RID_NEUTRAL_IN, data, sizeof(neutral_ack_packet_t));
+            minicore_usb_send_in(MC_HID_RID_NEUTRAL_IN, data, sizeof(neutral_ack_packet_t));
         }
         break;
     case MC_MSG_SPEED_LIMIT_ACK:
@@ -320,7 +324,7 @@ static void espnow_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data,
          * limit it asked for -- a robot that rebooted back to unrestricted is
          * exactly the case worth hearing about, and it will not be mid-scan. */
         if (len >= (int)sizeof(speed_limit_ack_packet_t)) {
-            tud_hid_report(MC_HID_RID_SPEED_LIMIT_IN, data, sizeof(speed_limit_ack_packet_t));
+            minicore_usb_send_in(MC_HID_RID_SPEED_LIMIT_IN, data, sizeof(speed_limit_ack_packet_t));
         }
         break;
     default:
