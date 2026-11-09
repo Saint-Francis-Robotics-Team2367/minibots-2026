@@ -1,6 +1,6 @@
 {
   "comment": [
-    "Flashable images for the browser tools at https://minibots.team2367.org.",
+    "Flashable images for the browser tools at https://minibots.team2367.com.",
     "Firebase Hosting only serves web/, so the pages fetch these over",
     "raw.githubusercontent.com, which sends access-control-allow-origin: *.",
     "Offsets and versions mirror scripts/flash-robot.sh and scripts/flash-dongle.sh \u2014",

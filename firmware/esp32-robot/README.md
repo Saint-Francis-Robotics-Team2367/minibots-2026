@@ -13,7 +13,7 @@ firmware/esp32-robot/
 
 ## Two ways to edit `main.py`
 
-**In your browser** — <https://minibots.team2367.org/code-robot>. Plug the robot into
+**In your browser** — <https://minibots.team2367.com/code-robot>. Plug the robot into
 USB, click **Connect robot**, then **Pull from robot** to read its current `main.py`.
 Edit it and press **Upload and run**; the page restarts the robot and shows what it
 prints. No clone, no terminal, no Python install. Chrome or Edge only.
@@ -97,7 +97,7 @@ Open `main.py`. The `Minibot` object gives you everything:
 | Buttons (bool) | `get_cross()`, `get_circle()`, `get_square()`, `get_triangle()` |
 | Enabled? | `get_game_status()` → `Minibot.TELEOP` / `Minibot.STANDBY` |
 | Motors (−1.0..1.0) | `drive_left_motor(v)`, `drive_right_motor(v)`, `stop_all_motors()` |
-| Forget saved trim | **Clear saved calibration** button at <https://minibots.team2367.org/code-robot>, or `clear_calibration()` from the REPL — see below |
+| Forget saved trim | **Clear saved calibration** button at <https://minibots.team2367.com/code-robot>, or `clear_calibration()` from the REPL — see below |
 
 Set your robot's **name** and **motor pins** in the `MinibotConfig(...)` line
 at the top of `main.py`. The Wi-Fi channel is fixed at `11` by `minibot.py`
@@ -127,7 +127,7 @@ Values are clamped to the full RC window, **1000–2000 µs**.
 > overrides `main.py`.** That's what lets it survive a brownout mid-match, but it
 > means editing `neutral_left_us=` in `main.py` will appear to do nothing while a
 > saved calibration exists. To hand control back to `main.py`, use
-> the **Clear saved calibration** button at <https://minibots.team2367.org/code-robot>
+> the **Clear saved calibration** button at <https://minibots.team2367.com/code-robot>
 > (which also shows you the saved values), run `bot.clear_calibration()` from the REPL
 > (`flash-robot --repl`), or delete `calib.json`.
 

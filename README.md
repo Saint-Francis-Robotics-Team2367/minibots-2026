@@ -159,7 +159,7 @@ scripts remain the source of truth for the pinned versions.
 | [firmware/common/minicore_policy.h](firmware/common/minicore_policy.h) | **Behaviour**: timeouts, neutral-trim range. The dongle neither uses nor includes it, so changes here need only `flash-robot` + a web reload. Put new policy constants here, not in the protocol header. |
 | [firmware/esp32s3-dongle/](firmware/esp32s3-dongle/) | ESP-IDF project for the Waveshare ESP32-S3-LCD-1.47 class USB HID dongle. |
 | [firmware/esp32-robot/](firmware/esp32-robot/) | MicroPython robot code (classic ESP32) — students edit `main.py`. |
-| [web/](web/) | The site: student documentation (`/`, `docs/`) plus the three hardware tools (Chrome or Edge; HTTPS or localhost). Deployed to <https://minibots.team2367.org>. `js/` is dependency-free ES modules; `lib/` is the robot library served for upload — **CI fails if it drifts** from `firmware/esp32-robot/`; `test/` is plain `node` scripts. |
+| [web/](web/) | The site: student documentation (`/`, `docs/`) plus the three hardware tools (Chrome or Edge; HTTPS or localhost). Deployed to <https://minibots.team2367.com>. `js/` is dependency-free ES modules; `lib/` is the robot library served for upload — **CI fails if it drifts** from `firmware/esp32-robot/`; `test/` is plain `node` scripts. |
 | [firmware/prebuilt/](firmware/prebuilt/) | Flashable images the **browser** tools write. They live here because a page can only fetch from a CORS-enabled origin, and neither micropython.org nor a CI artifact qualifies. `dongle/` is written by CI — do not hand-edit it. |
 
 ## USB identity (WebHID filter)
@@ -220,7 +220,7 @@ CI builds the dongle firmware on every change and uploads flashable artifacts
 
 ## The website
 
-**Live: <https://minibots.team2367.org>** — student documentation plus three hardware
+**Live: <https://minibots.team2367.com>** — student documentation plus three hardware
 tools, and everything the robots need is reachable from a browser. **Chrome or Edge**,
 over HTTPS or `http://localhost`: the tools talk to USB through WebHID and Web Serial,
 which Safari and Firefox do not implement. Devices are granted once per browser, then
@@ -231,19 +231,19 @@ reconnect on their own. The documentation pages read in any browser.
 
 | Page | What it does |
 | --- | --- |
-| [`/`](https://minibots.team2367.org/) | Home — what a Minibot is, and an index of everything else |
-| [`/docs/build`](https://minibots.team2367.org/docs/build) | Building the robot — **placeholder**, content pending |
-| [`/docs/wiring`](https://minibots.team2367.org/docs/wiring) | Wiring the robot — **placeholder**, content pending |
-| [`/docs/programming`](https://minibots.team2367.org/docs/programming) | Programming the robot — the loop, the full `Minibot` API, and the traps |
-| [`/docs/rulebook`](https://minibots.team2367.org/docs/rulebook) | Rulebook — the published Google Doc, embedded; edits there need no deploy |
+| [`/`](https://minibots.team2367.com/) | Home — what a Minibot is, and an index of everything else |
+| [`/docs/build`](https://minibots.team2367.com/docs/build) | Building the robot — **placeholder**, content pending |
+| [`/docs/wiring`](https://minibots.team2367.com/docs/wiring) | Wiring the robot — **placeholder**, content pending |
+| [`/docs/programming`](https://minibots.team2367.com/docs/programming) | Programming the robot — the loop, the full `Minibot` API, and the traps |
+| [`/docs/rulebook`](https://minibots.team2367.com/docs/rulebook) | Rulebook — the published Google Doc, embedded; edits there need no deploy |
 
 **Tools** — each needs different hardware plugged in.
 
 | Page | What it does | Needs |
 | --- | --- | --- |
-| [`/control`](https://minibots.team2367.org/control) | Driver station — pair, enable, speed limit, neutral trim | Dongle + gamepad |
-| [`/code-robot`](https://minibots.team2367.org/code-robot) | Read, edit and push `main.py`; install MicroPython on a fresh board | Robot on USB |
-| [`/flash-dongle`](https://minibots.team2367.org/flash-dongle) | Write the current dongle firmware | Dongle in its bootloader |
+| [`/control`](https://minibots.team2367.com/control) | Driver station — pair, enable, speed limit, neutral trim | Dongle + gamepad |
+| [`/code-robot`](https://minibots.team2367.com/code-robot) | Read, edit and push `main.py`; install MicroPython on a fresh board | Robot on USB |
+| [`/flash-dongle`](https://minibots.team2367.com/flash-dongle) | Write the current dongle firmware | Dongle in its bootloader |
 
 The rail nav at the top of every page holds **exactly four** entries (Home plus the
 three tools) and must stay that way: `css/core.css`'s three-track rail grid is what
@@ -308,7 +308,7 @@ recorded in [the migration plan](docs/WEB_MIGRATION_PLAN.md).
 
 ### Driver station
 
-**Live: <https://minibots.team2367.org/control>** — the deployed driver station. Open it in Chrome or
+**Live: <https://minibots.team2367.com/control>** — the deployed driver station. Open it in Chrome or
 Edge and click **Connect dongle** once to grant this browser access to it. After that the page
 reconnects to that dongle by itself — on load, and when you plug it in with the page already
 open — and **Connect dongle** stays as the manual fallback. **Disconnect** stays disconnected
@@ -348,17 +348,17 @@ only third-party asset is CodeMirror, loaded from a CDN with SRI. Tests are plai
 firebase deploy --only hosting
 ```
 
-`minibots.team2367.org` is a Firebase Hosting custom domain. Its two Cloudflare DNS records in the
-`team2367.org` zone must stay as-is:
+`minibots.team2367.com` is a Firebase Hosting custom domain. Its DNS lives in the `team2367.com`
+Route 53 zone, which SFHS IT manages (support@sfhs.com). These two records must stay as-is:
 
-| Record | Name | Value | Proxy |
-| --- | --- | --- | --- |
-| `CNAME` | `minibots` | `minibots-2367.web.app` | **DNS only** (grey cloud) |
-| `TXT` | `_acme-challenge.minibots` | Firebase-issued challenge token | n/a |
+| Record | Name | Value |
+| --- | --- | --- |
+| `CNAME` | `minibots` | `minibots-2367.web.app` |
+| `TXT` | `_acme-challenge.minibots` | Firebase-issued challenge token |
 
-> The CNAME must stay **DNS only**. Turning on Cloudflare's orange-cloud proxy puts Cloudflare's
-> certificate in front of Firebase's and breaks the automatic cert renewal that reads the
-> `_acme-challenge` TXT record. Don't delete that TXT record either — Firebase reuses it to renew.
+> Don't let the CNAME be proxied or the TXT record be deleted: Firebase reuses the
+> `_acme-challenge` record to renew its certificate. The CNAME is also in SFHS's internal DNS view
+> so the site loads on campus and over the VPN.
 
 ## Security
 

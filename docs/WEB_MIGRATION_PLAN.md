@@ -7,7 +7,7 @@ behavior: edit `firmware/esp32-robot/main.py`, run `./scripts/flash-robot.sh`, a
 through GitHub. Admins need the same plus ESP-IDF v5.3.2 to reflash a dongle. That
 toolchain is the barrier — not the robot code.
 
-The driver station at <https://minibots.team2367.org> already proves the browser can own
+The driver station at <https://minibots.team2367.com> already proves the browser can own
 this: it drives the dongle over **WebHID** and requires Chrome/Edge over HTTPS. **Web
 Serial** carries identical constraints (secure context, one user gesture, persistent
 per-origin grants, `setSignals()` for DTR/RTS), so reaching the robot over serial spends
